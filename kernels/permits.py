@@ -408,6 +408,24 @@ class NonceRegistry:
         self._registry[key] = replace(record, use_count=record.use_count + 1)
         return True  # Within allowed uses
 
+    def can_consume(
+        self,
+        nonce: str,
+        issuer: str,
+        subject: str,
+        max_executions: int,
+    ) -> bool:
+        """Return whether another use would be allowed, without recording it.
+
+        Denied requests must call this (or skip the registry entirely) so a
+        rejection cannot exhaust ``max_executions``.
+        """
+        key = (nonce, issuer, subject)
+        record = self._registry.get(key)
+        if record is None:
+            return True
+        return record.use_count < max_executions
+
     def get_record(self, nonce: str, issuer: str, subject: str) -> NonceRecord | None:
         """Retrieve nonce record if it exists."""
         key = (nonce, issuer, subject)
@@ -437,6 +455,8 @@ def verify_permit(
     allowed_actions: frozenset[str],
     request_actor: str,
     request_params: dict[str, Any],
+    request_evidence: str | None = None,
+    commit_use: bool = True,
 ) -> PermitVerificationResult:
     """
     Comprehensive fail-closed permit verification.
@@ -465,6 +485,9 @@ def verify_permit(
         allowed_actions: Set of allowed action names
         request_actor: Actor identity from request
         request_params: Parameters from request
+        request_evidence: Evidence string on the request, if any
+        commit_use: When False, replay state is checked but not recorded.
+            The kernel records a use only after the request is authorised.
 
     Returns:
         PermitVerificationResult with ALLOW/DENY and reason codes
@@ -498,29 +521,39 @@ def verify_permit(
     if not _params_satisfy_permit(request_params, permit.params):
         reasons.append("PARAMS_MISMATCH")
 
-    # Check 9: Nonce fresh (replay protection)
-    nonce_fresh = nonce_registry.check_and_record(
-        nonce=permit.nonce,
-        issuer=permit.issuer,
-        subject=permit.subject,
-        permit_id=permit.permit_id,
-        max_executions=permit.max_executions,
-        current_time_ms=current_time_ms,
+    # Check 11 before nonce accounting: a rejected request must not consume a use.
+    constraint_violations = _validate_constraints(
+        permit.constraints,
+        request_params,
+        request_evidence,
     )
-
-    if not nonce_fresh:
-        reasons.append("REPLAY_DETECTED")
-
-    # Check 10: Execution count
-    # (handled by nonce_registry.check_and_record above; if returned False, it's a replay)
-
-    # Check 11: Constraints satisfied
-    constraint_violations = _validate_constraints(permit.constraints, request_params)
     reasons.extend(constraint_violations)
 
-    # Fail-closed: any violation = DENY
     if reasons:
         return PermitVerificationResult(status=Decision.DENY, reasons=reasons)
+
+    # Check 9/10: Nonce fresh. Record only when the caller is committing a use.
+    if commit_use:
+        nonce_ok = nonce_registry.check_and_record(
+            nonce=permit.nonce,
+            issuer=permit.issuer,
+            subject=permit.subject,
+            permit_id=permit.permit_id,
+            max_executions=permit.max_executions,
+            current_time_ms=current_time_ms,
+        )
+    else:
+        nonce_ok = nonce_registry.can_consume(
+            nonce=permit.nonce,
+            issuer=permit.issuer,
+            subject=permit.subject,
+            max_executions=permit.max_executions,
+        )
+
+    if not nonce_ok:
+        return PermitVerificationResult(
+            status=Decision.DENY, reasons=["REPLAY_DETECTED"]
+        )
 
     return PermitVerificationResult(status=Decision.ALLOW, reasons=[])
 
@@ -553,29 +586,36 @@ def _params_satisfy_permit(
     return True
 
 
+# Constraints the kernel actually enforces. Anything else fails closed.
+_IMPLEMENTED_CONSTRAINTS = frozenset(
+    {"forbidden_params", "require_evidence", "max_time_ms"}
+)
+# Named in the docs but not enforced at execution time. Accepting them would
+# look like a control and do nothing, so they are rejected.
+_UNIMPLEMENTED_CONSTRAINTS = frozenset({"max_memory_mb", "allowed_domains"})
+
+
 def _validate_constraints(
-    constraints: dict[str, Any], request_params: dict[str, Any]
+    constraints: dict[str, Any],
+    request_params: dict[str, Any],
+    request_evidence: str | None = None,
 ) -> list[str]:
     """
     Validate request against permit constraints.
 
-    Constraint examples (extensible):
-    - max_time_ms: Maximum execution time
-    - max_memory_mb: Maximum memory usage
-    - allowed_domains: Network allowlist
-    - forbidden_params: Parameter blocklist
-    - require_evidence: Must have evidence_hash
+    Unknown keys and constraints that are not implemented are rejected.
+    ``require_evidence`` requires a non-empty request evidence string.
 
     Args:
         constraints: Constraints from permit
         request_params: Parameters from request
+        request_evidence: Evidence supplied with the request, if any
 
     Returns:
         List of violation reason codes (empty = all satisfied)
     """
     violations: list[str] = []
 
-    # Constraint: forbidden_params
     if "forbidden_params" in constraints:
         forbidden = constraints["forbidden_params"]
         if not isinstance(forbidden, list):
@@ -585,14 +625,23 @@ def _validate_constraints(
                 if param in request_params:
                     violations.append(f"FORBIDDEN_PARAM_DETECTED:{param}")
 
-    # Constraint: require_evidence
-    if constraints.get("require_evidence", False):
-        # Check if evidence_hash is non-empty (context-dependent; caller must ensure)
-        # This is a placeholder; actual implementation depends on integration
-        pass
+    if "require_evidence" in constraints:
+        flag = constraints["require_evidence"]
+        if not isinstance(flag, bool):
+            violations.append("CONSTRAINT_MALFORMED_REQUIRE_EVIDENCE")
+        elif flag and not (isinstance(request_evidence, str) and request_evidence.strip()):
+            violations.append("REQUIRE_EVIDENCE_MISSING")
 
-    # Future constraints: max_time_ms, max_memory_mb, allowed_domains, etc.
-    # Extensible design; add new constraint validators here
+    if "max_time_ms" in constraints and not isinstance(constraints["max_time_ms"], int):
+        violations.append("CONSTRAINT_MALFORMED_MAX_TIME_MS")
+
+    for key in constraints:
+        if key in _IMPLEMENTED_CONSTRAINTS:
+            continue
+        if key in _UNIMPLEMENTED_CONSTRAINTS:
+            violations.append(f"CONSTRAINT_UNIMPLEMENTED:{key}")
+        else:
+            violations.append(f"CONSTRAINT_UNKNOWN:{key}")
 
     return violations
 

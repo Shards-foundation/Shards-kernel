@@ -28,6 +28,7 @@ class JurisdictionPolicy:
                 KernelState.ARBITRATING,
                 KernelState.EXECUTING,
                 KernelState.AUDITING,
+                KernelState.COMPLETED,
             }
         )
     )
@@ -86,6 +87,7 @@ class JurisdictionPolicy:
                     KernelState.ARBITRATING,
                     KernelState.EXECUTING,
                     KernelState.AUDITING,
+                    KernelState.COMPLETED,
                 }
             )
 

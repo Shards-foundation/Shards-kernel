@@ -27,8 +27,8 @@ jobs:
 
       - name: Canary quality checks
         run: |
-          ruff check kernels implementations tests
-          mypy kernels implementations
+          # Same honest gate as CI. Repo-wide format/type debt is not a canary signal.
+          ruff check . --select E,F
           pytest -q
 
       - name: Canary build

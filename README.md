@@ -69,8 +69,8 @@ A compliant kernel MUST satisfy:
 ## State Machine (Canonical)
 
 ```
-BOOTING → IDLE → VALIDATING → ARBITRATING → (EXECUTING)? → AUDITING → IDLE
-                                                                      ↓
+BOOTING → IDLE → VALIDATING → ARBITRATING → AUDITING (intent)
+        → EXECUTING → AUDITING (outcome) → COMPLETED → IDLE
 Any unhandled exception ────────────────────────────────────────▶ HALTED
 ```
 

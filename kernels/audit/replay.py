@@ -54,6 +54,9 @@ def replay_and_verify(
             )
 
         # Recompute entry hash
+        denial_reasons = entry.get("permit_denial_reasons")
+        if isinstance(denial_reasons, list):
+            denial_reasons = tuple(denial_reasons)
         entry_data = serialize_for_audit(
             request_id=entry.get("request_id", ""),
             actor=entry.get("actor", ""),
@@ -66,6 +69,15 @@ def replay_and_verify(
             params_hash=entry.get("params_hash"),
             evidence_hash=entry.get("evidence_hash"),
             error=entry.get("error"),
+            permit_digest=entry.get("permit_digest"),
+            permit_verification=entry.get("permit_verification"),
+            permit_denial_reasons=denial_reasons,
+            proposal_hash=entry.get("proposal_hash"),
+            permit_nonce=entry.get("permit_nonce"),
+            permit_issuer=entry.get("permit_issuer"),
+            permit_subject=entry.get("permit_subject"),
+            permit_max_executions=entry.get("permit_max_executions"),
+            audit_phase=entry.get("audit_phase"),
         )
 
         computed_hash = compute_chain_hash(prev_hash, entry_data)

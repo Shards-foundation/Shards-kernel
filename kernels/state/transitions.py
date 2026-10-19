@@ -23,7 +23,7 @@ ALLOWED_TRANSITIONS: dict[KernelState, frozenset[KernelState]] = {
     KernelState.ARBITRATING: frozenset(
         {
             KernelState.EXECUTING,
-            KernelState.AUDITING,  # For denied requests
+            KernelState.AUDITING,  # For denied requests and pre-execution intent
             KernelState.HALTED,
         }
     ),
@@ -34,6 +34,13 @@ ALLOWED_TRANSITIONS: dict[KernelState, frozenset[KernelState]] = {
         }
     ),
     KernelState.AUDITING: frozenset(
+        {
+            KernelState.EXECUTING,  # Intent record is durable; the tool may run
+            KernelState.COMPLETED,  # Final audit record is durable
+            KernelState.HALTED,
+        }
+    ),
+    KernelState.COMPLETED: frozenset(
         {
             KernelState.IDLE,
             KernelState.HALTED,

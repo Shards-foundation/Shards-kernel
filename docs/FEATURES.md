@@ -16,12 +16,12 @@ KERNELS is a deterministic control plane for AI systems. This document describes
 
 ### 2.1 Deterministic State Machine
 
-KERNELS operates as a **finite state machine** with exactly seven states and deterministic transitions.
+KERNELS operates as a **finite state machine** with eight states and deterministic transitions. `HALTED` is the only terminal state. `COMPLETED` means one request has been audited; the kernel then returns to `IDLE`.
 
 ```
-BOOTING → IDLE → VALIDATING → ARBITRATING → EXECUTING → AUDITING → IDLE
-                                    ↓
-                                  HALTED
+BOOTING → IDLE → VALIDATING → ARBITRATING → AUDITING (intent)
+        → EXECUTING → AUDITING (outcome) → COMPLETED → IDLE
+Any unhandled exception → HALTED
 ```
 
 **Benefits:**

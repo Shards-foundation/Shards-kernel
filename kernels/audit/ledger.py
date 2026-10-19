@@ -18,6 +18,7 @@ from kernels.common.hashing import (
     compute_hash_dict,
     genesis_hash,
 )
+from kernels.audit.replay import replay_and_verify
 from kernels.common.codec import serialize_for_audit, audit_entry_to_dict
 
 
@@ -87,6 +88,7 @@ class AuditLedger:
         permit_issuer: Optional[str] = None,
         permit_subject: Optional[str] = None,
         permit_max_executions: Optional[int] = None,
+        audit_phase: Optional[str] = None,
     ) -> AuditEntry:
         """Append a new entry to the ledger.
 
@@ -110,6 +112,9 @@ class AuditLedger:
             permit_issuer: Issuer identity for nonce reconstruction (v0.2.0+).
             permit_subject: Subject identity for nonce reconstruction (v0.2.0+).
             permit_max_executions: Max executions for nonce reconstruction (v0.2.0+).
+            audit_phase: "intent" if this records authorisation before a tool
+                runs, or "outcome" if it records the result. None for records
+                that are not part of a tool execution.
 
         Returns:
             The newly created audit entry.
@@ -145,6 +150,7 @@ class AuditLedger:
                 permit_issuer=permit_issuer,
                 permit_subject=permit_subject,
                 permit_max_executions=permit_max_executions,
+                audit_phase=audit_phase,
             )
 
             # Compute entry hash using chain
@@ -177,6 +183,7 @@ class AuditLedger:
                 permit_issuer=permit_issuer,
                 permit_subject=permit_subject,
                 permit_max_executions=permit_max_executions,
+                audit_phase=audit_phase,
             )
 
             # Append and update chain
@@ -187,7 +194,52 @@ class AuditLedger:
             return entry
 
         except Exception as e:
-            raise AuditError(f"Failed to append audit entry: {e}")
+            raise AuditError(f"Failed to append audit entry: {e}") from e
+
+    def load_verified(
+        self,
+        entries: tuple[AuditEntry, ...] | list[AuditEntry],
+        root_hash: str,
+    ) -> None:
+        """Replace this ledger with entries whose hash chain verifies.
+
+        Nothing is installed if verification fails. A broken chain, a gap in
+        ``ledger_seq``, or a root hash that does not match the last entry
+        raises AuditError and leaves the current ledger untouched.
+
+        Args:
+            entries: Ledger entries, typically from an evidence bundle.
+            root_hash: Root hash claimed by the bundle.
+
+        Raises:
+            AuditError: If the ledger is already populated or the chain
+                does not verify.
+        """
+        if self._entries:
+            raise AuditError("Refusing to load a ledger into a non-empty ledger")
+
+        ordered = tuple(sorted(entries, key=lambda entry: entry.ledger_seq))
+        if not ordered:
+            if root_hash != genesis_hash():
+                raise AuditError("Empty ledger root_hash is not the genesis hash")
+            self._last_hash = genesis_hash()
+            self._next_seq = 0
+            return
+
+        for index, entry in enumerate(ordered):
+            if entry.ledger_seq != index:
+                raise AuditError(f"Ledger sequence is not contiguous at index {index}")
+
+        payload = [audit_entry_to_dict(entry) for entry in ordered]
+        ok, errors = replay_and_verify(payload, expected_root_hash=root_hash)
+        if not ok:
+            raise AuditError(
+                "Audit hash chain verification failed: " + "; ".join(errors)
+            )
+
+        self._entries.extend(ordered)
+        self._last_hash = ordered[-1].entry_hash
+        self._next_seq = ordered[-1].ledger_seq + 1
 
     def export(self, ts_ms: int) -> EvidenceBundle:
         """Export the ledger as an evidence bundle.
