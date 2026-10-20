@@ -11,9 +11,15 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional, Type
 import threading
 
-from kernels.common.types import Request, ToolCall
+from kernels.integrations.wire import (
+    boot_strict_kernel,
+    evidence_to_mapping,
+    policy_to_mapping,
+    receipt_to_mapping,
+    request_from_mapping,
+    status_mapping,
+)
 from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
 from kernels.jurisdiction.policy import JurisdictionPolicy
 
 
@@ -76,7 +82,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             {
                 "name": "KERNELS",
                 "version": "0.1.0",
-                "kernel_id": self.kernel.kernel_id if self.kernel else None,
+                "kernel_id": self.kernel.config.kernel_id if self.kernel else None,
             },
         )
 
@@ -90,7 +96,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             200,
             {
                 "status": "healthy",
-                "kernel_state": self.kernel.state.value,
+                "kernel_state": self.kernel.get_state().value,
             },
         )
 
@@ -100,13 +106,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"error": "No kernel"})
             return
 
-        self._send_json(
-            200,
-            {
-                "kernel_id": self.kernel.kernel_id,
-                "state": self.kernel.state.value,
-            },
-        )
+        self._send_json(200, status_mapping(self.kernel))
 
     def _handle_evidence(self) -> None:
         """Handle evidence export."""
@@ -114,8 +114,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"error": "No kernel"})
             return
 
-        evidence = self.kernel.export_evidence()
-        self._send_json(200, evidence)
+        self._send_json(200, evidence_to_mapping(self.kernel.export_evidence()))
 
     def _handle_policy(self) -> None:
         """Handle policy request."""
@@ -123,16 +122,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"error": "No kernel"})
             return
 
-        policy = self.kernel.policy
-        self._send_json(
-            200,
-            {
-                "allowed_actors": policy.allowed_actors,
-                "allowed_tools": policy.allowed_tools,
-                "require_tool_call": policy.require_tool_call,
-                "max_intent_length": policy.max_intent_length,
-            },
-        )
+        self._send_json(200, policy_to_mapping(self.kernel))
 
     def _handle_submit(self) -> None:
         """Handle request submission."""
@@ -143,36 +133,9 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         try:
             data = self._read_json()
 
-            # Build request
-            tool_call = None
-            if "tool_call" in data:
-                tool_call = ToolCall(
-                    name=data["tool_call"]["name"],
-                    params=data["tool_call"].get("params", {}),
-                )
-
-            request = Request(
-                request_id=data["request_id"],
-                actor=data["actor"],
-                intent=data["intent"],
-                tool_call=tool_call,
-                evidence=data.get("evidence"),
-                constraints=data.get("constraints"),
-            )
-
-            # Submit to kernel
-            receipt = self.kernel.submit(request)
-
-            self._send_json(
-                200,
-                {
-                    "request_id": receipt.request_id,
-                    "status": receipt.status,
-                    "decision": receipt.decision.value,
-                    "result": receipt.result,
-                    "error": receipt.error,
-                },
-            )
+            request, permit = request_from_mapping(self.kernel, data)
+            receipt = self.kernel.submit(request, permit_token=permit)
+            self._send_json(200, receipt_to_mapping(receipt))
 
         except KeyError as e:
             self._send_json(400, {"error": f"Missing field: {e}"})
@@ -185,12 +148,12 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"error": "No kernel"})
             return
 
-        self.kernel.halt()
+        self.kernel.halt("operator halt")
         self._send_json(
             200,
             {
                 "status": "halted",
-                "kernel_state": self.kernel.state.value,
+                "kernel_state": self.kernel.get_state().value,
             },
         )
 
@@ -206,7 +169,7 @@ class KernelServer:
     Exposes kernel functionality via REST API.
 
     Example:
-        kernel = StrictKernel(kernel_id="server-001")
+        kernel = StrictKernel()
         server = KernelServer(kernel, port=8080)
         server.start()
     """
@@ -283,7 +246,9 @@ def run_server(
         port: Port to listen on
         policy: Jurisdiction policy (uses default if not specified)
     """
-    kernel = StrictKernel(kernel_id=kernel_id, policy=policy)
+    kernel = boot_strict_kernel(kernel_id)
+    if policy is not None:
+        kernel.set_policy(policy)
     server = KernelServer(kernel, host, port)
 
     try:

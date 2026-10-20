@@ -28,7 +28,7 @@ jobs:
       - name: Canary quality checks
         run: |
           # Same honest gate as CI. Repo-wide format/type debt is not a canary signal.
-          ruff check . --select E,F
+          ruff check . --select E,F --ignore E501
           pytest -q
 
       - name: Canary build

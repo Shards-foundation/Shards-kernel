@@ -13,14 +13,19 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - An intent audit record is appended before a tool runs. If that append fails, the tool does not run. The outcome record stores the parameters that executed.
 - A rejected request does not consume a permit's `max_executions` budget.
 - Loading an audit bundle verifies the hash chain. A broken chain halts the kernel and does not install the entries.
-- An unexpected exception during request processing moves the kernel to `HALTED`.
+- An unexpected exception during request processing moves the kernel to `HALTED`. That halt is recorded on the kernel. `StateMachine.reset()` does not clear it, so a halted kernel does not accept another request.
+- Ambiguous requests are always denied. `KernelConfig.fail_closed = False` is not an opt-out.
+- The async kernel classes delegate to the synchronous kernels. They do not keep a second state machine. `AsyncDispatcher.dispatch` does not run a tool.
 
 ### Changed
 
 - Successful tool execution visits `COMPLETED` before returning to `IDLE`. The lifecycle is BOOTING, IDLE, VALIDATING, ARBITRATING, EXECUTING, AUDITING, COMPLETED, HALTED.
 - `KernelConfig.jurisdiction` is the jurisdiction name checked against a permit. It defaults to `"default"`.
 - A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
-- CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 48%, which this suite meets (measured combined coverage 48.4%). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
+- CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 65%, which this suite meets (measured combined coverage 65.8%: 2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
+- The reference audit ledger is process memory. `append` does not write a file and does not fsync. Export the bundle to keep entries. `implementations/storage.py` is a separate sample the kernel does not write to. `load_verified` uses postponed annotations so Python 3.9 can import the module.
+- `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected. The overall coverage gate is 66%.
+- Examples, the HTTP adapters, the SDK client and server, and MCP submit tool calls with a permit bound to the exact parameters. Adapter `halt()` passes a reason. Adapter evidence export returns a mapping.
 
 ### Removed
 

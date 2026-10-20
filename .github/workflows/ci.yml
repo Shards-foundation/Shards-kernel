@@ -44,7 +44,7 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
           --cov-report=json:coverage.json
-          --cov-fail-under=48
+          --cov-fail-under=66
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json

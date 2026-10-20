@@ -15,9 +15,15 @@ try:
 except ImportError:
     HAS_FLASK = False
 
-from kernels.common.types import Request, ToolCall
+from kernels.integrations.wire import (
+    boot_strict_kernel,
+    evidence_to_mapping,
+    policy_to_mapping,
+    receipt_to_mapping,
+    request_from_mapping,
+    status_mapping,
+)
 from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
 from kernels.jurisdiction.policy import JurisdictionPolicy
 
 
@@ -42,7 +48,9 @@ def create_flask_app(
 
     # Create kernel if not provided
     if kernel is None:
-        kernel = StrictKernel(kernel_id=kernel_id, policy=policy)
+        kernel = boot_strict_kernel(kernel_id)
+        if policy is not None:
+            kernel.set_policy(policy)
 
     # Create app
     app = Flask(__name__)
@@ -55,7 +63,7 @@ def create_flask_app(
             {
                 "name": "KERNELS",
                 "version": "0.1.0",
-                "kernel_id": app.config["kernel"].kernel_id,
+                "kernel_id": app.config["kernel"].config.kernel_id,
             }
         )
 
@@ -66,7 +74,7 @@ def create_flask_app(
         return jsonify(
             {
                 "status": "healthy",
-                "kernel_state": k.state.value,
+                "kernel_state": k.get_state().value,
             }
         )
 
@@ -74,12 +82,7 @@ def create_flask_app(
     def status():
         """Get kernel status."""
         k = app.config["kernel"]
-        return jsonify(
-            {
-                "kernel_id": k.kernel_id,
-                "state": k.state.value,
-            }
-        )
+        return jsonify(status_mapping(k))
 
     @app.route("/submit", methods=["POST"])
     def submit():
@@ -87,66 +90,31 @@ def create_flask_app(
         k = app.config["kernel"]
         data = request.get_json()
 
-        # Build tool call
-        tool_call = None
-        if "tool_call" in data:
-            tool_call = ToolCall(
-                name=data["tool_call"]["name"],
-                params=data["tool_call"].get("params", {}),
-            )
-
-        # Build request
-        req = Request(
-            request_id=data["request_id"],
-            actor=data["actor"],
-            intent=data["intent"],
-            tool_call=tool_call,
-            evidence=data.get("evidence"),
-            constraints=data.get("constraints"),
-        )
-
-        # Submit
-        receipt = k.submit(req)
-
-        return jsonify(
-            {
-                "request_id": receipt.request_id,
-                "status": receipt.status,
-                "decision": receipt.decision.value,
-                "result": receipt.result,
-                "error": receipt.error,
-            }
-        )
+        request_obj, permit = request_from_mapping(k, data or {})
+        receipt = k.submit(request_obj, permit_token=permit)
+        return jsonify(receipt_to_mapping(receipt))
 
     @app.route("/evidence", methods=["GET"])
     def evidence():
         """Export audit evidence."""
         k = app.config["kernel"]
-        return jsonify(k.export_evidence())
+        return jsonify(evidence_to_mapping(k.export_evidence()))
 
     @app.route("/policy", methods=["GET"])
     def policy():
         """Get current policy."""
         k = app.config["kernel"]
-        p = k.policy
-        return jsonify(
-            {
-                "allowed_actors": p.allowed_actors,
-                "allowed_tools": p.allowed_tools,
-                "require_tool_call": p.require_tool_call,
-                "max_intent_length": p.max_intent_length,
-            }
-        )
+        return jsonify(policy_to_mapping(k))
 
     @app.route("/halt", methods=["POST"])
     def halt():
         """Halt the kernel."""
         k = app.config["kernel"]
-        k.halt()
+        k.halt("operator halt")
         return jsonify(
             {
                 "status": "halted",
-                "kernel_state": k.state.value,
+                "kernel_state": k.get_state().value,
             }
         )
 

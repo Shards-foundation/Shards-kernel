@@ -10,9 +10,10 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable
 
-from kernels.common.types import Request, ToolCall, Decision
+from kernels.common.types import KernelRequest, ToolCall, Decision
+from kernels.integrations.wire import boot_strict_kernel, evidence_to_mapping
+from kernels.permits import PermitToken
 from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
 from kernels.jurisdiction.policy import JurisdictionPolicy
 
 
@@ -88,6 +89,9 @@ class MCPAdapter:
             input_schema: JSON schema for inputs
         """
         self._tools[name] = handler
+        dispatcher = getattr(self.kernel, "_dispatcher", None)
+        if dispatcher is not None and not dispatcher.registry.has(name):
+            dispatcher.registry.register(name, handler, description)
         self._tool_schemas[name] = MCPTool(
             name=name,
             description=description,
@@ -114,6 +118,7 @@ class MCPAdapter:
         self,
         call: MCPToolCall,
         intent: Optional[str] = None,
+        permit_token: Optional[PermitToken] = None,
     ) -> MCPToolResult:
         """
         Handle an MCP tool call through the kernel.
@@ -125,25 +130,22 @@ class MCPAdapter:
         Returns:
             MCP tool result
         """
-        # Build kernel request
-        request = Request(
+        arguments = dict(call.arguments)
+        request = KernelRequest(
             request_id=call.id,
+            ts_ms=self.kernel.config.clock.now_ms(),
             actor=self.actor,
             intent=intent or f"Execute {call.name}",
-            tool_call=ToolCall(
-                name=call.name,
-                params=call.arguments,
-            ),
+            tool_call=ToolCall(name=call.name, params=arguments),
+            params=arguments,
         )
 
-        # Submit to kernel
-        receipt = self.kernel.submit(request)
+        receipt = self.kernel.submit(request, permit_token=permit_token)
 
-        # Convert to MCP result
         if receipt.decision == Decision.ALLOW:
             return MCPToolResult(
                 call_id=call.id,
-                content=receipt.result,
+                content=receipt.tool_result,
                 is_error=False,
             )
         else:
@@ -184,11 +186,11 @@ class MCPAdapter:
 
     def export_evidence(self) -> Dict[str, Any]:
         """Export audit evidence from the kernel."""
-        return self.kernel.export_evidence()
+        return evidence_to_mapping(self.kernel.export_evidence())
 
     def halt(self) -> None:
         """Halt the kernel."""
-        self.kernel.halt()
+        self.kernel.halt("operator halt")
 
 
 class MCPServer:
@@ -248,7 +250,13 @@ class MCPServer:
                 name=params["name"],
                 arguments=params.get("arguments", {}),
             )
-            result = self.adapter.handle_tool_call(call)
+            permit_payload = params.get("permit")
+            permit = None
+            if permit_payload:
+                from kernels.integrations.wire import permit_from_mapping
+
+                permit = permit_from_mapping(permit_payload)
+            result = self.adapter.handle_tool_call(call, permit_token=permit)
 
             return {
                 "jsonrpc": "2.0",
@@ -312,5 +320,7 @@ def create_mcp_adapter(
     Returns:
         Configured MCP adapter
     """
-    kernel = StrictKernel(kernel_id=kernel_id, policy=policy)
+    kernel = boot_strict_kernel(kernel_id)
+    if policy is not None:
+        kernel.set_policy(policy)
     return MCPAdapter(kernel, actor)

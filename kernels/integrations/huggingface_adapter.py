@@ -334,7 +334,7 @@ class HuggingFaceAdapter:
 
     def halt(self) -> None:
         """Halt the kernel."""
-        self.kernel.halt()
+        self.kernel.halt("operator halt")
 
 
 class PermitInjector:

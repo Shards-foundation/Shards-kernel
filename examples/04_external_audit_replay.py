@@ -16,6 +16,9 @@ from kernels.common.types import (
 from kernels.variants.strict_kernel import StrictKernel
 from kernels.audit.replay import verify_evidence_bundle
 from kernels.common.codec import audit_entry_to_dict
+from _permit import issue_permit
+
+KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}
 
 
 def main() -> None:
@@ -33,35 +36,32 @@ def main() -> None:
         clock=VirtualClock(1000),
     )
     kernel.boot(config)
+    kernel.set_keyring(KEYRING)
 
-    # Submit several requests
-    requests = [
-        KernelRequest(
-            request_id="req-001",
-            ts_ms=1000,
-            actor="alice",
-            intent="First operation",
-            tool_call=ToolCall(name="echo", params={"text": "first"}),
-        ),
-        KernelRequest(
-            request_id="req-002",
-            ts_ms=2000,
-            actor="bob",
-            intent="Second operation",
-            tool_call=ToolCall(name="add", params={"a": 10, "b": 20}),
-        ),
-        KernelRequest(
-            request_id="req-003",
-            ts_ms=3000,
-            actor="alice",
-            intent="Third operation",
-            tool_call=ToolCall(name="echo", params={"text": "third"}),
-        ),
+    calls = [
+        ("req-001", 1000, "alice", "First operation", "echo", {"text": "first"}),
+        ("req-002", 2000, "bob", "Second operation", "add", {"a": 10, "b": 20}),
+        ("req-003", 3000, "alice", "Third operation", "echo", {"text": "third"}),
     ]
 
-    for request in requests:
-        receipt = kernel.submit(request)
-        print(f"  {request.request_id}: {receipt.decision.value}")
+    for request_id, ts_ms, actor, intent, action, params in calls:
+        request = KernelRequest(
+            request_id=request_id,
+            ts_ms=ts_ms,
+            actor=actor,
+            intent=intent,
+            tool_call=ToolCall(name=action, params=dict(params)),
+            params=dict(params),
+        )
+        permit = issue_permit(
+            KEYRING,
+            "example-key",
+            subject=actor,
+            action=action,
+            params=params,
+        )
+        receipt = kernel.submit(request, permit_token=permit)
+        print(f"  {request.request_id}: {receipt.decision.value} result={receipt.tool_result}")
 
     # Phase 2: Export evidence
     print("\n[Phase 2: Export Evidence Bundle]")

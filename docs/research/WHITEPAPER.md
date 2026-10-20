@@ -162,7 +162,8 @@ Any state ───────────────────────�
 | VALIDATING | Checking request structure |
 | ARBITRATING | Evaluating against policy |
 | EXECUTING | Running permitted action |
-| AUDITING | Recording decision |
+| AUDITING | Intent record, then the outcome record |
+| COMPLETED | Request finished, before the return to IDLE |
 | HALTED | Terminal, stopped |
 
 ### 3.4 Jurisdiction Policy
@@ -171,9 +172,8 @@ Jurisdiction defines what the kernel permits:
 
 ```python
 policy = JurisdictionPolicy(
-    allowed_actors=["agent-001", "agent-002"],
-    allowed_tools=["read_file", "write_file"],
-    require_tool_call=True,
+    allowed_actors=frozenset({"agent-001", "agent-002"}),
+    allowed_tools=frozenset({"read_file", "write_file"}),
 )
 ```
 
@@ -246,26 +246,24 @@ Four kernel variants provide different enforcement postures:
 ### 4.3 Request Flow
 
 ```python
-# 1. Create request
-request = Request(
+# 1. Create a request whose params match the tool call.
+params = {"path": "/config/app.yaml"}
+request = KernelRequest(
     request_id="req-001",
+    ts_ms=0,
     actor="agent-001",
     intent="Read configuration file",
-    tool_call=ToolCall(
-        name="read_file",
-        params={"path": "/config/app.yaml"}
-    ),
+    tool_call=ToolCall(name="read_file", params=dict(params)),
+    params=dict(params),
 )
 
-# 2. Submit to kernel
-receipt = kernel.submit(request)
+# 2. Submit with a permit bound to those params.
+receipt = kernel.submit(request, permit_token=permit)
 
 # 3. Check decision
 if receipt.decision == Decision.ALLOW:
-    # Action was executed
-    result = receipt.result
+    result = receipt.tool_result
 else:
-    # Action was denied
     error = receipt.error
 ```
 
@@ -325,10 +323,12 @@ All ten invariants are verified through:
 The API is designed for simplicity:
 
 ```python
-from kernels import StrictKernel, Request
+from kernels import KernelConfig, KernelRequest, StrictKernel, VirtualClock
 
-kernel = StrictKernel(kernel_id="my-kernel")
-receipt = kernel.submit(request)
+kernel = StrictKernel()
+kernel.boot(KernelConfig(kernel_id="my-kernel", variant="strict", clock=VirtualClock(0)))
+kernel.set_keyring(keyring)
+receipt = kernel.submit(request, permit_token=permit)
 ```
 
 ---

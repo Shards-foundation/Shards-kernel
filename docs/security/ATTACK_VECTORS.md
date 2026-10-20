@@ -40,12 +40,15 @@ Attacker crafts intent string to influence kernel behavior beyond stated purpose
 
 **Attack Scenario:**
 ```python
-# Malicious request
-request = Request(
+# Malicious request. The tool still needs a permit for these exact params.
+params = {"path": "/etc/passwd"}
+request = KernelRequest(
     request_id="req-001",
+    ts_ms=0,
     actor="attacker",
     intent="Read file /etc/passwd; also delete all logs",
-    tool_call=ToolCall(name="read_file", params={"path": "/etc/passwd"}),
+    tool_call=ToolCall(name="read_file", params=dict(params)),
+    params=dict(params),
 )
 ```
 
@@ -69,21 +72,23 @@ Attacker injects malicious values in tool parameters to escape intended scope.
 
 **Attack Scenario:**
 ```python
-# Path traversal attempt
-request = Request(
+# Path traversal attempt. A permit for {"path": "/config/app.yaml"}
+# does not authorise this object. The kernel denies PARAM_BINDING_MISMATCH
+# or the subset check before the tool runs.
+params = {"path": "../../../etc/passwd"}
+request = KernelRequest(
     request_id="req-001",
+    ts_ms=0,
     actor="agent",
     intent="Read config file",
-    tool_call=ToolCall(
-        name="read_file",
-        params={"path": "../../../etc/passwd"}
-    ),
+    tool_call=ToolCall(name="read_file", params=dict(params)),
+    params=dict(params),
 )
 ```
 
 **Mitigation:**
-- Tool implementations must validate params
-- Kernel validates param structure, not content
+- The permit is bound to the exact parameters that run
+- Tool implementations must still validate path contents
 - Use allow-lists for file paths
 
 **Status:** ⚠️ Partial (tool implementation responsibility)
@@ -115,12 +120,15 @@ Attacker claims to be a different actor to gain unauthorized access.
 
 **Attack Scenario:**
 ```python
-# Spoofed actor
-request = Request(
+# Spoofed actor. The permit subject must equal the request actor.
+params = {}
+request = KernelRequest(
     request_id="req-001",
+    ts_ms=0,
     actor="admin-agent",  # Attacker claims admin identity
     intent="Delete all records",
-    tool_call=ToolCall(name="delete_all", params={}),
+    tool_call=ToolCall(name="delete_all", params=dict(params)),
+    params=dict(params),
 )
 ```
 
@@ -142,7 +150,7 @@ def authenticated_submit(kernel, request, auth_token):
     if request.actor != verified_actor:
         raise AuthenticationError("Actor mismatch")
     
-    return kernel.submit(request)
+    return kernel.submit(request, permit_token=permit)
 ```
 
 ---
@@ -349,12 +357,14 @@ Attacker floods kernel with requests to exhaust resources.
 
 **Attack Scenario:**
 ```python
-# Flood attack
+# Flood attack. Each call is still a KernelRequest. An empty or huge
+# intent is denied as ambiguous before a tool runs.
 for i in range(1000000):
-    kernel.submit(Request(
+    kernel.submit(KernelRequest(
         request_id=f"flood-{i}",
+        ts_ms=0,
         actor="attacker",
-        intent="x" * 10000,  # Large intent
+        intent="x" * 10000,
     ))
 ```
 

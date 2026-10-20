@@ -17,9 +17,15 @@ try:
 except ImportError:
     HAS_FASTAPI = False
 
-from kernels.common.types import Request, ToolCall
+from kernels.integrations.wire import (
+    boot_strict_kernel,
+    evidence_to_mapping,
+    policy_to_mapping,
+    receipt_to_mapping,
+    request_from_mapping,
+    status_mapping,
+)
 from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
 from kernels.jurisdiction.policy import JurisdictionPolicy
 
 
@@ -38,8 +44,9 @@ if HAS_FASTAPI:
         actor: str
         intent: str
         tool_call: Optional[ToolCallModel] = None
-        evidence: Optional[List[str]] = None
-        constraints: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None
+        evidence: Optional[Any] = None
+        permit: Optional[Dict[str, Any]] = None
 
     class ReceiptResponse(BaseModel):
         """Receipt response model."""
@@ -47,7 +54,7 @@ if HAS_FASTAPI:
         request_id: str
         status: str
         decision: str
-        result: Optional[Dict[str, Any]] = None
+        result: Optional[Any] = None
         error: Optional[str] = None
 
     class HealthResponse(BaseModel):
@@ -99,7 +106,9 @@ def create_fastapi_app(
 
     # Create kernel if not provided
     if kernel is None:
-        kernel = StrictKernel(kernel_id=kernel_id, policy=policy)
+        kernel = boot_strict_kernel(kernel_id)
+        if policy is not None:
+            kernel.set_policy(policy)
 
     # Create app
     app = FastAPI(
@@ -129,7 +138,7 @@ def create_fastapi_app(
         return {
             "name": "KERNELS",
             "version": version,
-            "kernel_id": kernel.kernel_id,
+            "kernel_id": kernel.config.kernel_id,
         }
 
     @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -137,15 +146,16 @@ def create_fastapi_app(
         """Health check endpoint."""
         return HealthResponse(
             status="healthy",
-            kernel_state=k.state.value,
+            kernel_state=k.get_state().value,
         )
 
     @app.get("/status", response_model=StatusResponse, tags=["Status"])
     async def status(k: BaseKernel = Depends(get_kernel)):
         """Get kernel status."""
+        current = status_mapping(k)
         return StatusResponse(
-            kernel_id=k.kernel_id,
-            state=k.state.value,
+            kernel_id=current["kernel_id"],
+            state=current["state"],
         )
 
     @app.post("/submit", response_model=ReceiptResponse, tags=["Requests"])
@@ -154,58 +164,40 @@ def create_fastapi_app(
         k: BaseKernel = Depends(get_kernel),
     ):
         """Submit a request to the kernel."""
-        # Build tool call
-        tool_call = None
-        if body.tool_call:
-            tool_call = ToolCall(
-                name=body.tool_call.name,
-                params=body.tool_call.params,
-            )
-
-        # Build request
-        request = Request(
-            request_id=body.request_id,
-            actor=body.actor,
-            intent=body.intent,
-            tool_call=tool_call,
-            evidence=body.evidence,
-            constraints=body.constraints,
-        )
-
-        # Submit
-        receipt = k.submit(request)
-
+        payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+        if payload.get("tool_call") is not None:
+            payload["tool_call"] = {
+                "name": body.tool_call.name,
+                "params": body.tool_call.params,
+            }
+        request, permit = request_from_mapping(k, payload)
+        receipt = k.submit(request, permit_token=permit)
+        mapped = receipt_to_mapping(receipt)
         return ReceiptResponse(
-            request_id=receipt.request_id,
-            status=receipt.status,
-            decision=receipt.decision.value,
-            result=receipt.result,
-            error=receipt.error,
+            request_id=mapped["request_id"],
+            status=mapped["status"],
+            decision=mapped["decision"],
+            result=mapped["result"],
+            error=mapped["error"],
         )
 
     @app.get("/evidence", tags=["Audit"])
     async def evidence(k: BaseKernel = Depends(get_kernel)):
         """Export audit evidence."""
-        return k.export_evidence()
+        return evidence_to_mapping(k.export_evidence())
 
     @app.get("/policy", tags=["Policy"])
     async def policy(k: BaseKernel = Depends(get_kernel)):
         """Get current policy."""
-        p = k.policy
-        return {
-            "allowed_actors": p.allowed_actors,
-            "allowed_tools": p.allowed_tools,
-            "require_tool_call": p.require_tool_call,
-            "max_intent_length": p.max_intent_length,
-        }
+        return policy_to_mapping(k)
 
     @app.post("/halt", tags=["Control"])
     async def halt(k: BaseKernel = Depends(get_kernel)):
         """Halt the kernel."""
-        k.halt()
+        k.halt("operator halt")
         return {
             "status": "halted",
-            "kernel_state": k.state.value,
+            "kernel_state": k.get_state().value,
         }
 
     return app

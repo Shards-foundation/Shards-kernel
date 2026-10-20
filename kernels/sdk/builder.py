@@ -107,20 +107,24 @@ class RequestBuilder:
 
         request_id = self._request_id or f"req-{uuid.uuid4().hex[:8]}"
 
+        params = dict(self._tool_params)
+        if self._constraints:
+            params["constraints"] = dict(self._constraints)
+
         tool_call = None
         if self._tool_name:
-            tool_call = ToolCall(
-                name=self._tool_name,
-                params=self._tool_params,
-            )
+            tool_call = ToolCall(name=self._tool_name, params=dict(params))
+
+        evidence = "\n".join(self._evidence) if self._evidence else None
 
         return Request(
             request_id=request_id,
+            ts_ms=0,
             actor=self._actor,
             intent=self._intent,
             tool_call=tool_call,
-            evidence=self._evidence if self._evidence else None,
-            constraints=self._constraints if self._constraints else None,
+            params=params,
+            evidence=evidence,
         )
 
     def reset(self) -> RequestBuilder:
@@ -200,12 +204,16 @@ class PolicyBuilder:
         Returns:
             Constructed JurisdictionPolicy object
         """
+        if self._custom_rules:
+            raise ValueError(
+                "JurisdictionPolicy has no custom_rules field. "
+                "Use the built-in actor, tool, and size checks."
+            )
         return JurisdictionPolicy(
-            allowed_actors=self._allowed_actors,
-            allowed_tools=self._allowed_tools,
-            require_tool_call=self._require_tool_call,
+            allowed_actors=frozenset(self._allowed_actors),
+            allowed_tools=frozenset(self._allowed_tools),
             max_intent_length=self._max_intent_length,
-            custom_rules=self._custom_rules,
+            allow_intent_only=not self._require_tool_call,
         )
 
     def reset(self) -> PolicyBuilder:

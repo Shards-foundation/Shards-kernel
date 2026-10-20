@@ -12,6 +12,9 @@ from kernels.common.types import (
     VirtualClock,
 )
 from kernels.variants.strict_kernel import StrictKernel
+from _permit import issue_permit
+
+KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}
 
 
 def main() -> None:
@@ -23,6 +26,7 @@ def main() -> None:
         clock=VirtualClock(1000),
     )
     kernel.boot(config)
+    kernel.set_keyring(KEYRING)
 
     print("Fail-Closed Ambiguity Detection")
     print("=" * 50)
@@ -74,6 +78,14 @@ def main() -> None:
                 actor="test-user",
                 intent="A clear, unambiguous intent",
                 tool_call=ToolCall(name="echo", params={"text": "test"}),
+                params={"text": "test"},
+            ),
+            "permit": issue_permit(
+                KEYRING,
+                "example-key",
+                subject="test-user",
+                action="echo",
+                params={"text": "test"},
             ),
         },
     ]
@@ -85,7 +97,7 @@ def main() -> None:
             f"  Intent: {repr(request.intent[:50])}{'...' if len(request.intent) > 50 else ''}"
         )
 
-        receipt = kernel.submit(request)
+        receipt = kernel.submit(request, permit_token=case.get("permit"))
 
         print(f"  Status: {receipt.status.value}")
         print(f"  Decision: {receipt.decision.value}")

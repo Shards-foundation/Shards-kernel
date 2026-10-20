@@ -32,20 +32,21 @@ Any unhandled exception → HALTED
 
 **Example:**
 ```python
-from kernels import StrictKernel
+from kernels import KernelConfig, StrictKernel, VirtualClock
 
-kernel = StrictKernel(kernel_id="demo")
-print(kernel.state)  # KernelState.IDLE
+kernel = StrictKernel()
+kernel.boot(KernelConfig(kernel_id="demo", variant="strict", clock=VirtualClock(0)))
+print(kernel.get_state())  # KernelState.IDLE
 
-receipt = kernel.submit(request)
-print(kernel.state)  # KernelState.IDLE (returned after processing)
+receipt = kernel.submit(request, permit_token=permit)
+print(kernel.get_state())  # KernelState.IDLE after COMPLETED
 ```
 
 ---
 
 ### 2.2 Fail-Closed Semantics
 
-KERNELS **defaults to DENY** when policy is ambiguous or errors occur.
+KERNELS **defaults to DENY** when policy is ambiguous or errors occur. An ambiguous request is denied even if `fail_closed` is set to false. A tool call is denied unless `submit` receives a permit whose parameters are the parameters that run.
 
 **Principle:** When in doubt, deny.
 
@@ -56,12 +57,37 @@ KERNELS **defaults to DENY** when policy is ambiguous or errors occur.
 
 **Example:**
 ```python
-# Empty policy = deny all
-policy = JurisdictionPolicy()
-kernel = StrictKernel(kernel_id="secure", policy=policy)
+from kernels import StrictKernel
+from kernels.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
+from kernels.permits import PermitBuilder
 
-receipt = kernel.submit(request)
-print(receipt.decision)  # Decision.DENY
+kernel = StrictKernel()
+kernel.boot(KernelConfig(kernel_id="secure", variant="strict", clock=VirtualClock(0)))
+keyring = {"k": b"test-secret-key-32-bytes-long123"}
+kernel.set_keyring(keyring)
+params = {"text": "hello"}
+permit = (
+    PermitBuilder()
+    .issuer("operator")
+    .subject("agent")
+    .jurisdiction("default")
+    .action("echo")
+    .params(params)
+    .max_executions(1)
+    .valid_from_ms(0)
+    .valid_until_ms(10_000)
+    .proposal_hash("proposal-echo")
+    .build(keyring, "k")
+)
+request = KernelRequest(
+    request_id="req-1",
+    ts_ms=0,
+    actor="agent",
+    intent="Echo hello",
+    tool_call=ToolCall(name="echo", params=dict(params)),
+    params=dict(params),
+)
+receipt = kernel.submit(request, permit_token=permit)
 ```
 
 ---
@@ -75,20 +101,18 @@ Every request is recorded in an **immutable, hash-chained ledger**.
 - Hash-chained (tamper-evident)
 - Externally verifiable
 - Complete history
+- Process memory only. The reference ledger does not write a file and does not fsync. Export the bundle to keep it.
 
 **Example:**
 ```python
-# Export evidence
-evidence = kernel.export_evidence()
-print(f"Entries: {evidence['entry_count']}")
-print(f"Root hash: {evidence['root_hash']}")
-
-# Verify integrity
 from kernels.audit import replay_and_verify
-is_valid, errors = replay_and_verify(
-    evidence["ledger_entries"],
-    evidence["root_hash"]
-)
+from kernels.common.codec import audit_entry_to_dict
+
+bundle = kernel.export_evidence()
+print(f"Entries: {len(bundle.ledger_entries)}")
+print(f"Root hash: {bundle.root_hash}")
+entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
+is_valid, errors = replay_and_verify(entries, bundle.root_hash)
 print(f"Valid: {is_valid}")
 ```
 
@@ -102,49 +126,25 @@ Fine-grained control over **who can do what**.
 - Actor allow list
 - Tool allow list
 - Intent length limits
-- Custom rules
+- Parameter size
 
 **Example:**
 ```python
 from kernels import JurisdictionPolicy
 
 policy = JurisdictionPolicy(
-    allowed_actors=["agent-001", "agent-002"],
-    allowed_tools=["read_file", "search"],
-    require_tool_call=True,
+    allowed_actors=frozenset({"agent-001", "agent-002"}),
+    allowed_tools=frozenset({"read_file", "search"}),
     max_intent_length=1000,
 )
+kernel.set_policy(policy)
 ```
 
 ---
 
-### 2.5 Custom Rules
+### 2.5 No custom rule callables
 
-Add **arbitrary authorization logic** via custom rule functions.
-
-**Use Cases:**
-- Time-based restrictions
-- Rate limiting
-- Content filtering
-- External authorization
-
-**Example:**
-```python
-from kernels.jurisdiction import RuleResult
-
-def business_hours_only(request):
-    from datetime import datetime
-    hour = datetime.utcnow().hour
-    if 9 <= hour < 17:
-        return RuleResult(allowed=True)
-    return RuleResult(allowed=False, reason="Outside business hours")
-
-policy = JurisdictionPolicy(
-    allowed_actors=["agent"],
-    allowed_tools=["tool"],
-    custom_rules=[business_hours_only],
-)
-```
+`JurisdictionPolicy` does not take a list of rule functions. Actor, tool, size, and intent checks are the policy. Time windows and rate limits belong in front of `submit`. A tool call is still denied without a permit bound to its parameters.
 
 ---
 
@@ -161,13 +161,14 @@ Choose the **enforcement posture** that fits your use case.
 
 **Example:**
 ```python
-from kernels import StrictKernel, PermissiveKernel
+from kernels import KernelConfig, PermissiveKernel, StrictKernel, VirtualClock
 
-# Production
-prod = StrictKernel(kernel_id="prod", policy=strict_policy)
+prod = StrictKernel()
+prod.boot(KernelConfig(kernel_id="prod", variant="strict", clock=VirtualClock(0)))
+prod.set_policy(strict_policy)
 
-# Development
-dev = PermissiveKernel(kernel_id="dev")
+dev = PermissiveKernel()
+dev.boot(KernelConfig(kernel_id="dev", variant="permissive", clock=VirtualClock(0)))
 ```
 
 ---
@@ -197,15 +198,12 @@ Full **async/await support** for high-throughput scenarios.
 
 **Example:**
 ```python
-from kernels.async import AsyncStrictKernel
+from kernels.async_support.async_kernel import AsyncStrictKernel, submit_batch
 
-kernel = AsyncStrictKernel(kernel_id="async")
-
-# Single request
-receipt = await kernel.submit(request)
-
-# Batch requests
-receipts = await kernel.submit_batch(requests, concurrency=10)
+kernel = AsyncStrictKernel("async")
+kernel.set_keyring(keyring)
+receipt = await kernel.submit(request, permit_token=permit)
+receipts = await submit_batch(kernel, requests, permits)
 ```
 
 ---
@@ -340,11 +338,11 @@ Kernels can be **halted** for safety.
 
 **Example:**
 ```python
-kernel.halt()
-print(kernel.state)  # KernelState.HALTED
+kernel.halt("operator stop")
+print(kernel.get_state())  # KernelState.HALTED
 
-# Cannot process requests
-receipt = kernel.submit(request)  # Raises StateError
+# Cannot process requests, even if the inner machine is reset.
+kernel.submit(request, permit_token=permit)  # Raises StateError
 ```
 
 ---
@@ -358,7 +356,7 @@ receipt = kernel.submit(request)  # Raises StateError
 | Require tool_call | ✓ | Optional | ✓ | ✓ |
 | Require evidence | - | - | ✓ | - |
 | Require constraints | - | - | - | ✓ |
-| Custom rules | ✓ | ✓ | ✓ | ✓ |
+| Permit required for tools | ✓ | Unless opted out | ✓ | Unless opted out |
 | Audit ledger | ✓ | ✓ | ✓ | ✓ |
 | External verify | ✓ | ✓ | ✓ | ✓ |
 | Async support | ✓ | ✓ | ✓ | ✓ |
