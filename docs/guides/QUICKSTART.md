@@ -21,12 +21,13 @@ pip install -e .
 python -m kernels info
 ```
 
-### Option B: Install from GitHub
+### Option B: Install the distribution
 
-A PyPI release is pending. The PyPI project `kernels` is a different package, so do not run `pip install kernels`.
+The distribution name is `shards-kernel`. Import it as `kernels`. A PyPI release is pending, so `pip install shards-kernel` is not published yet. Do not run `pip install kernels` (that name is a different package). Until the release exists, install from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
+python -c "import kernels"
 ```
 
 ---

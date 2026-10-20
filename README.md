@@ -122,9 +122,14 @@ Variants tune posture while preserving invariants:
 
 ## Install
 
-A PyPI release is pending. The project name `kernels` on PyPI belongs to a different package ([Hugging Face kernels](https://pypi.org/project/kernels/)), so `pip install kernels` does not install this repository.
+The PyPI distribution name is `shards-kernel`. The import package is still `kernels`:
 
-Install this repository from GitHub:
+```bash
+python -m pip install shards-kernel
+python -c "import kernels"
+```
+
+A PyPI release is pending, so that install is not published yet. Do not run `pip install kernels`: the PyPI project `kernels` is a different package ([Hugging Face kernels](https://pypi.org/project/kernels/)). Until `shards-kernel` is released, install this repository from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
@@ -137,6 +142,8 @@ git clone https://github.com/Shards-foundation/kernels.git
 cd kernels
 python -m pip install -e .
 ```
+
+Either of those also provides `import kernels`.
 
 ## Quickstart
 
