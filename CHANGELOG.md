@@ -24,6 +24,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
 - CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 65%, which this suite meets (measured combined coverage 65.8%: 2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
 - The reference audit ledger is process memory. `append` does not write a file and does not fsync. Export the bundle to keep entries. `implementations/storage.py` is a separate sample the kernel does not write to. `load_verified` uses postponed annotations so Python 3.9 can import the module.
+- `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected. The overall coverage gate is 66%.
 - Examples, the HTTP adapters, the SDK client and server, and MCP submit tool calls with a permit bound to the exact parameters. Adapter `halt()` passes a reason. Adapter evidence export returns a mapping.
 
 ### Removed

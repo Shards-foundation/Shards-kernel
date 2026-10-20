@@ -64,18 +64,19 @@ This guide provides security hardening recommendations for KERNELS deployments. 
 
 ```python
 # Production configuration
-from kernels import StrictKernel, JurisdictionPolicy
+from kernels import JurisdictionPolicy, KernelConfig, StrictKernel, VirtualClock
 
-policy = JurisdictionPolicy(
-    allowed_actors=["production-agent-001"],
-    allowed_tools=["read_file", "write_file", "send_email"],
-    require_tool_call=True,  # Strict: require explicit tool
-)
-
-kernel = StrictKernel(
+kernel = StrictKernel()
+kernel.boot(KernelConfig(
     kernel_id="prod-kernel-001",
-    policy=policy,
-)
+    variant="strict",
+    clock=VirtualClock(0),
+))
+kernel.set_keyring(keyring)
+kernel.set_policy(JurisdictionPolicy(
+    allowed_actors=frozenset({"production-agent-001"}),
+    allowed_tools=frozenset({"read_file", "write_file", "send_email"}),
+))
 ```
 
 ---
@@ -87,20 +88,20 @@ kernel = StrictKernel(
 ```python
 # BAD: Overly permissive
 policy = JurisdictionPolicy(
-    allowed_actors=["*"],  # Never use wildcards
-    allowed_tools=["*"],   # Never use wildcards
+    allowed_actors=frozenset({"*"}),
+    allowed_tools=frozenset({"*"}),
 )
 
 # GOOD: Explicit allow list
 policy = JurisdictionPolicy(
-    allowed_actors=[
+    allowed_actors=frozenset({
         "agent-sales-001",
         "agent-support-001",
-    ],
-    allowed_tools=[
+    }),
+    allowed_tools=frozenset({
         "read_customer",
         "update_ticket",
-    ],
+    }),
 )
 ```
 
@@ -134,8 +135,8 @@ def submit_request(kernel, request, actor_token):
     # Verify actor matches request
     if request.actor != get_actor_from_token(actor_token):
         raise AuthorizationError("Actor mismatch")
-    
-    return kernel.submit(request)
+
+    return kernel.submit(request, permit_token=permit)
 ```
 
 ---
@@ -146,21 +147,19 @@ def submit_request(kernel, request, actor_token):
 
 ```python
 # Periodically verify ledger integrity
-from kernels import replay_and_verify
+from kernels.audit import replay_and_verify
+from kernels.common.codec import audit_entry_to_dict
 
 def verify_ledger_integrity(kernel):
-    evidence = kernel.export_evidence()
-    entries = evidence["ledger_entries"]
-    root_hash = evidence["root_hash"]
-    
-    is_valid, errors = replay_and_verify(entries, root_hash)
-    
+    bundle = kernel.export_evidence()
+    entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
+    is_valid, errors = replay_and_verify(entries, bundle.root_hash)
+
     if not is_valid:
-        # CRITICAL: Ledger compromised
-        kernel.halt()
+        kernel.halt("ledger integrity violation")
         alert_security_team(errors)
         raise SecurityError("Ledger integrity violation")
-    
+
     return True
 ```
 
@@ -172,13 +171,20 @@ import json
 from datetime import datetime
 
 def archive_evidence(kernel, archive_path):
-    evidence = kernel.export_evidence()
-    
+    from kernels.common.codec import audit_entry_to_dict
+
+    bundle = kernel.export_evidence()
+    payload = {
+        "kernel_id": bundle.kernel_id,
+        "root_hash": bundle.root_hash,
+        "ledger_entries": [audit_entry_to_dict(entry) for entry in bundle.ledger_entries],
+    }
+
     filename = f"evidence_{datetime.utcnow().isoformat()}.json"
     filepath = f"{archive_path}/{filename}"
-    
+
     with open(filepath, "w") as f:
-        json.dump(evidence, f, indent=2)
+        json.dump(payload, f, indent=2)
     
     # Compute and store archive hash
     archive_hash = compute_file_hash(filepath)
@@ -192,9 +198,9 @@ def archive_evidence(kernel, archive_path):
 ```python
 # Monitor for ledger tampering
 def detect_tampering(kernel, last_known_hash):
-    evidence = kernel.export_evidence()
-    current_hash = evidence["root_hash"]
-    entry_count = len(evidence["ledger_entries"])
+    bundle = kernel.export_evidence()
+    current_hash = bundle.root_hash
+    entry_count = len(bundle.ledger_entries)
     
     # Check for unexpected hash changes
     if entry_count > 0:
@@ -292,10 +298,10 @@ class RateLimiter:
 # Usage
 limiter = RateLimiter(max_requests=100, window_seconds=60)
 
-def submit_with_rate_limit(kernel, request):
+def submit_with_rate_limit(kernel, request, permit):
     if not limiter.check(request.actor):
         raise RateLimitError("Rate limit exceeded")
-    return kernel.submit(request)
+    return kernel.submit(request, permit_token=permit)
 ```
 
 ### 7.2 Burst Protection
@@ -476,7 +482,7 @@ def emergency_halt(kernel, reason: str):
         logging.error(f"Failed to archive evidence: {e}")
     
     # Halt the kernel
-    kernel.halt()
+    kernel.halt(reason)
     
     # Alert operations team
     send_alert("CRITICAL", f"Kernel halted: {reason}")
@@ -493,23 +499,29 @@ def recover_kernel(archive_path: str):
     # 2. Verify integrity
     is_valid, errors = replay_and_verify(
         evidence["ledger_entries"],
-        evidence["root_hash"]
+        evidence["root_hash"],
     )
     
     if not is_valid:
         raise SecurityError(f"Cannot recover: {errors}")
     
-    # 3. Create new kernel with verified state
-    kernel = StrictKernel(
+    # 3. Boot a new kernel. Halt is irrevocable, so recovery is a new process.
+    from kernels import KernelConfig, VirtualClock
+
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig(
         kernel_id=evidence["kernel_id"],
-        policy=load_policy(),
-    )
-    
-    # 4. Verify new kernel is operational
+        variant="strict",
+        clock=VirtualClock(0),
+    ))
+    kernel.set_policy(load_policy())
+    kernel.set_keyring(load_keyring())
+
+    # 4. A health check is a permit-bound tool call, or an intent-only request.
     test_request = create_health_check_request()
-    result = kernel.submit(test_request)
-    
-    if result.status != "ACCEPTED":
+    result = kernel.submit(test_request, permit_token=health_permit)
+
+    if result.status.value != "ACCEPTED":
         raise RecoveryError("Health check failed")
     
     return kernel
