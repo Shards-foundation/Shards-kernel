@@ -4,8 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    # The extra base lets stacked PRs into the docs branch run this workflow.
-    branches: [main, master, cursor/fix-docs-links-5262]
+    branches: [main, master]
 
 jobs:
   quality:
