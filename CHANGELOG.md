@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- `python -m kernels.cli.verify` reads `ledger_entries` and checks internal consistency by delegating to `verify_evidence_bundle`. Replay recomputes each entry hash from the entry content and compares `prev_hash` links and `root_hash`. A missing, empty, or unknown entries key, an empty bundle, malformed JSON, an unknown schema, or the legacy `entries` key is a failure with a non-zero exit. An empty entry list is rejected in the CLI before replay, because `replay_and_verify` reports an empty list as consistent. `root_hash` is stored in the bundle, so a match shows only that the bundle is internally consistent (integrity only).
 - Tool execution is fail-closed. A tool call requires a permit whose parameters are the parameters that run, even when no HMAC key is configured. Set `KernelConfig.allow_insecure_unpermitted_execution` to opt out on a non-strict kernel. `StrictKernel` ignores that flag.
 - Unknown permit constraints, and the documented but previously unimplemented constraints `max_memory_mb` and `allowed_domains`, are rejected. `require_evidence` now requires a non-empty evidence string.
 - An intent audit record is appended before a tool runs. If that append fails, the tool does not run. The outcome record stores the parameters that executed.
