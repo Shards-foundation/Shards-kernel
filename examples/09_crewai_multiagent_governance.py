@@ -49,6 +49,7 @@ from kernels.common.types import KernelConfig, VirtualClock
 from kernels.variants.strict_kernel import StrictKernel
 from kernels.integrations.crewai_adapter import CrewAIAdapter
 from kernels.permits import PermitBuilder
+from _permit import issue_permit
 
 
 # ============================================================================
@@ -224,7 +225,7 @@ def main():
         func=web_search,
         description="Search the web",
         actor=researcher_id,
-        require_permit=False,  # Low risk, no permit needed
+        require_permit=True,
     )
 
     researcher_read = adapter.wrap_tool(
@@ -232,7 +233,7 @@ def main():
         func=read_file,
         description="Read file from filesystem",
         actor=researcher_id,
-        require_permit=False,  # Low risk, no permit needed
+        require_permit=True,
     )
 
     # Analyst tools (MEDIUM RISK)
@@ -241,7 +242,7 @@ def main():
         func=analyze_data,
         description="Analyze data",
         actor=analyst_id,
-        require_permit=False,  # Computation only, no permit needed
+        require_permit=True,
     )
 
     analyst_report = adapter.wrap_tool(
@@ -249,7 +250,7 @@ def main():
         func=create_report,
         description="Create internal report",
         actor=analyst_id,
-        require_permit=False,  # Internal only, no permit needed
+        require_permit=True,
     )
 
     # Publisher tools (HIGH RISK - REQUIRE PERMITS)
@@ -286,7 +287,7 @@ def main():
     print()
 
     # ========================================================================
-    # Step 5: Demonstrate safe operations (no permits needed)
+    # Step 5: Demonstrate ordinary operations with bound permits
     # ========================================================================
 
     print("Step 5: Execute safe operations (LOW/MEDIUM RISK)")
@@ -294,33 +295,76 @@ def main():
 
     # Researcher searches web
     print("Researcher searches web...")
-    result = researcher_search._run(query="AI governance best practices")
-    print("✓ ALLOWED (no permit needed)")
+    search_params = {"query": "AI governance best practices"}
+    result = researcher_search._run(
+        permit_token=issue_permit(
+            keyring,
+            "crew-operator-2026",
+            subject=researcher_id,
+            action="web_search",
+            params=search_params,
+            issuer="operator@company.com",
+        ),
+        **search_params,
+    )
+    print("✓ ALLOWED (permit bound to this call)")
     print(f"  Result: {result[:50]}...")
     print()
 
     # Researcher reads file
     print("Researcher reads file...")
-    result = researcher_read._run(path="/data/research/papers.txt")
-    print("✓ ALLOWED (no permit needed)")
+    read_params = {"path": "/data/research/papers.txt"}
+    result = researcher_read._run(
+        permit_token=issue_permit(
+            keyring,
+            "crew-operator-2026",
+            subject=researcher_id,
+            action="read_file",
+            params=read_params,
+            issuer="operator@company.com",
+        ),
+        **read_params,
+    )
+    print("✓ ALLOWED (permit bound to this call)")
     print(f"  Result: {result[:50]}...")
     print()
 
     # Analyst analyzes data
     print("Analyst analyzes data...")
+    analyze_params = {
+        "data": "[research data from web search]",
+        "analysis_type": "sentiment analysis",
+    }
     result = analyst_analyze._run(
-        data="[research data from web search]", analysis_type="sentiment analysis"
+        permit_token=issue_permit(
+            keyring,
+            "crew-operator-2026",
+            subject=analyst_id,
+            action="analyze_data",
+            params=analyze_params,
+            issuer="operator@company.com",
+        ),
+        **analyze_params,
     )
-    print("✓ ALLOWED (no permit needed)")
+    print("✓ ALLOWED (permit bound to this call)")
     print(f"  Result: {result}")
     print()
 
     # Analyst creates report
     print("Analyst creates internal report...")
+    report_params = {"title": "AI Governance Analysis", "content": "[analysis results]"}
     result = analyst_report._run(
-        title="AI Governance Analysis", content="[analysis results]"
+        permit_token=issue_permit(
+            keyring,
+            "crew-operator-2026",
+            subject=analyst_id,
+            action="create_report",
+            params=report_params,
+            issuer="operator@company.com",
+        ),
+        **report_params,
     )
-    print("✓ ALLOWED (no permit needed)")
+    print("✓ ALLOWED (permit bound to this call)")
     print(f"  Result: {result}")
     print()
 
@@ -368,6 +412,7 @@ def main():
         .max_executions(1)
         .valid_from_ms(0)
         .valid_until_ms(10000000)
+        .proposal_hash("proposal-crew-action")
         .build(keyring, "crew-operator-2026")
     )
 
@@ -455,6 +500,7 @@ def main():
         .max_executions(1)
         .valid_from_ms(0)
         .valid_until_ms(10000000)
+        .proposal_hash("proposal-crew-action")
         .build(keyring, "crew-operator-2026")
     )
 
@@ -475,6 +521,7 @@ def main():
         .max_executions(1)
         .valid_from_ms(0)
         .valid_until_ms(10000000)
+        .proposal_hash("proposal-crew-action")
         .build(keyring, "crew-operator-2026")
     )
 

@@ -15,6 +15,9 @@ from kernels.variants.strict_kernel import StrictKernel
 from kernels.variants.permissive_kernel import PermissiveKernel
 from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
 from kernels.variants.dual_channel_kernel import DualChannelKernel
+from _permit import issue_permit
+
+KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}
 
 
 def make_config(kernel_id: str, variant: str) -> KernelConfig:
@@ -26,15 +29,17 @@ def make_config(kernel_id: str, variant: str) -> KernelConfig:
     )
 
 
-def test_variant(kernel, variant_name: str, requests: list) -> None:
+def test_variant(kernel, variant_name: str, requests: list, permit=None) -> None:
     """Test a kernel variant with a list of requests."""
     print(f"\n{'=' * 60}")
     print(f"VARIANT: {variant_name}")
     print("=" * 60)
+    kernel.set_keyring(KEYRING)
 
     for name, request in requests:
         print(f"\n[{name}]")
-        receipt = kernel.submit(request)
+        token = permit if request.request_id == "req-tool" else None
+        receipt = kernel.submit(request, permit_token=token)
         print(f"  Decision: {receipt.decision.value}")
         print(f"  Status: {receipt.status.value}")
         if receipt.error:
@@ -62,14 +67,35 @@ def main() -> None:
         ),
     )
 
+    echo_params = {"text": "hello"}
+    tool_permit = issue_permit(
+        KEYRING,
+        "example-key",
+        subject="test-user",
+        action="echo",
+        params=echo_params,
+        max_executions=4,
+    )
     tool_request = (
-        "Tool Request",
+        "Permitted tool request",
         KernelRequest(
             request_id="req-tool",
             ts_ms=2000,
             actor="test-user",
             intent="Execute echo tool",
-            tool_call=ToolCall(name="echo", params={"text": "hello"}),
+            tool_call=ToolCall(name="echo", params=dict(echo_params)),
+            params=dict(echo_params),
+        ),
+    )
+    unpermitted_tool = (
+        "Unpermitted tool request",
+        KernelRequest(
+            request_id="req-tool-denied",
+            ts_ms=2500,
+            actor="test-user",
+            intent="Execute echo without a permit",
+            tool_call=ToolCall(name="echo", params={"text": "nope"}),
+            params={"text": "nope"},
         ),
     )
 
@@ -109,8 +135,10 @@ def main() -> None:
         "Strict Kernel",
         [
             intent_only_request,
+            unpermitted_tool,
             tool_request,
         ],
+        permit=tool_permit,
     )
 
     # Test Permissive Kernel
@@ -121,8 +149,10 @@ def main() -> None:
         "Permissive Kernel",
         [
             intent_only_request,
+            unpermitted_tool,
             tool_request,
         ],
+        permit=tool_permit,
     )
 
     # Test Evidence-First Kernel

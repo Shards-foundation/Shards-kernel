@@ -182,6 +182,8 @@ Variants implement the `Kernel` protocol with different enforcement postures.
 13. Return receipt
 ```
 
+The intent record is linked in process memory before the tool runs. The reference ledger does not write a file and does not fsync. A crash drops entries that were not exported. An ambiguous request is denied even when `KernelConfig.fail_closed` is false. `StateMachine.reset()` can move a bare machine out of `HALTED`; a halted kernel keeps a separate flag and will not accept another request.
+
 ### Evidence Export
 
 ```

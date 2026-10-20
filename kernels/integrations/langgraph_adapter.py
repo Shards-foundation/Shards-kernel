@@ -147,11 +147,8 @@ class LangGraphAdapter:
             auto_register: Auto-register nodes in kernel dispatcher
             enforce_invariants: Enforce workflow invariants (halt on violation)
         """
-        if not LANGGRAPH_AVAILABLE:
-            raise ImportError(
-                "LangGraph is not installed. Install with: pip install langgraph"
-            )
-
+        # LangGraph itself is optional. Node governance runs without it.
+        self.langgraph_available = LANGGRAPH_AVAILABLE
         self.kernel = kernel
         self.actor = actor
         self.auto_register = auto_register
@@ -164,11 +161,7 @@ class LangGraphAdapter:
 
         # Extend LangChain adapter if available
         if LANGCHAIN_AVAILABLE:
-            self._langchain_adapter = LangChainAdapter(
-                kernel=kernel,
-                actor=actor,
-                auto_register=auto_register,
-            )
+            self._langchain_adapter = LangChainAdapter(kernel=kernel, actor=actor)
         else:
             self._langchain_adapter = None
 
@@ -267,11 +260,15 @@ class LangGraphAdapter:
 
             governed = adapter.wrap_node("process_data", process_data)
         """
-        # Register in kernel if auto_register enabled
+        # The kernel invokes tools with keyword parameters. Nodes take one
+        # state mapping, so the registered handler rebuilds that mapping.
+        def run_node(**params: Any) -> Any:
+            return func(params)
+
         if self.auto_register:
             self.kernel._dispatcher.registry.register(
                 name=name,
-                handler=func,
+                handler=run_node,
                 description=description or f"LangGraph node: {name}",
             )
 
@@ -314,8 +311,10 @@ class LangGraphAdapter:
 
             # Handle decision
             if receipt.decision == Decision.ALLOW:
-                # Execute node
-                updated_state = func(state)
+                # The kernel already ran the node. Do not run it again.
+                updated_state = receipt.tool_result
+                if updated_state is None:
+                    updated_state = state
 
                 # Convert updated state to dict
                 if isinstance(updated_state, dict):
@@ -390,7 +389,18 @@ class LangGraphAdapter:
             - Invariant violations
             - Permit verifications
         """
-        evidence = self.kernel.export_evidence()
+        from kernels.common.codec import audit_entry_to_dict
+
+        bundle = self.kernel.export_evidence()
+        entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
+        evidence: Dict[str, Any] = {
+            "kernel_id": bundle.kernel_id,
+            "variant": bundle.variant,
+            "root_hash": bundle.root_hash,
+            "exported_at_ms": bundle.exported_at_ms,
+            "entries": entries,
+            "entry_count": len(entries),
+        }
 
         # Add workflow-specific data
         evidence["workflow_data"] = {

@@ -10,6 +10,8 @@
 
 This cookbook provides practical recipes for common KERNELS tasks. Each recipe is self-contained and can be adapted to your needs.
 
+A tool call is denied unless `kernel.submit(request, permit_token=permit)` is given a permit bound to the exact parameters. `request.params` and `tool_call.params` must match. Boot with `kernel.boot(KernelConfig(...))` before submit. Working calls are in `examples/`. The sketches later in this guide still use older constructor names.
+
 ---
 
 ## 2. Basic Recipes

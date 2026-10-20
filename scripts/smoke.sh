@@ -22,6 +22,13 @@ echo "[3/7] Running tool execution example..."
 python3 examples/02_tool_execution.py
 
 echo ""
+echo "[3b] Running the remaining examples..."
+for example in examples/0{3,4,5,6,7,8,9}*.py examples/1{0,1}*.py; do
+  echo "  $example"
+  python3 "$example" >/tmp/kernels-example.out
+done
+
+echo ""
 echo "[4/7] Checking CLI help..."
 python3 -m kernels --help
 

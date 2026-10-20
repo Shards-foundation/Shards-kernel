@@ -333,7 +333,7 @@ class LangChainAdapter:
 
     def halt(self) -> None:
         """Halt the kernel."""
-        self.kernel.halt()
+        self.kernel.halt("operator halt")
 
 
 def create_langchain_adapter(

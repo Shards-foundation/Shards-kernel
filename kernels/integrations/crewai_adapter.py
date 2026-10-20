@@ -59,6 +59,10 @@ except ImportError:
     class BaseModel:  # type: ignore
         pass
 
+    def Field(*_args, **_kwargs):  # type: ignore
+        """Stand-in so tool schemas can be built without pydantic."""
+        return None
+
 
 # KERNELS imports
 from kernels.common.types import (
@@ -281,11 +285,7 @@ class CrewAIAdapter:
             actor: Default actor identity for agents
             auto_register: Auto-register tools in kernel dispatcher
         """
-        if not CREWAI_AVAILABLE:
-            raise ImportError(
-                "CrewAI is not installed. Install with: pip install crewai"
-            )
-
+        # CrewAI itself is optional. The governance wrapper runs without it.
         self.kernel = kernel
         self.default_actor = actor
         self.auto_register = auto_register
@@ -356,7 +356,18 @@ class CrewAIAdapter:
             Evidence bundle containing all tool executions,
             decisions, and permit verifications.
         """
-        return self.kernel.export_evidence()
+        from kernels.common.codec import audit_entry_to_dict
+
+        evidence = self.kernel.export_evidence()
+        entries = [audit_entry_to_dict(entry) for entry in evidence.ledger_entries]
+        return {
+            "kernel_id": evidence.kernel_id,
+            "variant": evidence.variant,
+            "root_hash": evidence.root_hash,
+            "exported_at_ms": evidence.exported_at_ms,
+            "entries": entries,
+            "entry_count": len(entries),
+        }
 
     def create_agent_identity(
         self,

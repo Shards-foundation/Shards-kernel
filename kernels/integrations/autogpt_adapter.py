@@ -398,7 +398,18 @@ class AutoGPTAdapter:
             Evidence bundle containing all command executions,
             decisions, and permit verifications.
         """
-        evidence = self.kernel.export_evidence()
+        from kernels.common.codec import audit_entry_to_dict
+
+        bundle = self.kernel.export_evidence()
+        entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
+        evidence: Dict[str, Any] = {
+            "kernel_id": bundle.kernel_id,
+            "variant": bundle.variant,
+            "root_hash": bundle.root_hash,
+            "exported_at_ms": bundle.exported_at_ms,
+            "entries": entries,
+            "entry_count": len(entries),
+        }
 
         # Add autonomous loop stats if monitoring enabled
         if self.monitor:

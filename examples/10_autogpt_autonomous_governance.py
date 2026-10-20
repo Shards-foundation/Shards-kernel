@@ -53,6 +53,7 @@ from kernels.common.types import KernelConfig, VirtualClock
 from kernels.variants.strict_kernel import StrictKernel
 from kernels.integrations.autogpt_adapter import AutoGPTAdapter
 from kernels.permits import PermitBuilder
+from _permit import issue_permit
 
 
 # ============================================================================
@@ -283,21 +284,43 @@ def main():
     print()
 
     # ========================================================================
-    # Step 4: Execute safe operations (no permits needed for LOW risk)
+    # Step 4: Execute low-risk operations with permits bound to the call
     # ========================================================================
 
-    print("Step 4: Execute LOW RISK operations (no permits required)")
+    print("Step 4: Execute LOW RISK operations (permits bound to the call)")
     print("-" * 80)
 
     # These should succeed because they're low risk
     print("Agent browses web for research...")
-    result = governed_browse(url="https://example.com/ai-governance")
+    browse_params = {"url": "https://example.com/ai-governance"}
+    result = governed_browse(
+        permit_token=issue_permit(
+            keyring,
+            "autogpt-operator-2026",
+            subject="autogpt-agent",
+            action="browse_website",
+            params=browse_params,
+            issuer="operator@company.com",
+        ),
+        **browse_params,
+    )
     print("✓ ALLOWED (risk: 0.3)")
     print(f"  Result: {result[:50]}...")
     print()
 
     print("Agent reads existing research file...")
-    result = governed_read(path="/data/research/notes.txt")
+    read_params = {"path": "/data/research/notes.txt"}
+    result = governed_read(
+        permit_token=issue_permit(
+            keyring,
+            "autogpt-operator-2026",
+            subject="autogpt-agent",
+            action="read_file",
+            params=read_params,
+            issuer="operator@company.com",
+        ),
+        **read_params,
+    )
     print("✓ ALLOWED (risk: 0.2)")
     print(f"  Result: {result[:50]}...")
     print()
@@ -344,6 +367,7 @@ def main():
         .max_executions(1)
         .valid_from_ms(0)
         .valid_until_ms(10000000)
+        .proposal_hash("proposal-write-file")
         .build(keyring, "autogpt-operator-2026")
     )
 
@@ -394,10 +418,22 @@ def main():
         print(f"Current iterations: {adapter.monitor.stats.total_iterations}/100")
         print()
 
-        # Execute 2 more commands (should succeed)
+        # Execute 2 more commands (should succeed). Each call still needs a
+        # permit bound to the exact parameters, including low-risk tools.
         print("Executing command 99...")
         try:
-            result = governed_browse(url="https://example.com/final-research")
+            final_browse = {"url": "https://example.com/final-research"}
+            result = governed_browse(
+                permit_token=issue_permit(
+                    keyring,
+                    "autogpt-operator-2026",
+                    subject="autogpt-agent",
+                    action="browse_website",
+                    params=final_browse,
+                    issuer="operator@company.com",
+                ),
+                **final_browse,
+            )
             print("✓ Command 99 executed successfully")
             print()
         except RuntimeError as e:
@@ -406,7 +442,18 @@ def main():
 
         print("Executing command 100...")
         try:
-            result = governed_read(path="/data/final-notes.txt")
+            final_read = {"path": "/data/final-notes.txt"}
+            result = governed_read(
+                permit_token=issue_permit(
+                    keyring,
+                    "autogpt-operator-2026",
+                    subject="autogpt-agent",
+                    action="read_file",
+                    params=final_read,
+                    issuer="operator@company.com",
+                ),
+                **final_read,
+            )
             print("✓ Command 100 executed successfully")
             print()
         except RuntimeError as e:

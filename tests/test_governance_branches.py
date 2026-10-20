@@ -411,11 +411,9 @@ class TestKernelDefensiveBranches(unittest.TestCase):
             )
         )
         receipt = kernel.submit(_request(intent=""))
-        # Empty intent is ambiguous, but fail_closed=False skips that denial.
-        # Jurisdiction then rejects the empty intent as a missing field.
+        # fail_closed=False does not authorise an ambiguous request.
         self.assertEqual(receipt.decision, Decision.DENY)
-        self.assertNotIn("Ambiguity", receipt.error or "")
-        self.assertIn("intent", (receipt.error or "").lower())
+        self.assertIn("Ambiguity", receipt.error or "")
 
     def test_insecure_opt_out_still_rejects_divergent_params(self) -> None:
         kernel = PermissiveKernel()

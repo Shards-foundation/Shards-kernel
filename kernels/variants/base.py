@@ -142,6 +142,8 @@ class BaseKernel(Kernel):
         # Set only after a permit (or the explicit insecure opt-out) has bound
         # the parameters that EXECUTING is allowed to use.
         self._execution_authorised: bool = False
+        # Independent of StateMachine.reset(). Halt stays irrevocable.
+        self._halted: bool = False
 
     @property
     def config(self) -> KernelConfig:
@@ -198,6 +200,8 @@ class BaseKernel(Kernel):
         """
         if self._ledger is None or self._state_machine is None:
             raise StateError("Kernel not booted")
+        if self._halted:
+            raise StateError("Kernel is halted")
         self._state_machine.assert_not_halted()
 
         try:
@@ -270,6 +274,7 @@ class BaseKernel(Kernel):
         """Move to HALTED after an unexpected failure. Never raises."""
         if self._state_machine is None:
             return
+        self._halted = True
         state_from = self._state_machine.state
         if not self._state_machine.is_halted:
             try:
@@ -310,6 +315,8 @@ class BaseKernel(Kernel):
         ):
             raise StateError("Kernel not booted")
 
+        if self._halted:
+            raise StateError("Kernel is halted")
         self._state_machine.assert_not_halted()
         self._state_machine.assert_state(KernelState.IDLE)
         self._execution_authorised = False
@@ -367,7 +374,8 @@ class BaseKernel(Kernel):
             max_intent_length=self.config.max_intent_length,
             strict=self._is_strict_ambiguity(),
         )
-        if ambiguity_errors and self.config.fail_closed:
+        # Ambiguity is always denied. fail_closed=False is not an opt-out.
+        if ambiguity_errors:
             return self._deny_request(
                 request,
                 state_from,
@@ -678,6 +686,7 @@ class BaseKernel(Kernel):
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
 
+        self._halted = True
         state_from = self._state_machine.state
         self._state_machine.halt()
         entry = self._ledger.append(

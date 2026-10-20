@@ -35,12 +35,14 @@ pip install kernels
 
 ```python
 from kernels import StrictKernel
+from kernels.common.types import KernelConfig, VirtualClock
 
-# Create kernel with default policy
-kernel = StrictKernel(kernel_id="my-first-kernel")
+kernel = StrictKernel()
+kernel.boot(KernelConfig(kernel_id="my-first-kernel", variant="strict", clock=VirtualClock(0)))
+kernel.set_keyring({"k": b"test-secret-key-32-bytes-long123"})
 
-print(f"Kernel ID: {kernel.kernel_id}")
-print(f"State: {kernel.state}")
+print(f"Kernel ID: {kernel.config.kernel_id}")
+print(f"State: {kernel.get_state()}")
 ```
 
 **Output:**
@@ -51,49 +53,57 @@ State: KernelState.IDLE
 
 ### Step 2: Submit a Request
 
-```python
-from kernels import Request, ToolCall, Decision
+A tool call needs a permit bound to the same parameters the tool will receive. `request.params` and `tool_call.params` must match.
 
-# Create a request
-request = Request(
+```python
+from kernels.common.types import KernelRequest, ToolCall
+from kernels.permits import PermitBuilder
+
+params = {"text": "Hello, World!"}
+keyring = {"k": b"test-secret-key-32-bytes-long123"}
+permit = (
+    PermitBuilder()
+    .issuer("operator")
+    .subject("my-agent")
+    .jurisdiction("default")
+    .action("echo")
+    .params(params)
+    .max_executions(1)
+    .valid_from_ms(0)
+    .valid_until_ms(10_000)
+    .proposal_hash("proposal-echo")
+    .build(keyring, "k")
+)
+request = KernelRequest(
     request_id="req-001",
+    ts_ms=0,
     actor="my-agent",
     intent="Say hello",
-    tool_call=ToolCall(
-        name="echo",
-        params={"message": "Hello, World!"}
-    ),
+    tool_call=ToolCall(name="echo", params=dict(params)),
+    params=dict(params),
 )
-
-# Submit to kernel
-receipt = kernel.submit(request)
-
-# Check result
+receipt = kernel.submit(request, permit_token=permit)
 print(f"Decision: {receipt.decision}")
-print(f"Result: {receipt.result}")
+print(f"Result: {receipt.tool_result}")
 ```
 
 **Output:**
 ```
 Decision: Decision.ALLOW
-Result: {'echoed': 'Hello, World!'}
+Result: Hello, World!
 ```
+
+The same call without `permit_token` is `Decision.DENY` with `MISSING_PERMIT`. A permit for different parameters is denied and does not consume `max_executions`.
 
 ### Step 3: Export Evidence
 
 ```python
-# Export audit evidence
 evidence = kernel.export_evidence()
-
-print(f"Entries: {len(evidence['ledger_entries'])}")
-print(f"Root Hash: {evidence['root_hash'][:16]}...")
+print(f"Entries: {len(evidence.ledger_entries)}")
+print(f"Root Hash: {evidence.root_hash[:16]}...")
 ```
 
-**Output:**
-```
-Entries: 1
-Root Hash: a1b2c3d4e5f6g7h8...
-```
+A successful tool call writes two ledger entries: the intent record, then the outcome. The ledger is process memory. Export the bundle if you need to keep it. `evidence` is an object, not a dictionary.
 
 ---
 

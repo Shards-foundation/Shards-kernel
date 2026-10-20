@@ -2,7 +2,9 @@
 
 **Version:** 0.1.0  
 **Classification:** Reference  
-**Last Updated:** January 2025
+**Last Updated:** October 2026
+
+Tool calls are denied unless `submit(..., permit_token=permit)` carries a permit whose `params` are the parameters that run. `request.params` and `tool_call.params` must be the same contents. Issue that permit with `PermitBuilder` and a configured key. See `examples/02_tool_execution.py`. The class sketches below are not the installed import surface (`KernelRequest`, `KernelReceipt`, `permit_token`).
 
 ---
 
@@ -58,10 +60,10 @@ class Receipt:
 **Example:**
 
 ```python
-receipt = kernel.submit(request)
+receipt = kernel.submit(request, permit_token=permit)
 
 if receipt.decision == Decision.ALLOW:
-    print(f"Result: {receipt.result}")
+    print(f"Result: {receipt.tool_result}")
 else:
     print(f"Denied: {receipt.error}")
 ```
@@ -117,6 +119,7 @@ class KernelState(Enum):
     ARBITRATING = "ARBITRATING"
     EXECUTING = "EXECUTING"
     AUDITING = "AUDITING"
+    COMPLETED = "COMPLETED"
     HALTED = "HALTED"
 ```
 
@@ -146,9 +149,9 @@ class StrictKernel:
     @property
     def policy(self) -> JurisdictionPolicy: ...
     
-    def submit(self, request: Request) -> Receipt: ...
+    def submit(self, request: Request, permit_token: PermitToken = None) -> Receipt: ...
     
-    def halt(self) -> None: ...
+    def halt(self, reason: str) -> Receipt: ...
     
     def export_evidence(self) -> Dict[str, Any]: ...
 ```
@@ -168,7 +171,7 @@ kernel = StrictKernel(
     policy=policy,
 )
 
-receipt = kernel.submit(request)
+receipt = kernel.submit(request, permit_token=permit)
 ```
 
 ---

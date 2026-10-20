@@ -107,10 +107,10 @@ class AsyncToolRegistry:
 
 class AsyncDispatcher:
     """
-    Async dispatcher for tool execution.
+    Registry holder for async tool callables.
 
-    Handles both sync and async tools, with timeout
-    and error handling.
+    ``dispatch`` does not run those callables. Authorised execution goes
+    through ``AsyncKernel.submit`` and a permit bound to the call.
     """
 
     def __init__(
@@ -127,65 +127,22 @@ class AsyncDispatcher:
         timeout: Optional[float] = None,
     ) -> AsyncToolResult:
         """
-        Dispatch a tool call for execution.
+        Refuse to run a tool.
 
-        Args:
-            tool_call: The tool call to execute
-            timeout: Timeout in seconds (uses default if not specified)
-
-        Returns:
-            AsyncToolResult with execution result
+        This registry is not an authorisation path. Running a tool here
+        would skip permit binding, the intent record, and halt-on-fault.
+        Submit the call through ``AsyncKernel`` with a permit bound to the
+        parameters that should run.
         """
-        import time
-
-        start = time.monotonic()
-        timeout = timeout or self.default_timeout
-
-        # Get tool
-        tool_fn = self.registry.get(tool_call.name)
-        if not tool_fn:
-            return AsyncToolResult(
-                success=False,
-                error=f"Tool not found: {tool_call.name}",
-            )
-
-        try:
-            # Execute with timeout
-            if asyncio.iscoroutinefunction(tool_fn):
-                result = await asyncio.wait_for(
-                    tool_fn(tool_call.params),
-                    timeout=timeout,
-                )
-            else:
-                # Run sync function in executor
-                loop = asyncio.get_event_loop()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, tool_fn, tool_call.params),
-                    timeout=timeout,
-                )
-
-            duration_ms = int((time.monotonic() - start) * 1000)
-
-            return AsyncToolResult(
-                success=True,
-                result=result if isinstance(result, dict) else {"result": result},
-                duration_ms=duration_ms,
-            )
-
-        except asyncio.TimeoutError:
-            duration_ms = int((time.monotonic() - start) * 1000)
-            return AsyncToolResult(
-                success=False,
-                error=f"Tool execution timed out after {timeout}s",
-                duration_ms=duration_ms,
-            )
-        except Exception as e:
-            duration_ms = int((time.monotonic() - start) * 1000)
-            return AsyncToolResult(
-                success=False,
-                error=str(e),
-                duration_ms=duration_ms,
-            )
+        del tool_call, timeout
+        return AsyncToolResult(
+            success=False,
+            error=(
+                "MISSING_PERMIT: AsyncDispatcher does not execute tools. "
+                "Submit the call through AsyncKernel with a permit bound "
+                "to the parameters."
+            ),
+        )
 
     async def dispatch_batch(
         self,
