@@ -482,7 +482,7 @@ Shows all tool executions with timestamps, decisions, and permit status.
 - **Compliance Mapping**: `docs/COMPLIANCE_MAPPING.md`
 - **Verification CLI**: `kernels/cli/verify.py`
 - **OpenClaw Project**: https://openclaw.ai/
-- **KERNELS Repository**: https://github.com/ayais12210-hub/kernels
+- **KERNELS Repository**: https://github.com/Shards-foundation/kernels
 
 ---
 

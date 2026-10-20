@@ -1,9 +1,12 @@
 site_name: KERNELS
 site_description: Deterministic control planes and CI/CD governance documentation.
-repo_url: https://github.com/ayais12210-hub/kernels
+repo_url: https://github.com/Shards-foundation/kernels
+edit_uri: edit/main/docs/
 
 theme:
   name: material
+  features:
+    - content.action.edit
 
 nav:
   - Home: README.md

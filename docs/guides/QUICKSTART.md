@@ -11,7 +11,7 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/ayais12210-hub/kernels.git
+git clone https://github.com/Shards-foundation/kernels.git
 cd kernels
 
 # Install in development mode
@@ -21,10 +21,12 @@ pip install -e .
 python -m kernels info
 ```
 
-### Option B: Install from PyPI (Coming Soon)
+### Option B: Install from GitHub
+
+A PyPI release is pending. The PyPI project `kernels` is a different package, so do not run `pip install kernels`.
 
 ```bash
-pip install kernels
+python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
 ```
 
 ---
