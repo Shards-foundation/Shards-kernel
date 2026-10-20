@@ -16,8 +16,8 @@ Documentation for understanding and integrating KERNELS.
 
 If you need to integrate KERNELS:
 
-1. Start at the main [README.md](../README.md) for overview
-2. Read [spec/README.md](../spec/README.md) for normative requirements
+1. Start at the main [README.md](https://github.com/Shards-foundation/kernels/blob/main/README.md) for overview
+2. Read [spec/README.md](https://github.com/Shards-foundation/kernels/blob/main/spec/README.md) for normative requirements
 3. Review [ARCHITECTURE.md](ARCHITECTURE.md) for implementation details
 4. Check [FAQ.md](FAQ.md) for common questions
 

@@ -26,7 +26,7 @@ test:
 	pytest
 
 test-cov:
-	pytest --cov=kernels --cov=implementations --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=48
+	pytest --cov=kernels --cov=implementations --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=65
 	$(PYTHON) scripts/ci/check_governance_coverage.py coverage.json
 
 security:

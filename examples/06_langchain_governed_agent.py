@@ -10,8 +10,8 @@ agent workflow. It shows:
 4. Preventing unauthorized actions (the "47 emails" scenario)
 
 The scenario: A customer support agent that can:
-- Search knowledge base (safe, no permit needed)
-- Calculate refunds (safe, no permit needed)
+- Search knowledge base (permit bound to the query)
+- Calculate refunds (permit bound to the amount)
 - Send emails (dangerous, requires permit)
 - Access database (dangerous, requires permit)
 
@@ -27,6 +27,7 @@ from kernels.common.types import KernelConfig, VirtualClock
 from kernels.variants.strict_kernel import StrictKernel
 from kernels.integrations.langchain_adapter import LangChainAdapter
 from kernels.permits import PermitBuilder
+from _permit import issue_permit
 
 # Simulate LangChain (these would normally be from langchain imports)
 # For demonstration, we implement minimal versions
@@ -196,25 +197,44 @@ def main():
     )
 
     print("✓ Wrapped 4 tools:")
-    print("  - search_kb (no permit required)")
-    print("  - calculate_refund (no permit required)")
+    print("  - search_kb (permit bound to the query)")
+    print("  - calculate_refund (permit bound to the amount)")
     print("  - send_email (PERMIT REQUIRED)")
     print("  - database_query (PERMIT REQUIRED)")
     print()
 
     # ========================================================================
-    # Step 3: Demonstrate safe operations (no permit needed)
+    # Step 3: Demonstrate ordinary operations with bound permits
     # ========================================================================
 
-    print("Step 3: Execute safe operations (no permits)")
+    print("Step 3: Execute ordinary operations with bound permits")
     print("-" * 80)
 
-    # Safe search
-    search_result = search_tool.run(query="refund policy")
+    # Every tool call carries a permit bound to the exact parameters.
+    search_params = {"query": "refund policy"}
+    search_permit = issue_permit(
+        keyring,
+        "operator-key-2024",
+        subject="support-agent-v1",
+        action="search_kb",
+        params=search_params,
+    )
+    search_result = search_tool.run(permit_token=search_permit, **search_params)
+    if not search_result.was_allowed:
+        raise SystemExit(f"search_kb should have been allowed: {search_result.error}")
     print(f"✓ search_kb executed: {search_result.result}")
 
-    # Safe calculation
-    refund_result = refund_tool.run(amount=50.0, reason="defective product")
+    refund_params = {"amount": 50.0, "reason": "defective product"}
+    refund_permit = issue_permit(
+        keyring,
+        "operator-key-2024",
+        subject="support-agent-v1",
+        action="calculate_refund",
+        params=refund_params,
+    )
+    refund_result = refund_tool.run(permit_token=refund_permit, **refund_params)
+    if not refund_result.was_allowed:
+        raise SystemExit(f"calculate_refund should have been allowed: {refund_result.error}")
     print(f"✓ calculate_refund executed: {refund_result.result}")
     print()
 
@@ -310,10 +330,10 @@ def main():
     print()
 
     email_result3 = email_tool.run(
-        permit_token=email_permit,  # Same permit, second use
-        to="another@example.com",
-        subject="Another email",
-        body="This should be blocked by replay protection",
+        permit_token=email_permit,  # Same permit, same parameters, second use
+        to="customer@example.com",
+        subject="Refund processed",
+        body="Your refund of $50 has been processed.",
     )
 
     if not email_result3.was_allowed:

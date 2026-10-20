@@ -22,7 +22,13 @@ The ledger MUST be hash-chained:
 - The first entry MUST reference the genesis hash
 - The chain MUST be verifiable through replay
 
-### 2.3 Deterministic
+### 2.3 Persistence
+
+The reference `AuditLedger` is in memory. Appending an entry links it into the process-local hash chain and then returns. That is the barrier the kernel uses before execution: the intent record is in the chain, or the tool does not run.
+
+The reference ledger does not open a file and does not fsync. Entries live until the process drops them or the caller exports a bundle. `implementations/storage.py` is a separate sample store. The kernel does not write intent records there. A future persistent backend must flush the intent record, with fsync or an equivalent barrier, before execution. This specification does not add that backend.
+
+### 2.4 Deterministic
 
 The ledger MUST be deterministic:
 - Same inputs MUST produce same hashes

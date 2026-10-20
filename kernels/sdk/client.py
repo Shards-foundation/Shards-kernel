@@ -13,8 +13,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import asyncio
 
-from kernels.common.types import Request, Receipt, Decision
+from kernels.common.types import Decision, KernelState, Receipt, ReceiptStatus, Request
 from kernels.common.errors import KernelError
+from kernels.integrations.wire import permit_to_mapping
+from kernels.permits import PermitToken
 
 
 @dataclass
@@ -91,20 +93,27 @@ class KernelClient:
         except urllib.error.URLError as e:
             raise KernelError(f"Connection error: {e.reason}")
 
-    def submit(self, request: Request) -> Receipt:
+    def submit(
+        self,
+        request: Request,
+        permit_token: Optional[PermitToken] = None,
+    ) -> Receipt:
         """
         Submit a request to the kernel.
 
         Args:
-            request: The request to submit
+            request: The request to submit.
+            permit_token: Permit authorising a tool call, when one is required.
 
         Returns:
-            Receipt with decision and result
+            Receipt with decision and result.
         """
-        data = {
+        data: Dict[str, Any] = {
             "request_id": request.request_id,
+            "ts_ms": request.ts_ms,
             "actor": request.actor,
             "intent": request.intent,
+            "params": request.params,
         }
 
         if request.tool_call:
@@ -116,17 +125,21 @@ class KernelClient:
         if request.evidence:
             data["evidence"] = request.evidence
 
-        if request.constraints:
-            data["constraints"] = request.constraints
+        if permit_token is not None:
+            data["permit"] = permit_to_mapping(permit_token)
 
         response = self._make_request("POST", "/submit", data)
 
         return Receipt(
             request_id=response["request_id"],
-            status=response["status"],
+            status=ReceiptStatus(response["status"]),
+            state_from=KernelState(response.get("state_from", "IDLE")),
+            state_to=KernelState(response.get("state_to", "IDLE")),
+            ts_ms=int(response.get("ts_ms", 0)),
             decision=Decision[response["decision"]],
-            result=response.get("result"),
             error=response.get("error"),
+            evidence_hash=response.get("evidence_hash"),
+            tool_result=response.get("result"),
         )
 
     def submit_batch(self, requests: List[Request]) -> List[Receipt]:
@@ -228,21 +241,16 @@ class AsyncKernelClient:
             data,
         )
 
-    async def submit(self, request: Request) -> Receipt:
-        """
-        Submit a request to the kernel.
-
-        Args:
-            request: The request to submit
-
-        Returns:
-            Receipt with decision and result
-        """
+    async def submit(
+        self,
+        request: Request,
+        permit_token: Optional[PermitToken] = None,
+    ) -> Receipt:
+        """Submit a request to the kernel."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
-            self._sync_client.submit,
-            request,
+            lambda: self._sync_client.submit(request, permit_token=permit_token),
         )
 
     async def submit_batch(

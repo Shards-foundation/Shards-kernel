@@ -285,7 +285,7 @@ class GenericAdapter:
 
     def halt(self) -> None:
         """Halt the kernel."""
-        self.kernel.halt()
+        self.kernel.halt("operator halt")
 
 
 def create_generic_adapter(

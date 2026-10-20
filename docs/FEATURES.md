@@ -45,7 +45,7 @@ print(kernel.state)  # KernelState.IDLE (returned after processing)
 
 ### 2.2 Fail-Closed Semantics
 
-KERNELS **defaults to DENY** when policy is ambiguous or errors occur.
+KERNELS **defaults to DENY** when policy is ambiguous or errors occur. An ambiguous request is denied even if `fail_closed` is set to false. A tool call is denied unless `submit` receives a permit whose parameters are the parameters that run.
 
 **Principle:** When in doubt, deny.
 
@@ -56,12 +56,37 @@ KERNELS **defaults to DENY** when policy is ambiguous or errors occur.
 
 **Example:**
 ```python
-# Empty policy = deny all
-policy = JurisdictionPolicy()
-kernel = StrictKernel(kernel_id="secure", policy=policy)
+from kernels import StrictKernel
+from kernels.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
+from kernels.permits import PermitBuilder
 
-receipt = kernel.submit(request)
-print(receipt.decision)  # Decision.DENY
+kernel = StrictKernel()
+kernel.boot(KernelConfig(kernel_id="secure", variant="strict", clock=VirtualClock(0)))
+keyring = {"k": b"test-secret-key-32-bytes-long123"}
+kernel.set_keyring(keyring)
+params = {"text": "hello"}
+permit = (
+    PermitBuilder()
+    .issuer("operator")
+    .subject("agent")
+    .jurisdiction("default")
+    .action("echo")
+    .params(params)
+    .max_executions(1)
+    .valid_from_ms(0)
+    .valid_until_ms(10_000)
+    .proposal_hash("proposal-echo")
+    .build(keyring, "k")
+)
+request = KernelRequest(
+    request_id="req-1",
+    ts_ms=0,
+    actor="agent",
+    intent="Echo hello",
+    tool_call=ToolCall(name="echo", params=dict(params)),
+    params=dict(params),
+)
+receipt = kernel.submit(request, permit_token=permit)
 ```
 
 ---
@@ -75,6 +100,7 @@ Every request is recorded in an **immutable, hash-chained ledger**.
 - Hash-chained (tamper-evident)
 - Externally verifiable
 - Complete history
+- Process memory only. The reference ledger does not write a file and does not fsync. Export the bundle to keep it.
 
 **Example:**
 ```python

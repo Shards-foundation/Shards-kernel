@@ -53,7 +53,7 @@ import os
 from kernels.common.types import KernelConfig, VirtualClock
 from kernels.variants.strict_kernel import StrictKernel
 from kernels.integrations.langgraph_adapter import LangGraphAdapter
-from kernels.permits import PermitBuilder
+from _permit import issue_permit
 
 
 # ============================================================================
@@ -62,7 +62,7 @@ from kernels.permits import PermitBuilder
 
 
 def validate_order(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate order details (LOW RISK - no permits needed)."""
+    """Validate order details. The caller supplies a permit for this state."""
     print("\n📋 VALIDATING ORDER:")
     print(f"   Order ID: {state.get('order_id')}")
     print(f"   Total: ${state.get('total_price', 0)}")
@@ -162,7 +162,7 @@ def main():
     print("Scenario: E-commerce order processing workflow")
     print()
     print("Workflow Steps:")
-    print("  1. Validate order (LOW RISK - no permit)")
+    print("  1. Validate order (permit bound to the current state)")
     print("  2. Process payment (HIGH RISK - permit required)")
     print("  3. Update inventory (HIGH RISK - permit required)")
     print("  4. Send confirmation (MEDIUM RISK - permit required)")
@@ -253,7 +253,7 @@ def main():
     print("Step 3: Wrap workflow nodes with governance")
     print("-" * 80)
 
-    # Low risk nodes (no permits)
+    # Every node is authorised by a permit for the state it receives
     governed_validate = adapter.wrap_node(
         "validate_order",
         validate_order,
@@ -339,10 +339,20 @@ def main():
     # Step 5: Execute workflow (validate order)
     # ========================================================================
 
-    print("Step 5: Execute workflow step 1 - Validate order (no permit needed)")
+    print("Step 5: Execute workflow step 1 - Validate order")
     print("-" * 80)
 
-    workflow_state = governed_validate(workflow_state)
+    workflow_state = governed_validate(
+        workflow_state,
+        permit_token=issue_permit(
+            keyring,
+            "workflow-operator-2026",
+            subject="ecommerce-workflow",
+            action="validate_order",
+            params=dict(workflow_state),
+            issuer="operator@company.com",
+        ),
+    )
 
     print(f"✓ Order validated: {workflow_state['order_validated']}")
     if workflow_state.get("validation_errors"):
@@ -373,65 +383,17 @@ def main():
     print("Step 7: Execute workflow WITH valid permits")
     print("-" * 80)
 
-    # Create permits for each high-risk operation
-    payment_permit = (
-        PermitBuilder()
-        .issuer("operator@company.com")
-        .subject("ecommerce-workflow")
-        .jurisdiction("default")
-        .action("process_payment")
-        .params({"total_price": 200.0, "payment_method": "credit_card"})
-        .max_executions(1)
-        .valid_from_ms(0)
-        .valid_until_ms(10000000)
-        .build(keyring, "workflow-operator-2026")
-    )
-
-    inventory_permit = (
-        PermitBuilder()
-        .issuer("operator@company.com")
-        .subject("ecommerce-workflow")
-        .jurisdiction("default")
-        .action("update_inventory")
-        .params({})  # Complex state, don't match exact params
-        .max_executions(1)
-        .valid_from_ms(0)
-        .valid_until_ms(10000000)
-        .build(keyring, "workflow-operator-2026")
-    )
-
-    confirmation_permit = (
-        PermitBuilder()
-        .issuer("operator@company.com")
-        .subject("ecommerce-workflow")
-        .jurisdiction("default")
-        .action("send_confirmation")
-        .params({"customer_email": "customer@example.com", "order_id": "ORD-2026-001"})
-        .max_executions(1)
-        .valid_from_ms(0)
-        .valid_until_ms(10000000)
-        .build(keyring, "workflow-operator-2026")
-    )
-
-    shipping_permit = (
-        PermitBuilder()
-        .issuer("operator@company.com")
-        .subject("ecommerce-workflow")
-        .jurisdiction("default")
-        .action("ship_order")
-        .params(
-            {
-                "order_id": "ORD-2026-001",
-                "shipping_address": "123 Main St, City, State 12345",
-            }
+    def state_permit(action: str, state: dict):
+        return issue_permit(
+            keyring,
+            "workflow-operator-2026",
+            subject="ecommerce-workflow",
+            action=action,
+            params=dict(state),
+            issuer="operator@company.com",
         )
-        .max_executions(1)
-        .valid_from_ms(0)
-        .valid_until_ms(10000000)
-        .build(keyring, "workflow-operator-2026")
-    )
 
-    print("✓ Permits issued for workflow steps:")
+    print("✓ Each step is authorised for the state it will receive:")
     print("  - process_payment")
     print("  - update_inventory")
     print("  - send_confirmation")
@@ -443,25 +405,35 @@ def main():
     print()
 
     # Step 2: Process payment
-    workflow_state = governed_payment(workflow_state, permit_token=payment_permit)
+    workflow_state = governed_payment(
+        workflow_state,
+        permit_token=state_permit("process_payment", workflow_state),
+    )
     print(f"✓ Payment processed: {workflow_state['payment_processed']}")
     print()
 
     # Step 3: Update inventory
-    workflow_state = governed_inventory(workflow_state, permit_token=inventory_permit)
+    workflow_state = governed_inventory(
+        workflow_state,
+        permit_token=state_permit("update_inventory", workflow_state),
+    )
     print(f"✓ Inventory updated: {workflow_state['inventory_updated']}")
     print(f"  New inventory: {workflow_state['inventory']}")
     print()
 
     # Step 4: Send confirmation
     workflow_state = governed_confirmation(
-        workflow_state, permit_token=confirmation_permit
+        workflow_state,
+        permit_token=state_permit("send_confirmation", workflow_state),
     )
     print(f"✓ Confirmation sent: {workflow_state['confirmation_sent']}")
     print()
 
     # Step 5: Ship order
-    workflow_state = governed_shipping(workflow_state, permit_token=shipping_permit)
+    workflow_state = governed_shipping(
+        workflow_state,
+        permit_token=state_permit("ship_order", workflow_state),
+    )
     print(f"✓ Order shipped: {workflow_state['order_shipped']}")
     print()
 

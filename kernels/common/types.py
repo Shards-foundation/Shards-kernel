@@ -186,6 +186,8 @@ class KernelConfig:
 
     kernel_id: str
     variant: str
+    # Retained for compatibility. Ambiguous requests are always denied;
+    # setting this to False does not authorise them.
     fail_closed: bool = True
     require_jurisdiction: bool = True
     require_audit: bool = True
