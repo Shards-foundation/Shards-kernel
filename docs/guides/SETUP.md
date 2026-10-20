@@ -57,7 +57,14 @@ python -m kernels info
 
 ### 2.2 PyPI
 
-A PyPI release is pending. The PyPI project `kernels` belongs to a different package. Do not run `pip install kernels`.
+The distribution name is `shards-kernel`. After it is published:
+
+```bash
+python -m pip install shards-kernel
+python -c "import kernels"
+```
+
+A PyPI release is pending, so that command is not published yet. Do not run `pip install kernels`. That name belongs to a different package. The import package in this repository remains `kernels`.
 
 ### 2.3 From GitHub
 
