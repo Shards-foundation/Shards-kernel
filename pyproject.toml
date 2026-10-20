@@ -35,6 +35,15 @@ Repository = "https://github.com/Shards-foundation/kernels"
 Documentation = "https://github.com/Shards-foundation/kernels/tree/main/docs"
 Changelog = "https://github.com/Shards-foundation/kernels/blob/main/CHANGELOG.md"
 
+[project.optional-dependencies]
+# Test and lint tools only. The installed runtime package has no dependencies.
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "hypothesis>=6",
+    "ruff==0.14.11",
+]
+
 [tool.setuptools.dynamic]
 version = {attr = "kernels._version.__version__"}
 

@@ -4,7 +4,7 @@
 
 ## 1. State Definitions
 
-The kernel state machine defines exactly seven states. A conforming implementation MUST support all states and MUST NOT define additional states.
+The kernel state machine defines eight states: BOOTING, IDLE, VALIDATING, ARBITRATING, EXECUTING, AUDITING, COMPLETED, and HALTED. A conforming implementation MUST support all of them. HALTED is the only terminal state. COMPLETED records that one request has finished; it is not terminal, and the kernel returns to IDLE unless it halts.
 
 ### 1.1 BOOTING
 
@@ -27,7 +27,7 @@ The kernel state machine defines exactly seven states. A conforming implementati
 
 **Entry Conditions:**
 - Successful boot from BOOTING
-- Successful audit completion from AUDITING
+- Request finished from COMPLETED
 
 **Exit Conditions:**
 - Request received → VALIDATING
@@ -61,10 +61,12 @@ The kernel state machine defines exactly seven states. A conforming implementati
 - Validation passed from VALIDATING
 
 **Exit Conditions:**
-- Decision ALLOW with tool_call → EXECUTING
+- Decision ALLOW with tool_call → AUDITING, so an intent record is durable before execution
 - Decision ALLOW without tool_call → AUDITING
 - Decision DENY → AUDITING
 - Decision HALT → HALTED
+
+The transition matrix still lists ARBITRATING → EXECUTING. The kernel does not use that edge. EXECUTING is reached only from AUDITING, after the intent record has been appended.
 
 **Invariants:**
 - Arbitration MUST evaluate all policy rules
@@ -75,7 +77,7 @@ The kernel state machine defines exactly seven states. A conforming implementati
 **Description:** Kernel is dispatching tool call and capturing result.
 
 **Entry Conditions:**
-- Decision ALLOW with tool_call from ARBITRATING
+- Intent audit record appended from AUDITING, and the parameters about to run are the parameters the permit authorised
 
 **Exit Conditions:**
 - Execution complete → AUDITING
@@ -96,14 +98,31 @@ The kernel state machine defines exactly seven states. A conforming implementati
 - Execution complete from EXECUTING
 
 **Exit Conditions:**
-- Audit entry written → IDLE
+- Intent record appended and a tool is authorised → EXECUTING
+- Outcome record appended → COMPLETED
 - Audit failure → HALTED
 
 **Invariants:**
-- Audit entry MUST be written before state change
-- Audit entry MUST include all required fields
+- An intent record MUST be appended before EXECUTING. If that append fails, the tool MUST NOT run.
+- The outcome record MUST describe the parameters that actually executed.
+- Audit failure MUST halt the kernel. AUDITING does not return directly to IDLE.
 
-### 1.7 HALTED
+### 1.7 COMPLETED
+
+**Description:** The request has been audited. The kernel is about to accept another request.
+
+**Entry Conditions:**
+- Outcome audit record appended from AUDITING
+
+**Exit Conditions:**
+- Request finished → IDLE
+- Halt command or fatal error → HALTED
+
+**Invariants:**
+- COMPLETED is not a terminal state
+- The kernel MUST NOT accept a new request until it has returned to IDLE
+
+### 1.8 HALTED
 
 **Description:** Terminal state, no further operations permitted.
 
@@ -123,15 +142,16 @@ The kernel state machine defines exactly seven states. A conforming implementati
 
 The following matrix defines all allowed transitions. An X indicates the transition is allowed.
 
-| From \ To    | BOOTING | IDLE | VALIDATING | ARBITRATING | EXECUTING | AUDITING | HALTED |
-|--------------|---------|------|------------|-------------|-----------|----------|--------|
-| BOOTING      | -       | X    | -          | -           | -         | -        | X      |
-| IDLE         | -       | -    | X          | -           | -         | -        | X      |
-| VALIDATING   | -       | -    | -          | X           | -         | X        | X      |
-| ARBITRATING  | -       | -    | -          | -           | X         | X        | X      |
-| EXECUTING    | -       | -    | -          | -           | -         | X        | X      |
-| AUDITING     | -       | X    | -          | -           | -         | -        | X      |
-| HALTED       | -       | -    | -          | -           | -         | -        | -      |
+| From \ To    | BOOTING | IDLE | VALIDATING | ARBITRATING | EXECUTING | AUDITING | COMPLETED | HALTED |
+|--------------|---------|------|------------|-------------|-----------|----------|-----------|--------|
+| BOOTING      | -       | X    | -          | -           | -         | -        | -         | X      |
+| IDLE         | -       | -    | X          | -           | -         | -        | -         | X      |
+| VALIDATING   | -       | -    | -          | X           | -         | X        | -         | X      |
+| ARBITRATING  | -       | -    | -          | -           | X         | X        | -         | X      |
+| EXECUTING    | -       | -    | -          | -           | -         | X        | -         | X      |
+| AUDITING     | -       | -    | -          | -           | X         | -        | X         | X      |
+| COMPLETED    | -       | X    | -          | -           | -         | -        | -         | X      |
+| HALTED       | -       | -    | -          | -           | -         | -        | -         | -      |
 
 ## 3. Transition Rules
 
@@ -180,16 +200,25 @@ The following matrix defines all allowed transitions. An X indicates the transit
          │  │ARBITRATING │────────────────────────┤
          │  └─────┬──────┘     HALT               │
          │        │                               │
-         │        │ ALLOW + tool                  │
+         │        │ ALLOW                         │
+         │        ▼                               │
+         │  ┌────────────┐     intent appended    │
+         │  │  AUDITING  │────────────────────────┤
+         │  └─────┬──────┘                        │
+         │        │ tool authorised               │
          │        ▼                               │
          │  ┌────────────┐                        │
          │  │ EXECUTING  │────────────────────────┤
          │  └─────┬──────┘     failure            │
          │        │                               │
-         │        │ complete                      │
+         │        │ outcome appended              │
          │        ▼                               │
          │  ┌────────────┐                        │
-         └──│  AUDITING  │────────────────────────┘
+         │  │  AUDITING  │                        │
+         │  └─────┬──────┘                        │
+         │        ▼                               │
+         │  ┌────────────┐                        │
+         └──│ COMPLETED  │────────────────────────┘
             └────────────┘     failure
 ```
 

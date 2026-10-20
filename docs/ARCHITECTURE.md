@@ -171,15 +171,15 @@ Variants implement the `Kernel` protocol with different enforcement postures.
 7. Check variant requirements
 8. Make decision: ALLOW | DENY | HALT
 9. If ALLOW and tool_call present:
-   a. State: ARBITRATING → EXECUTING
-   b. Dispatch tool call
-   c. Capture result
+   a. State: ARBITRATING → AUDITING
+   b. Append an intent audit record. If this append fails, the tool does not run.
+   c. State: AUDITING → EXECUTING
+   d. Dispatch the tool with the parameters the permit authorised
+   e. Capture the result
 10. State: → AUDITING
-11. Create audit entry
-12. Compute entry hash
-13. Append to ledger
-14. State: AUDITING → IDLE
-15. Return receipt
+11. Append the outcome audit record for the parameters that actually ran
+12. State: AUDITING → COMPLETED → IDLE
+13. Return receipt
 ```
 
 ### Evidence Export

@@ -49,6 +49,10 @@ class PermissiveKernel(BaseKernel):
             hash_alg=config.hash_alg,
             max_param_bytes=config.max_param_bytes,
             max_intent_length=8192,  # More permissive
+            jurisdiction=config.jurisdiction,
+            allow_insecure_unpermitted_execution=(
+                config.allow_insecure_unpermitted_execution
+            ),
         )
         super().boot(permissive_config)
 

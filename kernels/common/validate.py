@@ -75,11 +75,13 @@ def validate_tool_call(tool_call: Union[ToolCall, dict[str, Any]]) -> list[str]:
 
         if "params" in tool_call and not isinstance(tool_call.get("params"), dict):
             errors.append("tool_call.params must be a dictionary")
-    else:
+    elif isinstance(tool_call, ToolCall):
         if not tool_call.name:
             errors.append("tool_call.name is required")
         elif not isinstance(tool_call.name, str):
             errors.append("tool_call.name must be a string")
+    else:
+        errors.append("tool_call has invalid structure")
 
     return errors
 
@@ -117,8 +119,11 @@ def check_ambiguity(
         if isinstance(request.tool_call, dict):
             if not request.tool_call.get("name"):
                 errors.append("Tool call with empty name is ambiguous")
-        elif not request.tool_call.name:
-            errors.append("Tool call with empty name is ambiguous")
+        elif isinstance(request.tool_call, ToolCall):
+            if not request.tool_call.name:
+                errors.append("Tool call with empty name is ambiguous")
+        else:
+            errors.append("Tool call with invalid structure is ambiguous")
 
     # Params not being a dict is ambiguous
     if request.params is not None and not isinstance(request.params, dict):

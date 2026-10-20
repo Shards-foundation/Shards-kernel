@@ -4,6 +4,7 @@ All kernel variants must implement the Kernel protocol. The BaseKernel
 provides common functionality that variants can extend.
 """
 
+import copy
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional
 
@@ -19,6 +20,7 @@ from kernels.common.types import (
     ToolCall,
 )
 from kernels.common.errors import (
+    AuditError,
     BootError,
     StateError,
 )
@@ -28,7 +30,7 @@ from kernels.jurisdiction.policy import JurisdictionPolicy
 from kernels.jurisdiction.rules import evaluate_policy
 from kernels.state.machine import StateMachine
 from kernels.execution.tools import create_default_registry
-from kernels.execution.dispatcher import Dispatcher
+from kernels.execution.dispatcher import Dispatcher, resolve_bound_params
 from kernels.core.runtime import (
     ExecutionContext,
     KernelRuntime,
@@ -38,6 +40,7 @@ from kernels.core.runtime import (
 from kernels.permits import (
     NonceRegistry,
     PermitToken,
+    _params_satisfy_permit,
     verify_permit,
 )
 
@@ -135,6 +138,10 @@ class BaseKernel(Kernel):
         self._pending_result: Optional[Any] = None
         self._nonce_registry: NonceRegistry = NonceRegistry()
         self._keyring: dict[str, bytes] = {}  # HMAC keys for permit verification
+        self._transitions: list[tuple[KernelState, KernelState]] = []
+        # Set only after a permit (or the explicit insecure opt-out) has bound
+        # the parameters that EXECUTING is allowed to use.
+        self._execution_authorised: bool = False
 
     @property
     def config(self) -> KernelConfig:
@@ -166,49 +173,57 @@ class BaseKernel(Kernel):
         """
         self._keyring = keyring
 
-    def load_ledger(self, evidence: EvidenceBundle) -> None:
-        """Load ledger from evidence bundle and rebuild nonce registry.
+    @property
+    def transition_log(self) -> tuple[tuple[KernelState, KernelState], ...]:
+        """Return state transitions observed since boot, oldest first."""
+        return tuple(self._transitions)
 
-        This enables cross-restart replay protection by reconstructing the
-        nonce registry from audit entries. Entries are processed in deterministic
-        order by ledger_seq to ensure consistent reconstruction.
+    def load_ledger(self, evidence: EvidenceBundle) -> None:
+        """Load a ledger whose hash chain verifies, then rebuild nonce use.
+
+        A bundle whose chain does not recompute is refused and the kernel is
+        halted. Entries are not installed in that case, so a forged bundle
+        cannot seed the nonce registry or the root hash.
+
+        Successful loads count a permit use for ``INTENT`` records and for
+        legacy ``ALLOW`` records. Outcome records are not counted again.
 
         Args:
             evidence: Evidence bundle containing ledger entries.
 
         Raises:
-            StateError: If kernel is not booted.
+            StateError: If the kernel is not booted or is already halted.
+            AuditError: If the hash chain does not verify. The kernel is
+                HALTED before this is raised.
         """
+        if self._ledger is None or self._state_machine is None:
+            raise StateError("Kernel not booted")
+        self._state_machine.assert_not_halted()
+
+        try:
+            self._ledger.load_verified(evidence.ledger_entries, evidence.root_hash)
+        except AuditError:
+            self._halt_on_fault(
+                "Refusing to load a ledger whose hash chain does not verify"
+            )
+            raise
+
+        self._rebuild_nonce_registry()
+
+    def _rebuild_nonce_registry(self) -> None:
+        """Rebuild nonce use from the verified ledger."""
         if self._ledger is None:
             raise StateError("Kernel not booted")
-
-        # Sort entries by ledger_seq for deterministic ordering
-        # This ensures tie-breaking when timestamps are identical
-        sorted_entries = sorted(evidence.ledger_entries, key=lambda e: e.ledger_seq)
-
-        # Rebuild ledger
-        for entry in sorted_entries:
-            # Re-add entry to ledger (this updates hash chain)
-            self._ledger._entries.append(entry)
-            self._ledger._last_hash = entry.entry_hash
-
-        # Restore sequence counter from last entry
-        if sorted_entries:
-            self._ledger._next_seq = sorted_entries[-1].ledger_seq + 1
-
-        # Rebuild nonce registry from entries with permit verification
-        # Must process in ledger_seq order to correctly reconstruct use_count
-        for entry in sorted_entries:
+        self._nonce_registry = NonceRegistry()
+        for entry in self._ledger.entries:
             if (
                 entry.permit_digest
-                and entry.permit_verification == "ALLOW"
+                and entry.permit_verification in ("INTENT", "ALLOW")
                 and entry.permit_nonce
                 and entry.permit_issuer
                 and entry.permit_subject
                 and entry.permit_max_executions is not None
             ):
-                # Reconstruct nonce usage by calling check_and_record
-                # This will mark the nonce as used in the registry
                 self._nonce_registry.check_and_record(
                     nonce=entry.permit_nonce,
                     issuer=entry.permit_issuer,
@@ -224,7 +239,12 @@ class BaseKernel(Kernel):
             raise BootError("Kernel already booted")
 
         self._config = config
-        self._state_machine = StateMachine(KernelState.BOOTING)
+        self._transitions = []
+        self._execution_authorised = False
+        self._state_machine = StateMachine(
+            KernelState.BOOTING,
+            on_transition=self._record_transition,
+        )
         self._ledger = AuditLedger(config.kernel_id, config.variant)
         self._policy = self._policy or JurisdictionPolicy.default()
         self._dispatcher = Dispatcher(create_default_registry())
@@ -242,24 +262,98 @@ class BaseKernel(Kernel):
             return KernelState.BOOTING
         return self._state_machine.state
 
+    def _record_transition(self, state_from: KernelState, state_to: KernelState) -> None:
+        """Remember a transition for tests and diagnostics."""
+        self._transitions.append((state_from, state_to))
+
+    def _halt_on_fault(self, reason: str) -> None:
+        """Move to HALTED after an unexpected failure. Never raises."""
+        if self._state_machine is None:
+            return
+        state_from = self._state_machine.state
+        if not self._state_machine.is_halted:
+            try:
+                self._state_machine.halt()
+            except Exception:
+                return
+        if self._ledger is None or self._config is None:
+            return
+        try:
+            self._ledger.append(
+                request_id="HALT",
+                actor="SYSTEM",
+                intent=reason,
+                decision=Decision.HALT,
+                state_from=state_from,
+                state_to=KernelState.HALTED,
+                ts_ms=self.config.clock.now_ms(),
+                error=reason,
+                audit_phase="halt",
+            )
+        except Exception:
+            return
+
     def submit(
         self, request: KernelRequest, permit_token: Optional[PermitToken] = None
     ) -> KernelReceipt:
-        """Submit a request for processing."""
-        if self._state_machine is None:
-            raise StateError("Kernel not booted")
-        if self._dispatcher is None or self._ledger is None or self._runtime is None:
+        """Submit a request for processing.
+
+        An unexpected exception halts the kernel. A tool call is not run
+        unless its parameters were bound and an intent audit record was
+        appended first.
+        """
+        if (
+            self._state_machine is None
+            or self._dispatcher is None
+            or self._ledger is None
+            or self._runtime is None
+        ):
             raise StateError("Kernel not booted")
 
         self._state_machine.assert_not_halted()
         self._state_machine.assert_state(KernelState.IDLE)
+        self._execution_authorised = False
+        try:
+            return self._submit_bound(request, permit_token)
+        except Exception:
+            self._halt_on_fault("Unhandled exception during request processing")
+            raise
 
-        state_from = self._state_machine.state
+    def _tool_parts(
+        self, request: KernelRequest
+    ) -> tuple[Optional[str], dict[str, Any], Optional[str]]:
+        """Return ``(tool_name, tool_params, error)`` for a request."""
+        tool_call = request.tool_call
+        if tool_call is None:
+            return None, {}, None
+        if isinstance(tool_call, ToolCall):
+            params = tool_call.params
+            name: Optional[str] = tool_call.name
+        elif isinstance(tool_call, dict):
+            params = tool_call.get("params", {})
+            name = tool_call.get("name") or ""
+        else:
+            return None, {}, "Invalid tool call structure"
+        if not isinstance(params, dict):
+            return name, {}, "PARAM_BINDING_MISMATCH: tool_call.params must be a dictionary"
+        return name, params, None
 
-        # Transition to VALIDATING
-        self._state_machine.transition(KernelState.VALIDATING)
+    def _submit_bound(
+        self, request: KernelRequest, permit_token: Optional[PermitToken]
+    ) -> KernelReceipt:
+        """Process one request. Callers wrap this so faults halt the kernel."""
+        if (
+            self._state_machine is None
+            or self._ledger is None
+            or self._dispatcher is None
+            or self._runtime is None
+        ):
+            raise StateError("Kernel not booted")
 
-        # Validate request structure
+        machine = self._state_machine
+        state_from = machine.state
+        machine.transition(KernelState.VALIDATING)
+
         validation_errors = validate_request(request)
         if validation_errors:
             return self._deny_request(
@@ -268,30 +362,40 @@ class BaseKernel(Kernel):
                 f"Validation failed: {'; '.join(validation_errors)}",
             )
 
-        # Check ambiguity
         ambiguity_errors = check_ambiguity(
             request,
             max_intent_length=self.config.max_intent_length,
             strict=self._is_strict_ambiguity(),
         )
-        if ambiguity_errors:
-            if self.config.fail_closed:
+        if ambiguity_errors and self.config.fail_closed:
+            return self._deny_request(
+                request,
+                state_from,
+                f"Ambiguity detected: {'; '.join(ambiguity_errors)}",
+            )
+
+        tool_name, tool_params, tool_error = self._tool_parts(request)
+        if tool_error:
+            return self._deny_request(request, state_from, tool_error)
+
+        canonical_params: Optional[dict[str, Any]] = None
+        if request.tool_call is not None:
+            canonical_params, bind_error = resolve_bound_params(request.params, tool_params)
+            if bind_error or canonical_params is None:
                 return self._deny_request(
                     request,
                     state_from,
-                    f"Ambiguity detected: {'; '.join(ambiguity_errors)}",
+                    bind_error or "PARAM_BINDING_MISMATCH",
                 )
 
-        # Permit verification (CRITICAL: Hard gate before execution)
-        permit_verification_result = None
         permit_digest = None
         proposal_hash = None
         permit_nonce = None
         permit_issuer = None
         permit_subject = None
         permit_max_executions = None
+        decision_envelope = None
 
-        # Check if permit is required
         if self._requires_permit(request):
             if permit_token is None:
                 return self._deny_permit(
@@ -300,16 +404,21 @@ class BaseKernel(Kernel):
                     "MISSING_PERMIT",
                     ["MISSING_PERMIT"],
                 )
+            if tool_name != permit_token.action:
+                return self._deny_permit(
+                    request,
+                    state_from,
+                    (
+                        "ACTION_TOOL_MISMATCH: permit authorises "
+                        f"'{permit_token.action}' but the tool is '{tool_name}'"
+                    ),
+                    ["ACTION_TOOL_MISMATCH"],
+                    permit_digest=permit_token.permit_id,
+                    proposal_hash=permit_token.proposal_hash,
+                )
 
-            # Verify permit
-            tool_name = request.tool_call.name if request.tool_call else None
-            request_params = request.params if request.params else {}
-
-            # Handle wildcard in allowed_tools
             allowed_actions = self.policy.allowed_tools
             if "*" in allowed_actions:
-                # Wildcard means all actions are allowed
-                # For permit verification, we create a set containing the specific action
                 allowed_actions = frozenset({permit_token.action, "*"})
 
             permit_verification_result = verify_permit(
@@ -317,54 +426,47 @@ class BaseKernel(Kernel):
                 keyring=self._keyring,
                 nonce_registry=self._nonce_registry,
                 current_time_ms=self.config.clock.now_ms(),
-                current_jurisdiction="default",  # TODO: Make this configurable
+                current_jurisdiction=self.config.jurisdiction,
                 allowed_actions=allowed_actions,
                 request_actor=request.actor,
-                request_params=request_params,
+                request_params=canonical_params or {},
+                request_evidence=request.evidence,
+                commit_use=False,
             )
-
             permit_digest = permit_token.permit_id
             proposal_hash = permit_token.proposal_hash
-            permit_nonce = permit_token.nonce  # For ledger-backed replay protection
-            permit_issuer = permit_token.issuer  # For nonce reconstruction
-            permit_subject = permit_token.subject  # For nonce reconstruction
-            permit_max_executions = (
-                permit_token.max_executions
-            )  # For nonce reconstruction
-
+            permit_nonce = permit_token.nonce
+            permit_issuer = permit_token.issuer
+            permit_subject = permit_token.subject
+            permit_max_executions = permit_token.max_executions
             if not permit_verification_result.is_allowed():
                 return self._deny_permit(
                     request,
                     state_from,
-                    f"Permit verification failed: {', '.join(permit_verification_result.reasons)}",
+                    "Permit verification failed: "
+                    + ", ".join(permit_verification_result.reasons),
                     permit_verification_result.reasons,
                     permit_digest=permit_digest,
                     proposal_hash=proposal_hash,
                 )
 
-            # Create DecisionEnvelope: bind verified permit to execution
-            # This prevents TOCTOU by making permit and params immutable
+            max_time = permit_token.constraints.get("max_time_ms")
+            forbidden = permit_token.constraints.get("forbidden_params", [])
             decision_envelope = DecisionEnvelope(
                 proposal_hash=permit_token.proposal_hash,
                 permit_digest=permit_token.permit_id,
-                constraints=permit_token.constraints,
-                max_time_ms=permit_token.constraints.get("max_time_ms"),
-                forbidden_params=tuple(
-                    permit_token.constraints.get("forbidden_params", [])
-                ),
-                tool_name=request.tool_call.name if request.tool_call else "",
-                params=request_params.copy(),  # Immutable snapshot
+                constraints=dict(permit_token.constraints),
+                max_time_ms=max_time if isinstance(max_time, int) else None,
+                forbidden_params=tuple(forbidden) if isinstance(forbidden, list) else tuple(),
+                tool_name=tool_name or "",
+                params=dict(canonical_params or {}),
                 decision=Decision.ALLOW,
                 verified_at_ms=self.config.clock.now_ms(),
                 actor=request.actor,
             )
-        else:
-            decision_envelope = None
 
-        # Transition to ARBITRATING
-        self._state_machine.transition(KernelState.ARBITRATING)
+        machine.transition(KernelState.ARBITRATING)
 
-        # Evaluate jurisdiction
         if self.config.require_jurisdiction:
             policy_result = evaluate_policy(request, self.policy)
             if not policy_result.allowed:
@@ -374,7 +476,6 @@ class BaseKernel(Kernel):
                     f"Jurisdiction denied: {'; '.join(policy_result.violations)}",
                 )
 
-        # Check variant-specific requirements
         variant_errors = self._check_variant_requirements(request)
         if variant_errors:
             return self._deny_request(
@@ -383,119 +484,202 @@ class BaseKernel(Kernel):
                 f"Variant requirements not met: {'; '.join(variant_errors)}",
             )
 
-        # Decide: ALLOW
-        decision = Decision.ALLOW
-        tool_result = None
-
-        # Execute if tool_call present
-        if request.tool_call is not None:
-            # If we have a decision envelope, verify that request hasn't changed
-            # This prevents TOCTOU bugs where request is mutated between validation and execution
-            if decision_envelope is not None:
-                if request.tool_call.name != decision_envelope.tool_name:
-                    return self._fail_request(
-                        request,
-                        state_from,
-                        (
-                            "TOCTOU detected: tool_name mismatch "
-                            f"(envelope: {decision_envelope.tool_name}, "
-                            f"request: {request.tool_call.name})"
-                        ),
-                    )
-                # Params may have been normalized, so we don't do strict equality check
-                # The envelope proves what was verified.
-                # The params hash in audit proves what was executed.
-
-            self._state_machine.transition(KernelState.EXECUTING)
-            context = ExecutionContext(
-                trace_id=request.request_id,
-                actor=request.actor,
-                state_ref=self._state_machine.state.value,
-                policy_ref="jurisdiction:active",
-                policy_snapshot=(
-                    f"actors={sorted(self.policy.allowed_actors)};"
-                    f"tools={sorted(self.policy.allowed_tools)}"
-                ),
-                idempotency_key=request.request_id,
-                max_time_ms=(
-                    decision_envelope.max_time_ms
-                    if decision_envelope is not None
-                    else None
-                ),
-                max_calls=1,
-                call_index=1,
+        if request.tool_call is None:
+            machine.transition(KernelState.AUDITING)
+            entry = self._append_record(
+                request,
+                state_from=state_from,
+                decision=Decision.ALLOW,
+                state_to=KernelState.COMPLETED,
+                audit_phase="outcome",
             )
-            runtime_result = self._runtime.execute(request.tool_call, context)
-            if not runtime_result.dispatcher_result.success:
-                return self._fail_request(
+            self._complete_request()
+            return self._receipt(
+                request,
+                state_from,
+                ReceiptStatus.ACCEPTED,
+                Decision.ALLOW,
+                entry.entry_hash,
+                None,
+            )
+
+        live_name, live_params, live_error = self._tool_parts(request)
+        rebound, rebound_error = resolve_bound_params(
+            request.params if live_error is None else None,
+            live_params,
+        )
+        if (
+            live_error
+            or rebound_error
+            or live_name != tool_name
+            or rebound != canonical_params
+        ):
+            return self._deny_request(
+                request,
+                state_from,
+                rebound_error or live_error or "PARAM_BINDING_MISMATCH",
+            )
+
+        if permit_token is not None:
+            if tool_name != permit_token.action or not _params_satisfy_permit(
+                canonical_params or {}, permit_token.params
+            ):
+                return self._deny_permit(
                     request,
                     state_from,
-                    f"Tool execution failed: {runtime_result.dispatcher_result.error}",
+                    "PARAM_BINDING_MISMATCH: execution parameters are not those "
+                    "the permit authorised",
+                    ["PARAM_BINDING_MISMATCH"],
+                    permit_digest=permit_digest,
+                    proposal_hash=proposal_hash,
                 )
-            tool_result = runtime_result.dispatcher_result.result
+        elif not self.config.allow_insecure_unpermitted_execution:
+            return self._deny_permit(
+                request,
+                state_from,
+                "MISSING_PERMIT",
+                ["MISSING_PERMIT"],
+            )
 
-        # Audit
-        self._state_machine.transition(KernelState.AUDITING)
-
-        tool_name = None
-        if request.tool_call is not None:
-            if isinstance(request.tool_call, ToolCall):
-                tool_name = request.tool_call.name
-            else:
-                tool_name = request.tool_call.get("name")
-
-        entry = self._ledger.append(
+        # The intent record is appended before the tool is invoked. If this
+        # append fails, the exception propagates and the tool does not run.
+        machine.transition(KernelState.AUDITING)
+        self._ledger.append(
             request_id=request.request_id,
             actor=request.actor,
             intent=request.intent,
-            decision=decision,
+            decision=Decision.ALLOW,
             state_from=state_from,
-            state_to=KernelState.IDLE,
+            state_to=KernelState.EXECUTING,
             ts_ms=self.config.clock.now_ms(),
             tool_name=tool_name,
-            params=request.params,
+            params=canonical_params,
             evidence=request.evidence,
             permit_digest=permit_digest,
-            permit_verification="ALLOW" if permit_verification_result else None,
+            permit_verification="INTENT" if permit_token is not None else None,
             permit_denial_reasons=tuple(),
             proposal_hash=proposal_hash,
             permit_nonce=permit_nonce,
             permit_issuer=permit_issuer,
             permit_subject=permit_subject,
             permit_max_executions=permit_max_executions,
+            audit_phase="intent",
         )
 
-        # Return to IDLE
-        self._state_machine.transition(KernelState.IDLE)
+        if permit_token is not None:
+            consumed = self._nonce_registry.check_and_record(
+                nonce=permit_token.nonce,
+                issuer=permit_token.issuer,
+                subject=permit_token.subject,
+                permit_id=permit_token.permit_id,
+                max_executions=permit_token.max_executions,
+                current_time_ms=self.config.clock.now_ms(),
+            )
+            if not consumed:
+                return self._fail_request(
+                    request,
+                    state_from,
+                    "REPLAY_DETECTED",
+                    params=canonical_params,
+                    tool_name=tool_name,
+                    permit_digest=permit_digest,
+                    proposal_hash=proposal_hash,
+                    denial_reasons=["REPLAY_DETECTED"],
+                )
 
-        return KernelReceipt(
-            request_id=request.request_id,
-            status=ReceiptStatus.ACCEPTED,
+        self._execution_authorised = True
+        self._transition_executing()
+        context = ExecutionContext(
+            trace_id=request.request_id,
+            actor=request.actor,
+            state_ref=machine.state.value,
+            policy_ref="jurisdiction:active",
+            policy_snapshot=(
+                f"actors={sorted(self.policy.allowed_actors)};"
+                f"tools={sorted(self.policy.allowed_tools)}"
+            ),
+            idempotency_key=request.request_id,
+            max_time_ms=(
+                decision_envelope.max_time_ms if decision_envelope is not None else None
+            ),
+            max_calls=1,
+            call_index=1,
+        )
+        runtime_result = self._runtime.execute(
+            ToolCall(name=tool_name or "", params=copy.deepcopy(canonical_params)),
+            context,
+            authorised_params=copy.deepcopy(canonical_params),
+            authorised_tool_name=tool_name,
+        )
+        if not runtime_result.dispatcher_result.success:
+            return self._fail_request(
+                request,
+                state_from,
+                f"Tool execution failed: {runtime_result.dispatcher_result.error}",
+                params=canonical_params,
+                tool_name=tool_name,
+                permit_digest=permit_digest,
+                proposal_hash=proposal_hash,
+            )
+
+        machine.transition(KernelState.AUDITING)
+        entry = self._append_record(
+            request,
             state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
-            decision=decision,
-            evidence_hash=entry.entry_hash,
-            tool_result=tool_result,
+            decision=Decision.ALLOW,
+            state_to=KernelState.COMPLETED,
+            audit_phase="outcome",
+            tool_name=tool_name,
+            params=canonical_params,
+            permit_digest=permit_digest,
+            permit_verification="OUTCOME" if permit_token is not None else None,
+            proposal_hash=proposal_hash,
+            permit_nonce=permit_nonce,
+            permit_issuer=permit_issuer,
+            permit_subject=permit_subject,
+            permit_max_executions=permit_max_executions,
         )
+        self._complete_request()
+        return self._receipt(
+            request,
+            state_from,
+            ReceiptStatus.ACCEPTED,
+            Decision.ALLOW,
+            entry.entry_hash,
+            runtime_result.dispatcher_result.result,
+        )
+
+    def _transition_executing(self) -> None:
+        """Enter EXECUTING only when parameters have been bound."""
+        if self._state_machine is None:
+            raise StateError("Kernel not booted")
+        if not self._execution_authorised:
+            raise StateError("Refusing EXECUTING without a bound authorisation")
+        self._state_machine.transition(KernelState.EXECUTING)
+
+    def _complete_request(self) -> None:
+        """Leave AUDITING through COMPLETED and return to IDLE."""
+        if self._state_machine is None:
+            raise StateError("Kernel not booted")
+        if self._state_machine.state == KernelState.AUDITING:
+            self._state_machine.transition(KernelState.COMPLETED)
+        if self._state_machine.state != KernelState.COMPLETED:
+            raise StateError(
+                f"Cannot complete request from {self._state_machine.state.value}"
+            )
+        self._state_machine.transition(KernelState.IDLE)
 
     def step(self) -> Optional[KernelReceipt]:
         """Advance the kernel by one step."""
-        # Base implementation: no pending work
         return None
 
     def halt(self, reason: str) -> KernelReceipt:
         """Halt the kernel."""
-        if self._state_machine is None:
-            raise StateError("Kernel not booted")
-
-        if self._ledger is None:
+        if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
 
         state_from = self._state_machine.state
         self._state_machine.halt()
-
-        # Audit the halt
         entry = self._ledger.append(
             request_id="HALT",
             actor="SYSTEM",
@@ -504,8 +688,8 @@ class BaseKernel(Kernel):
             state_from=state_from,
             state_to=KernelState.HALTED,
             ts_ms=self.config.clock.now_ms(),
+            audit_phase="halt",
         )
-
         return KernelReceipt(
             request_id="HALT",
             status=ReceiptStatus.ACCEPTED,
@@ -522,6 +706,75 @@ class BaseKernel(Kernel):
             raise StateError("Kernel not booted")
         return self._ledger.export(self.config.clock.now_ms())
 
+    def _append_record(
+        self,
+        request: KernelRequest,
+        *,
+        state_from: KernelState,
+        decision: Decision,
+        state_to: KernelState,
+        audit_phase: str,
+        tool_name: Optional[str] = None,
+        params: Optional[dict[str, Any]] = None,
+        error: Optional[str] = None,
+        permit_digest: Optional[str] = None,
+        permit_verification: Optional[str] = None,
+        permit_denial_reasons: Optional[tuple[str, ...]] = None,
+        proposal_hash: Optional[str] = None,
+        permit_nonce: Optional[str] = None,
+        permit_issuer: Optional[str] = None,
+        permit_subject: Optional[str] = None,
+        permit_max_executions: Optional[int] = None,
+    ) -> Any:
+        """Append one audit record. The ledger hashes ``params`` as given."""
+        if self._ledger is None:
+            raise StateError("Kernel not booted")
+        return self._ledger.append(
+            request_id=request.request_id,
+            actor=request.actor,
+            intent=request.intent,
+            decision=decision,
+            state_from=state_from,
+            state_to=state_to,
+            ts_ms=self.config.clock.now_ms(),
+            tool_name=tool_name,
+            params=params,
+            evidence=request.evidence,
+            error=error,
+            permit_digest=permit_digest,
+            permit_verification=permit_verification,
+            permit_denial_reasons=permit_denial_reasons,
+            proposal_hash=proposal_hash,
+            permit_nonce=permit_nonce,
+            permit_issuer=permit_issuer,
+            permit_subject=permit_subject,
+            permit_max_executions=permit_max_executions,
+            audit_phase=audit_phase,
+        )
+
+    def _receipt(
+        self,
+        request: KernelRequest,
+        state_from: KernelState,
+        status: ReceiptStatus,
+        decision: Decision,
+        evidence_hash: Optional[str],
+        tool_result: Any,
+        error: Optional[str] = None,
+    ) -> KernelReceipt:
+        """Build a receipt. The kernel is IDLE again unless it halted."""
+        return KernelReceipt(
+            request_id=request.request_id,
+            status=status,
+            state_from=state_from,
+            state_to=KernelState.IDLE,
+            ts_ms=self.config.clock.now_ms(),
+            decision=decision,
+            error=error,
+            evidence_hash=evidence_hash,
+            tool_result=tool_result,
+        )
+
     def _deny_request(
         self,
         request: KernelRequest,
@@ -531,34 +784,25 @@ class BaseKernel(Kernel):
         """Create a DENY receipt and audit entry."""
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
-
-        # Transition to AUDITING
         if self._state_machine.state != KernelState.AUDITING:
             self._state_machine.transition(KernelState.AUDITING)
-
-        entry = self._ledger.append(
-            request_id=request.request_id,
-            actor=request.actor,
-            intent=request.intent,
-            decision=Decision.DENY,
+        entry = self._append_record(
+            request,
             state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
+            decision=Decision.DENY,
+            state_to=KernelState.COMPLETED,
+            audit_phase="outcome",
             error=error,
         )
-
-        # Return to IDLE
-        self._state_machine.transition(KernelState.IDLE)
-
-        return KernelReceipt(
-            request_id=request.request_id,
-            status=ReceiptStatus.REJECTED,
-            state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
-            decision=Decision.DENY,
+        self._complete_request()
+        return self._receipt(
+            request,
+            state_from,
+            ReceiptStatus.REJECTED,
+            Decision.DENY,
+            entry.entry_hash,
+            None,
             error=error,
-            evidence_hash=entry.entry_hash,
         )
 
     def _fail_request(
@@ -566,38 +810,41 @@ class BaseKernel(Kernel):
         request: KernelRequest,
         state_from: KernelState,
         error: str,
+        *,
+        params: Optional[dict[str, Any]] = None,
+        tool_name: Optional[str] = None,
+        permit_digest: Optional[str] = None,
+        proposal_hash: Optional[str] = None,
+        denial_reasons: Optional[list[str]] = None,
     ) -> KernelReceipt:
-        """Create a FAILED receipt and audit entry."""
+        """Create a FAILED receipt. The audited params are the ones bound."""
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
-
-        # Transition to AUDITING
         if self._state_machine.state != KernelState.AUDITING:
             self._state_machine.transition(KernelState.AUDITING)
-
-        entry = self._ledger.append(
-            request_id=request.request_id,
-            actor=request.actor,
-            intent=request.intent,
-            decision=Decision.DENY,
+        entry = self._append_record(
+            request,
             state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
+            decision=Decision.DENY,
+            state_to=KernelState.COMPLETED,
+            audit_phase="outcome",
+            tool_name=tool_name,
+            params=params,
             error=error,
+            permit_digest=permit_digest,
+            permit_verification="OUTCOME" if permit_digest else None,
+            permit_denial_reasons=tuple(denial_reasons or ()),
+            proposal_hash=proposal_hash,
         )
-
-        # Return to IDLE
-        self._state_machine.transition(KernelState.IDLE)
-
-        return KernelReceipt(
-            request_id=request.request_id,
-            status=ReceiptStatus.FAILED,
-            state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
-            decision=Decision.DENY,
+        self._complete_request()
+        return self._receipt(
+            request,
+            state_from,
+            ReceiptStatus.FAILED,
+            Decision.DENY,
+            entry.entry_hash,
+            None,
             error=error,
-            evidence_hash=entry.entry_hash,
         )
 
     def _is_strict_ambiguity(self) -> bool:
@@ -609,25 +856,16 @@ class BaseKernel(Kernel):
         return []
 
     def _requires_permit(self, request: KernelRequest) -> bool:
-        """Determine if request requires a permit token.
+        """Return whether this request must carry a verified permit.
 
-        Override in variants to customize permit requirements.
-
-        Default behavior:
-        - Permit required if:
-          1. Keyring is configured (permits can be verified), AND
-          2. Request has tool_call (will execute code)
-        - Permit optional otherwise (backward compatible with tests)
-
-        Returns:
-            True if permit is required, False otherwise.
+        A tool call requires a permit even when no keyring is configured.
+        ``allow_insecure_unpermitted_execution`` is the only opt-out, and
+        StrictKernel forces that flag off. Intent-only requests do not
+        execute a tool and do not require a permit.
         """
-        # If no keyring configured, permits are not enforced (backward compat)
-        if not self._keyring:
+        if request.tool_call is None:
             return False
-
-        # If keyring is configured, require permit for any request that can reach EXECUTING
-        return request.tool_call is not None
+        return not self.config.allow_insecure_unpermitted_execution
 
     def _deny_permit(
         self,
@@ -640,51 +878,33 @@ class BaseKernel(Kernel):
     ) -> KernelReceipt:
         """Create a DENY receipt for permit verification failure.
 
-        Args:
-            request: The request being denied.
-            state_from: State before validation.
-            error: Human-readable error message.
-            denial_reasons: List of denial reason codes.
-            permit_digest: Permit ID if permit was present.
-            proposal_hash: Proposal hash from permit if present.
-
-        Returns:
-            Receipt with DENY decision and permit denial audit.
+        Permit denial does not record a nonce use.
         """
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
-
-        # Transition to AUDITING
         if self._state_machine.state != KernelState.AUDITING:
             self._state_machine.transition(KernelState.AUDITING)
-
-        entry = self._ledger.append(
-            request_id=request.request_id,
-            actor=request.actor,
-            intent=request.intent,
-            decision=Decision.DENY,
+        entry = self._append_record(
+            request,
             state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
+            decision=Decision.DENY,
+            state_to=KernelState.COMPLETED,
+            audit_phase="outcome",
             error=error,
             permit_digest=permit_digest,
             permit_verification="DENY",
             permit_denial_reasons=tuple(denial_reasons),
             proposal_hash=proposal_hash,
         )
-
-        # Return to IDLE
-        self._state_machine.transition(KernelState.IDLE)
-
-        return KernelReceipt(
-            request_id=request.request_id,
-            status=ReceiptStatus.REJECTED,
-            state_from=state_from,
-            state_to=KernelState.IDLE,
-            ts_ms=self.config.clock.now_ms(),
-            decision=Decision.DENY,
+        self._complete_request()
+        return self._receipt(
+            request,
+            state_from,
+            ReceiptStatus.REJECTED,
+            Decision.DENY,
+            entry.entry_hash,
+            None,
             error=error,
-            evidence_hash=entry.entry_hash,
         )
 
     def set_runtime_hooks(

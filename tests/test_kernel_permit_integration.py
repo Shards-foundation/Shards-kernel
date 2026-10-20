@@ -83,15 +83,17 @@ class TestPermitIntegrationHappyPath(unittest.TestCase):
         self.assertEqual(receipt.decision, Decision.ALLOW)
         self.assertIsNotNone(receipt.tool_result)
 
-        # Assert: Audit contains permit verification
+        # Assert: Audit contains an intent record and an outcome record.
         evidence = self.kernel.export_evidence()
         entries = evidence.ledger_entries
-        self.assertEqual(len(entries), 1)
-
-        entry = entries[0]
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0].audit_phase, "intent")
+        self.assertEqual(entries[0].permit_verification, "INTENT")
+        entry = entries[1]
+        self.assertEqual(entry.audit_phase, "outcome")
         self.assertEqual(entry.decision, Decision.ALLOW)
         self.assertEqual(entry.permit_digest, permit.permit_id)
-        self.assertEqual(entry.permit_verification, "ALLOW")
+        self.assertEqual(entry.permit_verification, "OUTCOME")
         self.assertEqual(len(entry.permit_denial_reasons), 0)
         self.assertEqual(entry.proposal_hash, permit.proposal_hash)
 
@@ -278,13 +280,13 @@ class TestPermitIntegrationReplay(unittest.TestCase):
         self.assertEqual(receipt2.status, ReceiptStatus.REJECTED)
         self.assertEqual(receipt2.decision, Decision.DENY)
 
-        # Assert: Audit shows replay detection
+        # Assert: Audit shows replay detection after the intent and outcome.
         evidence = self.kernel.export_evidence()
         entries = evidence.ledger_entries
-        self.assertEqual(len(entries), 2)
+        self.assertEqual(len(entries), 3)
 
-        # Second entry should show replay denial
-        entry2 = entries[1]
+        # Last entry should show replay denial
+        entry2 = entries[-1]
         self.assertEqual(entry2.decision, Decision.DENY)
         self.assertIn("REPLAY_DETECTED", entry2.permit_denial_reasons)
 
@@ -435,16 +437,24 @@ class TestPermitIntegrationCrossRestart(unittest.TestCase):
         self.assertEqual(receipt4.status, ReceiptStatus.REJECTED)
         self.assertEqual(receipt4.decision, Decision.DENY)
 
-        # Verify final ledger state
+        # Verify final ledger state. Each successful use writes an intent
+        # record and an outcome record; the denial writes one outcome.
         evidence2 = kernel2.export_evidence()
-        # Should have: req1 (ALLOW), req2 (ALLOW), req3 (ALLOW), req4 (DENY)
-        self.assertEqual(len(evidence2.ledger_entries), 4)
-        self.assertEqual(evidence2.ledger_entries[0].decision, Decision.ALLOW)
-        self.assertEqual(evidence2.ledger_entries[1].decision, Decision.ALLOW)
-        self.assertEqual(evidence2.ledger_entries[2].decision, Decision.ALLOW)
-        self.assertEqual(evidence2.ledger_entries[3].decision, Decision.DENY)
+        decisions = [entry.decision for entry in evidence2.ledger_entries]
+        self.assertEqual(
+            decisions,
+            [
+                Decision.ALLOW,
+                Decision.ALLOW,
+                Decision.ALLOW,
+                Decision.ALLOW,
+                Decision.ALLOW,
+                Decision.ALLOW,
+                Decision.DENY,
+            ],
+        )
         self.assertIn(
-            "REPLAY_DETECTED", evidence2.ledger_entries[3].permit_denial_reasons
+            "REPLAY_DETECTED", evidence2.ledger_entries[-1].permit_denial_reasons
         )
 
     def test_multi_use_permit_use_count_reconstruction(self) -> None:

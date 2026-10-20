@@ -14,6 +14,7 @@ class KernelState(Enum):
     ARBITRATING = "ARBITRATING"
     EXECUTING = "EXECUTING"
     AUDITING = "AUDITING"
+    COMPLETED = "COMPLETED"
     HALTED = "HALTED"
 
 
@@ -99,6 +100,8 @@ class AuditEntry:
     permit_max_executions: Optional[int] = (
         None  # Max executions for nonce reconstruction
     )
+    # "intent" is appended before a tool runs; "outcome" records what ran.
+    audit_phase: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -190,3 +193,10 @@ class KernelConfig:
     hash_alg: str = "sha256"
     max_param_bytes: int = 65536
     max_intent_length: int = 4096
+    # Jurisdiction name checked against permit.jurisdiction. Defaults to the
+    # historical constant so existing permits that say "default" keep working.
+    jurisdiction: str = "default"
+    # Development-only escape hatch. When True, a non-strict kernel may run a
+    # tool with no permit. StrictKernel forces this off. Never enable it where
+    # an authorisation decision matters.
+    allow_insecure_unpermitted_execution: bool = False

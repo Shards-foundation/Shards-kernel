@@ -61,6 +61,7 @@ def serialize_for_audit(
     permit_issuer: Optional[str] = None,
     permit_subject: Optional[str] = None,
     permit_max_executions: Optional[int] = None,
+    audit_phase: Optional[str] = None,
 ) -> str:
     """Serialize audit entry data for hashing.
 
@@ -87,6 +88,7 @@ def serialize_for_audit(
         permit_issuer: Issuer identity for nonce reconstruction (v0.2.0+).
         permit_subject: Subject identity for nonce reconstruction (v0.2.0+).
         permit_max_executions: Max executions for nonce reconstruction (v0.2.0+).
+        audit_phase: "intent" before execution, or "outcome" afterwards.
 
     Returns:
         Deterministic string representation for hashing.
@@ -113,6 +115,7 @@ def serialize_for_audit(
         "permit_issuer": permit_issuer,
         "permit_subject": permit_subject,
         "permit_max_executions": permit_max_executions,
+        "audit_phase": audit_phase,
     }
     return serialize_deterministic(entry_dict)
 
@@ -168,5 +171,6 @@ def audit_entry_to_dict(entry: Any) -> dict[str, Any]:
         result["permit_subject"] = entry.permit_subject
     if hasattr(entry, "permit_max_executions"):
         result["permit_max_executions"] = entry.permit_max_executions
+    result["audit_phase"] = getattr(entry, "audit_phase", None)
 
     return result

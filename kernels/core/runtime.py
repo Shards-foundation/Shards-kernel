@@ -318,6 +318,9 @@ class KernelRuntime:
         self,
         tool_call: ToolCall,
         context: ExecutionContext,
+        *,
+        authorised_params: Optional[dict] = None,
+        authorised_tool_name: Optional[str] = None,
     ) -> RuntimeExecutionResult:
         """Execute a tool call through the canonical runtime boundary."""
         execution_identity = self._build_execution_identity(
@@ -424,7 +427,11 @@ class KernelRuntime:
 
         self._emit("tool.called", effective_context, {"tool_name": tool_call.name})
         start = perf_counter()
-        dispatcher_result = self._dispatcher.execute(tool_call)
+        dispatcher_result = self._dispatcher.execute(
+            tool_call,
+            authorised_params=authorised_params,
+            authorised_tool_name=authorised_tool_name,
+        )
         elapsed_ms = int((perf_counter() - start) * 1000)
 
         budget_exceeded = (

@@ -6,6 +6,26 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Security
+
+- Tool execution is fail-closed. A tool call requires a permit whose parameters are the parameters that run, even when no HMAC key is configured. Set `KernelConfig.allow_insecure_unpermitted_execution` to opt out on a non-strict kernel. `StrictKernel` ignores that flag.
+- Unknown permit constraints, and the documented but previously unimplemented constraints `max_memory_mb` and `allowed_domains`, are rejected. `require_evidence` now requires a non-empty evidence string.
+- An intent audit record is appended before a tool runs. If that append fails, the tool does not run. The outcome record stores the parameters that executed.
+- A rejected request does not consume a permit's `max_executions` budget.
+- Loading an audit bundle verifies the hash chain. A broken chain halts the kernel and does not install the entries.
+- An unexpected exception during request processing moves the kernel to `HALTED`.
+
+### Changed
+
+- Successful tool execution visits `COMPLETED` before returning to `IDLE`. The lifecycle is BOOTING, IDLE, VALIDATING, ARBITRATING, EXECUTING, AUDITING, COMPLETED, HALTED.
+- `KernelConfig.jurisdiction` is the jurisdiction name checked against a permit. It defaults to `"default"`.
+- A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
+- CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 48%, which this suite meets (measured combined coverage 48.4%). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
+
+### Removed
+
+- Removed the GitHub Actions workflows `hpc-matrix`, `gpu-hardware`, `benchmark`, `codex-self-heal`, and `codex-pr-generator`. They do not test this package. `codex-self-heal.yml` did not parse: a Python heredoc at column 0 inside a `run: |` block broke the YAML.
+
 ### Added
 
 - Added autonomous Codex contribution scaffold workflows: issue-triggered PR generation and CI failure self-healing issue creation.

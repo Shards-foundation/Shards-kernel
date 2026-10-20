@@ -29,6 +29,9 @@ def main() -> None:
         kernel_id="example-kernel",
         variant="strict",
         clock=clock,
+        # Must match the permit's jurisdiction. The historical default is
+        # "default"; this example uses a named jurisdiction.
+        jurisdiction="production",
     )
 
     kernel = StrictKernel()
@@ -128,7 +131,9 @@ def main() -> None:
     print(f"   Error: {receipt2.error}")
 
     evidence2 = kernel.export_evidence()
-    entry2 = evidence2.ledger_entries[1]
+    # A successful call writes an intent record and an outcome record.
+    # The replay denial is the last entry, not the second one.
+    entry2 = evidence2.ledger_entries[-1]
     print(f"   Replay denial reasons: {entry2.permit_denial_reasons}")
 
     print("\n=== Example complete ===")

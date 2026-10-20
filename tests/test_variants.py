@@ -38,21 +38,23 @@ class TestStrictKernel(unittest.TestCase):
         """Kernel boots to IDLE state."""
         self.assertEqual(self.kernel.get_state(), KernelState.IDLE)
 
-    def test_valid_request_allowed(self) -> None:
-        """Valid request with tool_call is allowed."""
+    def test_unpermitted_tool_call_denied(self) -> None:
+        """A tool call without a permit is denied, even with no keyring."""
         request = KernelRequest(
             request_id="req-001",
             ts_ms=1000,
             actor="alice",
             intent="echo test",
             tool_call=ToolCall(name="echo", params={"text": "hello"}),
+            params={"text": "hello"},
         )
 
         receipt = self.kernel.submit(request)
 
-        self.assertEqual(receipt.status, ReceiptStatus.ACCEPTED)
-        self.assertEqual(receipt.decision, Decision.ALLOW)
-        self.assertEqual(receipt.tool_result, "hello")
+        self.assertEqual(receipt.status, ReceiptStatus.REJECTED)
+        self.assertEqual(receipt.decision, Decision.DENY)
+        self.assertIn("MISSING_PERMIT", receipt.error or "")
+        self.assertIsNone(receipt.tool_result)
 
     def test_empty_intent_denied(self) -> None:
         """Empty intent is denied."""
