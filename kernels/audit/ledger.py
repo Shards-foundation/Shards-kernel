@@ -12,6 +12,8 @@ does not write to it. A future file backend must flush the intent record
 (fsync, or an equivalent durability barrier) before a tool is allowed to run.
 """
 
+from __future__ import annotations
+
 from typing import Any, Optional
 
 from kernels.common.types import (
