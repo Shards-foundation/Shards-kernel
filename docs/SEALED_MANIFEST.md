@@ -19,7 +19,7 @@ This document serves as the authoritative sealed manifest for KERNELS v0.1.0. It
 | Name | KERNELS |
 | Version | 0.1.0 |
 | License | MIT |
-| Repository | https://github.com/ayais12210-hub/kernels |
+| Repository | https://github.com/Shards-foundation/kernels |
 | Language | Python 3.11+ |
 | Dependencies | None (stdlib only) |
 
@@ -215,15 +215,14 @@ Everything not listed above is internal and may change without notice.
 
 | Artifact | SHA-256 |
 |----------|---------|
-| kernels-0.1.0.tar.gz | [computed at release] |
-| kernels-0.1.0-py3-none-any.whl | [computed at release] |
+| kernels-0.1.0.tar.gz | not published (no GitHub release) |
+| kernels-0.1.0-py3-none-any.whl | not published (no GitHub release) |
 
 ### 9.2 Verification
 
-```bash
-# Verify release artifact
-sha256sum -c checksums.txt
+`checksums.txt` is not in this repository. There is no release tarball to checksum.
 
+```bash
 # Verify git commit
 git verify-commit HEAD
 ```

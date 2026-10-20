@@ -22,7 +22,7 @@ This playbook provides step-by-step procedures for operating KERNELS in producti
 
 ```bash
 # Step 1: Clone repository
-git clone https://github.com/ayais12210-hub/kernels.git
+git clone https://github.com/Shards-foundation/kernels.git
 cd kernels
 
 # Step 2: Create virtual environment

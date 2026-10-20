@@ -2,7 +2,7 @@ name: Dependency Health
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main, master, cursor/fix-docs-links-5262]
     paths:
       - "pyproject.toml"
       - ".github/workflows/**"

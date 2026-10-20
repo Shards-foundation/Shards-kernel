@@ -11,7 +11,7 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/ayais12210-hub/kernels.git
+git clone https://github.com/Shards-foundation/kernels.git
 cd kernels
 
 # Install in development mode
@@ -21,10 +21,13 @@ pip install -e .
 python -m kernels info
 ```
 
-### Option B: Install from PyPI (Coming Soon)
+### Option B: Install the distribution
+
+The distribution name is `shards-kernel`. Import it as `kernels`. A PyPI release is pending, so `pip install shards-kernel` is not published yet. Do not run `pip install kernels` (that name is a different package). Until the release exists, install from GitHub:
 
 ```bash
-pip install kernels
+python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
+python -c "import kernels"
 ```
 
 ---
