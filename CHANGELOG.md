@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Changed
+
+- The PyPI distribution name is `shards-kernel`. The import package remains `kernels`.
+- Replaced the truncated `LICENSE` stub with the SPDX MIT text. Copyright line: `Copyright (c) 2026 Shards Inc Ltd`.
+
 ### Security
 
 - `python -m kernels.cli.verify` reads `ledger_entries` and checks internal consistency by delegating to `verify_evidence_bundle`. Replay recomputes each entry hash from the entry content and compares `prev_hash` links and `root_hash`. A missing, empty, or unknown entries key, an empty bundle, malformed JSON, an unknown schema, or the legacy `entries` key is a failure with a non-zero exit. An empty entry list is rejected in the CLI before replay, because `replay_and_verify` reports an empty list as consistent. `root_hash` is stored in the bundle, so a match shows only that the bundle is internally consistent (integrity only).

@@ -40,7 +40,7 @@ KERNELS has **zero external dependencies**. It uses only Python standard library
 
 ```bash
 # Clone repository
-git clone https://github.com/ayais12210-hub/kernels.git
+git clone https://github.com/Shards-foundation/kernels.git
 cd kernels
 
 # Create virtual environment
@@ -55,20 +55,23 @@ pip install -e .
 python -m kernels info
 ```
 
-### 2.2 From PyPI (Coming Soon)
+### 2.2 PyPI
+
+The distribution name is `shards-kernel`. After it is published:
 
 ```bash
-pip install kernels
+python -m pip install shards-kernel
+python -c "import kernels"
 ```
 
-### 2.3 From GitHub Release
+A PyPI release is pending, so that command is not published yet. Do not run `pip install kernels`. That name belongs to a different package. The import package in this repository remains `kernels`.
+
+### 2.3 From GitHub
+
+This repository has no published release tarball (`kernels-0.1.0.tar.gz` is not a release asset). Install from the Git repository:
 
 ```bash
-# Download release
-wget https://github.com/ayais12210-hub/kernels/releases/download/v0.1.0/kernels-0.1.0.tar.gz
-
-# Install
-pip install kernels-0.1.0.tar.gz
+python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
 ```
 
 ### 2.4 Using Docker
@@ -80,7 +83,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Clone and install
-RUN git clone https://github.com/ayais12210-hub/kernels.git . && \
+RUN git clone https://github.com/Shards-foundation/kernels.git . && \
     pip install -e .
 
 # Run smoke test
@@ -223,7 +226,7 @@ kernel = StrictKernel(
 
 ```bash
 # Clone repository
-git clone https://github.com/ayais12210-hub/kernels.git
+git clone https://github.com/Shards-foundation/kernels.git
 cd kernels
 
 # Create virtual environment
