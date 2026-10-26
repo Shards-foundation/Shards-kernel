@@ -131,15 +131,12 @@ repo/
 
 ## 4) KERNELS Workflow Mapping
 
-The following files in this repository implement core parts of the architecture:
+The following files in this repository implement core parts of the architecture. `.github/workflows/hpc-matrix.yml`, `.github/workflows/gpu-hardware.yml`, and `.github/workflows/benchmark.yml` are not in this repository.
 
 | Existing workflow | Layer coverage | Notes |
 |---|---|---|
 | `.github/workflows/ci.yml` | 1, 2, 4, 6 | Fast lint/type/test/build gate |
-| `.github/workflows/hpc-matrix.yml` | 4, 5, 6 | Expanded Python/Torch/CUDA compatibility |
-| `.github/workflows/gpu-hardware.yml` | 5, 6, 7 | Hardware validation on self-hosted GPU runners |
 | `.github/workflows/security.yml` | 1, 2, 3, 8 | CodeQL, dependency review, secret scanning |
-| `.github/workflows/benchmark.yml` | 7 | Regression checks using benchmark artifacts |
 | `.github/workflows/dependency-health.yml` | 3 | Dependency graph and vulnerability health |
 | `.github/workflows/dependency-canary.yml` | 3, 4 | Canary runs against latest dependencies |
 | `.github/workflows/release.yml` | 9, 10 | Build + publish releases |

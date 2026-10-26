@@ -390,9 +390,9 @@ Use this checklist when preparing for regulatory review:
 
 For organizations seeking compliance assistance or audit preparation:
 
-- **Documentation**: https://github.com/anthropics/kernels
-- **Issues**: https://github.com/anthropics/kernels/issues
-- **Security**: security@anthropic.com (for responsible disclosure)
+- **Documentation**: https://github.com/Shards-foundation/kernels
+- **Issues**: https://github.com/Shards-foundation/kernels/issues
+- **Security**: shards-inc@engineer.com (for responsible disclosure; see `SECURITY.md`)
 
 ---
 

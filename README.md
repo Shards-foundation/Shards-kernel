@@ -1,6 +1,5 @@
 # KERNELS - Deterministic Control Planes for AI Systems
 
-[![PyPI version](https://img.shields.io/pypi/v/kernels.svg)](https://pypi.org/project/kernels/)
 [![CI](https://github.com/Shards-foundation/kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/kernels/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Shards-foundation/kernels/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/kernels)
 
@@ -121,11 +120,30 @@ Variants tune posture while preserving invariants:
 
 ---
 
-## Install from PyPI
+## Install
+
+The PyPI distribution name is `shards-kernel`. The import package is still `kernels`:
 
 ```bash
-python -m pip install kernels
+python -m pip install shards-kernel
+python -c "import kernels"
 ```
+
+A PyPI release is pending, so that install is not published yet. Do not run `pip install kernels`: the PyPI project `kernels` is a different package ([Hugging Face kernels](https://pypi.org/project/kernels/)). Until `shards-kernel` is released, install this repository from GitHub:
+
+```bash
+python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
+```
+
+Or clone it and install the checkout in editable mode:
+
+```bash
+git clone https://github.com/Shards-foundation/kernels.git
+cd kernels
+python -m pip install -e .
+```
+
+Either of those also provides `import kernels`.
 
 ## Quickstart
 
@@ -155,19 +173,27 @@ Outputs:
 
 ## Autonomous Codex contribution scaffold
 
-This repository now includes a drop-in automation scaffold for closed-loop kernel
-contributions:
+Local scripts under `scripts/agents/` support a closed-loop contribution
+workflow. `.github/workflows/codex-pr-generator.yml` and
+`.github/workflows/codex-self-heal.yml` are not in this repository. The workflow
+files that are present are:
 
-- `.github/workflows/codex-pr-generator.yml` captures issue context (when the
-  issue has a `codex` label), prepares a constrained prompt payload, and opens a
-  tracking PR containing run artifacts.
-- `.github/workflows/codex-self-heal.yml` watches failed CI/benchmark runs and
-  opens a `self-heal` issue with structured failure context plus failure
-  taxonomy (`failure_type`, `repair_strategy`).
+- `.github/workflows/ci.yml`
+- `.github/workflows/dependency-canary.yml`
+- `.github/workflows/dependency-health.yml`
+- `.github/workflows/docs.yml`
+- `.github/workflows/jekyll-gh-pages.yml`
+- `.github/workflows/release.yml`
+- `.github/workflows/security.yml`
+- `.github/workflows/smoke.yml`
+- `.github/workflows/static.yml`
+
+The local scripts are:
+
 - `scripts/agents/codex_generate_patch.py` writes auditable run payloads to
   `.codex/runs/`.
 - `scripts/agents/build_codex_prompt.py` injects kernel skill constraints from
-  `/skills` into an agent-ready prompt payload with failure-aware routing.
+  `skills/` into an agent-ready prompt payload with failure-aware routing.
 - `scripts/agents/append_metrics.py` attaches benchmark deltas to each run.
 - `scripts/agents/evaluate_run.py` scores runs and updates
   `.codex/meta/leaderboard.json` and `.codex/memory/*.json` for active memory.

@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Changed
+
+- The PyPI distribution name is `shards-kernel`. The import package remains `kernels`.
+- Replaced the truncated `LICENSE` stub with the SPDX MIT text. Copyright line: `Copyright (c) 2026 Shards Inc Ltd`.
+
 ### Security
 
 - Tool execution is fail-closed. A tool call requires a permit whose parameters are the parameters that run, even when no HMAC key is configured. Set `KernelConfig.allow_insecure_unpermitted_execution` to opt out on a non-strict kernel. `StrictKernel` ignores that flag.
