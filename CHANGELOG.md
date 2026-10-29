@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Added
+
+- Optional SQLite-backed audit persistence for kernel variants, including commit-before-memory-advance, verified ledger recovery on boot, kernel/variant binding, WAL mode, and FULL synchronous commits.
+- Executable demos for minimal request handling, evidence verification, and persistent audit recovery; CI runs them across the supported Python matrix.
+- Isolated wheel-install verification, Bandit source scanning, pip-audit dependency scanning, and URL-scheme validation in the HTTP SDK client.
+
+### Changed
+
+
 ### Changed
 
 - The PyPI distribution name is `shards-kernel`. The import package remains `kernels`.
@@ -29,7 +38,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - `KernelConfig.jurisdiction` is the jurisdiction name checked against a permit. It defaults to `"default"`.
 - A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
 - CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 65%, which this suite meets (measured combined coverage 65.8%: 2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
-- The reference audit ledger is process memory. `append` does not write a file and does not fsync. Export the bundle to keep entries. `implementations/storage.py` is a separate sample the kernel does not write to. `load_verified` uses postponed annotations so Python 3.9 can import the module.
+- The audit ledger remains process-local by default; optional `SQLiteAuditStorage` commits each ledger entry before the in-memory chain advances and verifies persisted history on boot. SQLite is single-host storage, not an independently protected archive.
 - `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected. The overall coverage gate is 66%.
 - Examples, the HTTP adapters, the SDK client and server, and MCP submit tool calls with a permit bound to the exact parameters. Adapter `halt()` passes a reason. Adapter evidence export returns a mapping.
 
