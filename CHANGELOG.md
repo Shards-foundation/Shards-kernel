@@ -10,10 +10,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 - Optional SQLite-backed audit persistence for kernel variants, including commit-before-memory-advance, verified ledger recovery on boot, kernel/variant binding, WAL mode, and FULL synchronous commits.
 - Executable demos for minimal request handling, evidence verification, and persistent audit recovery; CI runs them across the supported Python matrix.
+- Release workflow now runs tests, governance coverage, demos, dependency and source security scans, clean-wheel verification, and publishes the exact verified distributions. Dependabot checks Python and GitHub Actions dependencies weekly.
 - Isolated wheel-install verification, Bandit source scanning, pip-audit dependency scanning, and URL-scheme validation in the HTTP SDK client.
-
-### Changed
-
 
 ### Changed
 
