@@ -41,11 +41,12 @@ dev = [
     "pytest>=7",
     "pytest-cov>=4",
     "hypothesis>=6",
-    "ruff==0.14.11",
+    "ruff==0.17.2",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
-    # FastAPI 0.135+ requires Python 3.10; this package still supports 3.9.
+    # FastAPI 0.129+ requires Python >=3.10. Pip honors Requires-Python, so
+    # CPython 3.9 still resolves to the newest compatible release (0.128.x).
     "flask>=2,<4",
-    "fastapi>=0.100,<0.135",
+    "fastapi>=0.100,<0.163",
     "httpx>=0.24,<1",
 ]
 
