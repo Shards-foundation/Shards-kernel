@@ -1,15 +1,9 @@
-"""Append-only audit ledger implementation.
+"""Append-only, hash-chained audit ledger with optional durable storage.
 
-The audit ledger maintains a hash-chained sequence of entries. Each entry
-includes the hash of the previous entry, ensuring tamper detection.
-
-This ledger is process memory only. ``append`` returns after the entry is
-linked into that chain. It does not write a file and it does not fsync.
-A crash, or a process exit, drops entries that were not copied out with
-``export``. There is no persistent backend on this class. The SQLite helper
-under ``implementations/storage.py`` is a separate sample and the kernel
-does not write to it. A future file backend must flush the intent record
-(fsync, or an equivalent durability barrier) before a tool is allowed to run.
+Without a storage adapter, entries remain in process memory. With a storage
+adapter, each entry is committed before the in-memory chain advances, and
+stored entries are reconstructed and verified before the ledger is usable.
+The kernel must treat storage or recovery errors as fatal to execution.
 """
 
 from __future__ import annotations
