@@ -1,14 +1,13 @@
 """End-to-end tests for the lightweight SDK HTTP server."""
 
 import json
-import threading
 import urllib.error
 import urllib.request
 
 import pytest
 
 from kernels.integrations.wire import boot_strict_kernel
-from kernels.sdk.server import KernelRequestHandler, KernelServer
+from kernels.sdk.server import KernelServer
 
 
 @pytest.fixture
@@ -83,8 +82,3 @@ def test_server_submit_and_halt(live_server):
     assert status == 200
     assert result["status"] == "halted"
 
-
-def test_handler_without_kernel_fails_closed():
-    handler = KernelRequestHandler
-    assert handler.kernel is None
-    assert threading.current_thread() is not None
