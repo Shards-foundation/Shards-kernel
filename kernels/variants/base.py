@@ -125,11 +125,18 @@ class BaseKernel(Kernel):
     Variants extend this class and override specific behaviors.
     """
 
-    def __init__(self) -> None:
-        """Initialize base kernel state."""
+    def __init__(self, audit_storage: Optional[Any] = None) -> None:
+        """Initialize base kernel state.
+
+        Args:
+            audit_storage: Optional storage implementing append and
+                list_entries. Restored entries are verified before use;
+                storage failures must prevent tool execution.
+        """
         self._config: Optional[KernelConfig] = None
         self._state_machine: Optional[StateMachine] = None
         self._ledger: Optional[AuditLedger] = None
+        self._audit_storage = audit_storage
         self._policy: Optional[JurisdictionPolicy] = None
         self._dispatcher: Optional[Dispatcher] = None
         self._runtime: Optional[KernelRuntime] = None
@@ -249,7 +256,13 @@ class BaseKernel(Kernel):
             KernelState.BOOTING,
             on_transition=self._record_transition,
         )
-        self._ledger = AuditLedger(config.kernel_id, config.variant)
+        self._ledger = AuditLedger(
+            config.kernel_id,
+            config.variant,
+            storage=self._audit_storage,
+        )
+        if self._ledger.entries:
+            self._rebuild_nonce_registry()
         self._policy = self._policy or JurisdictionPolicy.default()
         self._dispatcher = Dispatcher(create_default_registry())
         self._runtime = KernelRuntime(

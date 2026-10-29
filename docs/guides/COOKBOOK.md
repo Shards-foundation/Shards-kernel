@@ -304,7 +304,16 @@ Each kernel has its own ledger, nonce registry, and halted flag. Construct one `
 
 ### Recipe 7.2: Persistence
 
-There is no file backend. `AuditLedger.append` returns after the entry is linked in process memory. Copy `export_evidence()` out if the record must survive the process. `implementations/storage.py` is a separate SQLite sample. The kernel does not write to it. A future backend must fsync the intent record before the tool runs.
+The default ledger is process-local. For local durable persistence, inject the SQLite adapter when constructing a kernel:
+
+```python
+from implementations.storage import SQLiteAuditStorage
+from kernels.variants.strict_kernel import StrictKernel
+
+kernel = StrictKernel(audit_storage=SQLiteAuditStorage("audit.sqlite3"))
+```
+
+Each entry is committed before the in-memory chain advances. On boot, the ledger restores and verifies the persisted chain; storage or verification errors prevent normal startup. Keep the database on protected storage and test backup/restore. SQLite does not protect against a privileged actor rewriting the database; use external anchoring or signatures when that threat is in scope.
 
 ### Recipe 7.3: Halt
 

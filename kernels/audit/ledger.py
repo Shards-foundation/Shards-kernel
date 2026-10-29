@@ -1,15 +1,9 @@
-"""Append-only audit ledger implementation.
+"""Append-only, hash-chained audit ledger with optional durable storage.
 
-The audit ledger maintains a hash-chained sequence of entries. Each entry
-includes the hash of the previous entry, ensuring tamper detection.
-
-This ledger is process memory only. ``append`` returns after the entry is
-linked into that chain. It does not write a file and it does not fsync.
-A crash, or a process exit, drops entries that were not copied out with
-``export``. There is no persistent backend on this class. The SQLite helper
-under ``implementations/storage.py`` is a separate sample and the kernel
-does not write to it. A future file backend must flush the intent record
-(fsync, or an equivalent durability barrier) before a tool is allowed to run.
+Without a storage adapter, entries remain in process memory. With a storage
+adapter, each entry is committed before the in-memory chain advances, and
+stored entries are reconstructed and verified before the ledger is usable.
+The kernel must treat storage or recovery errors as fatal to execution.
 """
 
 from __future__ import annotations
@@ -39,8 +33,8 @@ class AuditLedger:
     or removed once added. The hash chain allows verification of integrity.
     """
 
-    def __init__(self, kernel_id: str, variant: str) -> None:
-        """Initialize an empty audit ledger.
+    def __init__(self, kernel_id: str, variant: str, storage: Optional[Any] = None) -> None:
+        """Initialize an audit ledger, optionally backed by durable storage.
 
         Args:
             kernel_id: Identifier of the kernel this ledger belongs to.
@@ -48,9 +42,66 @@ class AuditLedger:
         """
         self._kernel_id = kernel_id
         self._variant = variant
+        self._storage = storage
         self._entries: list[AuditEntry] = []
         self._last_hash = genesis_hash()
         self._next_seq = 0  # Monotonic sequence counter for deterministic ordering
+        if self._storage is not None:
+            try:
+                bind_kernel = getattr(self._storage, "bind_kernel", None)
+                if callable(bind_kernel):
+                    bind_kernel(self._kernel_id, self._variant)
+                self._restore_from_storage()
+            except AuditError:
+                raise
+            except Exception as exc:
+                raise AuditError(f"Failed to initialize persistent audit ledger: {exc}") from exc
+
+    def _restore_from_storage(self) -> None:
+        """Restore and verify previously committed entries before use.
+
+        Any malformed row or broken chain raises AuditError. Callers must not
+        execute tools when persistent audit recovery fails.
+        """
+        rows = self._storage.list_entries(self._kernel_id)
+        if not rows:
+            return
+        restored: list[AuditEntry] = []
+        try:
+            for row in rows:
+                denial_reasons = row.get("permit_denial_reasons") or ()
+                restored.append(
+                    AuditEntry(
+                        ledger_seq=int(row["ledger_seq"]),
+                        prev_hash=str(row["prev_hash"]),
+                        entry_hash=str(row["entry_hash"]),
+                        ts_ms=int(row["ts_ms"]),
+                        request_id=str(row["request_id"]),
+                        actor=str(row["actor"]),
+                        intent=str(row["intent"]),
+                        decision=Decision(row["decision"]),
+                        state_from=KernelState(row["state_from"]),
+                        state_to=KernelState(row["state_to"]),
+                        tool_name=row.get("tool_name"),
+                        params_hash=row.get("params_hash"),
+                        evidence_hash=row.get("evidence_hash"),
+                        error=row.get("error"),
+                        permit_digest=row.get("permit_digest"),
+                        permit_verification=row.get("permit_verification"),
+                        permit_denial_reasons=tuple(denial_reasons),
+                        proposal_hash=row.get("proposal_hash"),
+                        permit_nonce=row.get("permit_nonce"),
+                        permit_issuer=row.get("permit_issuer"),
+                        permit_subject=row.get("permit_subject"),
+                        permit_max_executions=row.get("permit_max_executions"),
+                        audit_phase=row.get("audit_phase"),
+                    )
+                )
+            self.load_verified(tuple(restored), str(rows[-1]["entry_hash"]))
+        except AuditError:
+            raise
+        except Exception as exc:
+            raise AuditError(f"Failed to restore persistent audit ledger: {exc}") from exc
 
     @property
     def kernel_id(self) -> str:
@@ -196,7 +247,12 @@ class AuditLedger:
                 audit_phase=audit_phase,
             )
 
-            # Append and update chain
+            # Commit to durable storage before mutating the live ledger. If
+            # persistence fails, append raises and the caller must fail closed.
+            if self._storage is not None:
+                self._storage.append(self._kernel_id, audit_entry_to_dict(entry))
+
+            # Append and update chain only after the storage commit succeeds.
             self._entries.append(entry)
             self._last_hash = entry_hash
             self._next_seq += 1  # Increment sequence counter

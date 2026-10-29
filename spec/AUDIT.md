@@ -24,9 +24,11 @@ The ledger MUST be hash-chained:
 
 ### 2.3 Persistence
 
-The reference `AuditLedger` is in memory. Appending an entry links it into the process-local hash chain and then returns. That is the barrier the kernel uses before execution: the intent record is in the chain, or the tool does not run.
+Without a storage adapter, `AuditLedger` is process-local: an appended intent is linked into the in-memory hash chain before execution, but it is not durable across process loss.
 
-The reference ledger does not open a file and does not fsync. Entries live until the process drops them or the caller exports a bundle. `implementations/storage.py` is a separate sample store. The kernel does not write intent records there. A future persistent backend must flush the intent record, with fsync or an equivalent barrier, before execution. This specification does not add that backend.
+When a storage adapter is supplied to the kernel, each entry is committed to that adapter before the in-memory ledger advances. A storage error raises an audit failure; execution must fail closed. On boot, stored entries are reconstructed and the complete hash chain is verified before the kernel accepts requests. Invalid or incompatible stored history must prevent startup.
+
+The provided `SQLiteAuditStorage` implementation uses SQLite WAL mode and `synchronous=FULL` and binds a kernel ID to one variant. This is a single-host durability mechanism, not an independently protected archive: a privileged actor who can rewrite the database may rewrite its contents and hashes. Deployments that require resistance to privileged rewriting need external root anchoring, signatures, access controls, and monitored backup/restore procedures.
 
 ### 2.4 Deterministic
 

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   quality:
     runs-on: ubuntu-24.04
@@ -30,9 +33,6 @@ jobs:
           pip install build
 
       - name: Ruff lint
-        # pyproject ignores E501. Passing --select on the CLI replaces that
-        # ignore, so E501 is ignored here explicitly. Import order and pyupgrade
-        # findings are pre-existing and are not part of this gate.
         run: ruff check . --select E,F --ignore E501
 
       - name: Run tests with coverage
@@ -44,22 +44,52 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
           --cov-report=json:coverage.json
-          --cov-fail-under=66
+          --cov-fail-under=70
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
 
-      - name: Upload coverage report to Codecov
+      - name: Check whether Codecov upload is configured
         if: matrix.python-version == '3.12'
+        id: codecov-token
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload coverage report to Codecov
+        if: matrix.python-version == '3.12' && steps.codecov-token.outputs.available == 'true'
         uses: codecov/codecov-action@v5
-        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Shards-foundation/kernels
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
       - name: Smoke checks
         run: ./scripts/smoke.sh
 
-      - name: Build package
+      - name: Run documented demos
+        run: |
+          python examples/01_minimal_request.py
+          python examples/02_verify_evidence.py
+          python examples/04_sqlite_persistent_ledger.py
+
+      - name: Build source and wheel distributions
         run: python -m build
+
+      - name: Verify wheel in an isolated environment
+        if: matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_venv="$RUNNER_TEMP/kernels-wheel-venv"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --upgrade pip
+          "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$wheel_venv/bin/python" -c "import kernels; from kernels.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
+          "$wheel_venv/bin/kernels" --help

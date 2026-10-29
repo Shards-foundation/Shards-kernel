@@ -17,10 +17,22 @@ class SQLiteAuditStorage:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._database_path)
+        """Open a connection with SQLite's strongest standard sync setting."""
+        connection = sqlite3.connect(self._database_path)
+        connection.execute("PRAGMA synchronous = FULL")
+        return connection
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_kernel_metadata (
+                    kernel_id TEXT PRIMARY KEY,
+                    variant TEXT NOT NULL
+                )
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -39,6 +51,22 @@ class SQLiteAuditStorage:
                     PRIMARY KEY (kernel_id, ledger_seq)
                 )
                 """
+            )
+
+    def bind_kernel(self, kernel_id: str, variant: str) -> None:
+        """Bind a database kernel ID to one variant and reject drift."""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO audit_kernel_metadata (kernel_id, variant) VALUES (?, ?)",
+                (kernel_id, variant),
+            )
+            row = connection.execute(
+                "SELECT variant FROM audit_kernel_metadata WHERE kernel_id = ?",
+                (kernel_id,),
+            ).fetchone()
+        if row is None or row[0] != variant:
+            raise ValueError(
+                f"Kernel {kernel_id!r} is already bound to a different variant"
             )
 
     def append(self, kernel_id: str, entry: dict[str, Any]) -> None:
