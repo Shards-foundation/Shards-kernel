@@ -2,6 +2,7 @@
 
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import HTTPServer
 from types import SimpleNamespace
@@ -136,8 +137,9 @@ def test_sdk_server_no_kernel_routes_and_options():
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     try:
         for path in ("/health", "/status", "/evidence", "/policy"):
-            with urllib.request.urlopen(base + path, timeout=2) as response:
-                assert response.status == 503
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(base + path, timeout=2)
+            assert error.value.code == 503
         for path, payload in (("/submit", {"request_id": "x"}), ("/halt", {})):
             request = urllib.request.Request(
                 base + path,
