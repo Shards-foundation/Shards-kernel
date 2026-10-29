@@ -1,0 +1,21 @@
+"area: tests":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "scripts/ci/**"
+"area: kernel":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "kernels/**"
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "pyproject.toml"
+          - "setup.cfg"
+          - "tox.ini"
