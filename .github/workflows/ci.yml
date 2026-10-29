@@ -44,19 +44,30 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
           --cov-report=json:coverage.json
-          --cov-fail-under=66
+          --cov-fail-under=70
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
 
-      - name: Upload coverage report to Codecov
+      - name: Check whether Codecov upload is configured
         if: matrix.python-version == '3.12'
+        id: codecov-token
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload coverage report to Codecov
+        if: matrix.python-version == '3.12' && steps.codecov-token.outputs.available == 'true'
         uses: codecov/codecov-action@v5
-        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Shards-foundation/kernels
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
       - name: Smoke checks
         run: ./scripts/smoke.sh
