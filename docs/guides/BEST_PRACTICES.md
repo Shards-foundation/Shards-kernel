@@ -171,7 +171,7 @@ import os
 api_key = os.environ.get("KERNELS_API_KEY")
 
 # Bad: Hardcoded
-api_key = "secret-key-12345"
+api_key = "example-value-only"
 ```
 
 ### 4.3 Validate All Inputs
