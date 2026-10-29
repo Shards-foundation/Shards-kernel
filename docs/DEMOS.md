@@ -31,17 +31,19 @@ exports the evidence bundle.
 Submits a deterministic request and independently recomputes the exported
 hash chain. The process exits non-zero if verification fails.
 
-### 03 — SQLite evidence archive
+### 03 — Durable SQLite audit ledger
 
-Writes an exported evidence bundle to the SQLite storage helper, opens a new
-storage instance, reads the records back, and verifies the chain and root hash.
-The temporary database is removed when the demo exits.
+Injects `SQLiteAuditStorage` into the kernel, commits each ledger entry to
+SQLite before the in-memory ledger advances, then creates a new kernel instance
+against the same database. Boot verifies and restores the persisted hash chain.
+The demo fails if the recovered entries or root hash differ. The temporary
+database is removed when the demo exits.
 
-**Important boundary:** demo 03 archives evidence after the kernel operation.
-The current kernel does not inject this SQLite helper into its live audit
-ledger. Do not treat this example as proof of durable audit-before-execution.
-That integration, crash-consistency testing, and recovery semantics remain
-separate production-hardening work.
+This is a local durable-storage implementation, not a distributed database or
+an independently tamper-proof archive. Production deployments still need
+operational backup/restore drills, filesystem and host security, monitoring,
+and external anchoring or signing if resistance to privileged database
+rewriting is required.
 
 ## Expected behaviour
 
