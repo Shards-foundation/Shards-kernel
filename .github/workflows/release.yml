@@ -92,7 +92,7 @@ jobs:
           "$wheel_venv/bin/kernels" --help
 
       - name: Upload verified release distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verified-release-dist
           path: dist/
