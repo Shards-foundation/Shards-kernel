@@ -4,13 +4,13 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   verify:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Verify release candidate
     runs-on: ubuntu-24.04
     steps:
@@ -27,6 +27,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           pip install build twine pip-audit bandit
+
+      - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from kernels._version import __version__
+
+          expected = f"v{__version__}"
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(f"Release tag {actual!r} does not match package version {expected!r}")
+          print(f"Verified release version: {__version__}")
+          PY
 
       - name: Ruff lint
         run: ruff check . --select E,F --ignore E501
@@ -85,6 +100,7 @@ jobs:
           retention-days: 7
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Publish verified distributions to PyPI
     needs: verify
     runs-on: ubuntu-latest
