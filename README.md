@@ -167,7 +167,7 @@ evidence verification, and SQLite evidence archiving. Start with
 python -m pip install -e ".[dev]"
 python examples/01_minimal_request.py
 python examples/02_verify_evidence.py
-python examples/03_sqlite_evidence_archive.py
+python examples/04_sqlite_persistent_ledger.py
 ```
 
 The SQLite demo injects a SQLite-backed audit ledger into the kernel and checks
