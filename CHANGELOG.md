@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Breaking changes
+
+- `python -m kernels.cli.verify` requires `ledger_entries`. A missing or empty list, the legacy `entries` key, malformed JSON, an unknown schema (a non-object payload, or a `schema` or `schema_version` field), an empty object, and a missing `root_hash` exit 1. The LangChain, Hugging Face, generic, LangGraph, CrewAI, and AutoGPT adapters still export `entries`, so their bundles fail this command until they are migrated. `MoltbookAdapter` inherits the generic export and fails the same way.
+- Success output says `internally consistent (integrity only)`. `root_hash` is taken from the bundle and the bundle is not signed, so a match shows internal consistency only, not authenticity. A full rewrite that recomputes every `entry_hash`, `prev_hash`, and `root_hash` still passes. Dropping trailing entries and resetting `root_hash` to the new last entry still passes. Relabelling unhashed metadata (`kernel_id`, `variant`, `exported_at_ms`, `entry_count`, and `ledger_seq`) still passes.
+- Removed from the report: the five named checks and the `N/5` line, the statistics block, warnings, and the kernel ID and variant header. `--detailed` no longer shows the tool, permit status, or denial reason; it prints the sequence, decision, and a truncated `entry_hash`. `--json` reports `internally_consistent` instead of `passed`, and no longer includes `checks_passed`, `checks_failed`, `warnings`, or `stats`. Check failures exit 1. The previous exception handler exited 2; an uncaught error, such as a null `entry_hash`, now ends with status 1 and a traceback. Invalid arguments still exit 2.
+- Removed checks not yet rebuilt: sequence numbering (`ledger_seq`), permit enforcement, nonce replay, and state transitions.
+- Removed Python API: `EvidenceVerifier`, `VerificationResult`, and `print_verification_result`. `verify_evidence` and `verify_evidence_file` now return `ConsistencyResult`.
+
 ### Added
 
 - Optional SQLite-backed audit persistence for kernel variants, including commit-before-memory-advance, verified ledger recovery on boot, kernel/variant binding, WAL mode, and FULL synchronous commits.
