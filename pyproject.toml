@@ -45,7 +45,7 @@ dev = [
     # Optional adapter servers exercised by tests. Not runtime dependencies.
     # FastAPI 0.135+ requires Python 3.10; this package still supports 3.9.
     "flask>=2,<4",
-    "fastapi>=0.100,<0.135",
+    "fastapi>=0.100,<0.163",
     "httpx>=0.24,<1",
 ]
 
