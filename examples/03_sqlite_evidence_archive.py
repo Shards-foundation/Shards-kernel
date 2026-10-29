@@ -1,65 +1,67 @@
 #!/usr/bin/env python3
-"""Example 03: archive and re-verify exported evidence using SQLite.
+"""Example 03: run a kernel with a durable SQLite audit ledger.
 
-This example archives evidence after the kernel request has completed. It
-demonstrates the storage helper; it does NOT claim that SQLite persistence is
-wired into the kernel's pre-execution audit boundary.
+Unlike the archive-only example, this demo injects SQLite storage into the
+kernel. Each audit append is committed before the in-memory ledger advances.
+The kernel restores and verifies the hash chain when restarted with the same
+database, kernel ID, and variant.
 """
 
 import tempfile
 from pathlib import Path
 
 from implementations.storage import SQLiteAuditStorage
-from kernels.audit.replay import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
 from kernels.common.types import KernelConfig, KernelRequest, VirtualClock
 from kernels.variants.strict_kernel import StrictKernel
 
 
+def config(clock_ms: int) -> KernelConfig:
+    """Return a reproducible strict-kernel configuration."""
+    return KernelConfig(
+        kernel_id="demo-sqlite-003",
+        variant="strict",
+        clock=VirtualClock(clock_ms),
+    )
+
+
 def main() -> None:
-    """Create evidence, persist it, reopen the database, and verify it."""
-    kernel = StrictKernel()
-    kernel.boot(
-        KernelConfig(
-            kernel_id="demo-sqlite-003",
-            variant="strict",
-            clock=VirtualClock(3_000),
-        )
-    )
-    kernel.submit(
-        KernelRequest(
-            request_id="demo-request-003",
-            ts_ms=3_000,
-            actor="demo-operator",
-            intent="Demonstrate evidence archiving",
-        )
-    )
-    evidence = kernel.export_evidence()
-    entries = [audit_entry_to_dict(entry) for entry in evidence.ledger_entries]
-
+    """Persist an audit ledger, restart, and verify recovery."""
     with tempfile.TemporaryDirectory(prefix="kernels-demo-") as temp_dir:
-        database = Path(temp_dir) / "evidence.sqlite3"
+        database = Path(temp_dir) / "audit.sqlite3"
         storage = SQLiteAuditStorage(str(database))
-        for entry in entries:
-            storage.append(evidence.kernel_id, entry)
 
-        # Reopen via a new storage instance to prove the rows outlive the
-        # original connection and can be read back from the database file.
-        reopened = SQLiteAuditStorage(str(database))
-        archived = reopened.list_entries(evidence.kernel_id)
-        valid, errors = replay_and_verify(
-            archived,
-            expected_root_hash=evidence.root_hash,
+        kernel = StrictKernel(audit_storage=storage)
+        kernel.boot(config(3_000))
+        kernel.submit(
+            KernelRequest(
+                request_id="demo-request-003",
+                ts_ms=3_000,
+                actor="demo-operator",
+                intent="Demonstrate durable audit-before-completion",
+            )
         )
+        original = kernel.export_evidence()
+
+        # Reopening the database and constructing a new kernel verifies and
+        # restores the stored ledger before the new kernel can accept requests.
+        restarted = StrictKernel(
+            audit_storage=SQLiteAuditStorage(str(database))
+        )
+        restarted.boot(config(4_000))
+        recovered = restarted.export_evidence()
+        health = SQLiteAuditStorage(str(database)).health()
 
         print(f"Database: {database.name}")
-        print(f"Archived entries: {len(archived)}")
-        print(f"Storage health: {'PASS' if reopened.health()['ok'] else 'FAIL'}")
-        print(f"Archived hash-chain verification: {'PASS' if valid else 'FAIL'}")
-        if errors:
-            for error in errors:
-                print(f"  - {error}")
-        if len(archived) != len(entries) or not valid:
+        print(f"Persisted entries: {len(original.ledger_entries)}")
+        print(f"Recovered entries: {len(recovered.ledger_entries)}")
+        print(f"Root hash recovered: {recovered.root_hash == original.root_hash}")
+        print(f"Storage health: {'PASS' if health['ok'] else 'FAIL'}")
+
+        if (
+            not health["ok"]
+            or recovered.root_hash != original.root_hash
+            or recovered.ledger_entries != original.ledger_entries
+        ):
             raise SystemExit(1)
 
 
