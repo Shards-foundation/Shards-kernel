@@ -182,7 +182,7 @@ Variants implement the `Kernel` protocol with different enforcement postures.
 13. Return receipt
 ```
 
-The intent record is linked in process memory before the tool runs. The reference ledger does not write a file and does not fsync. A crash drops entries that were not exported. An ambiguous request is denied even when `KernelConfig.fail_closed` is false. `StateMachine.reset()` can move a bare machine out of `HALTED`; a halted kernel keeps a separate flag and will not accept another request.
+The intent record is appended before the tool runs. With the default ledger this record is process-local; with an injected storage adapter it is committed before the in-memory chain advances. SQLite-backed startup restores and verifies the chain and fails closed on storage or integrity errors. A crash can still affect uncommitted work, and a local database is not an independently protected archive. An ambiguous request is denied even when `KernelConfig.fail_closed` is false. `StateMachine.reset()` can move a bare machine out of `HALTED`; a halted kernel keeps a separate flag and will not accept another request.
 
 ### Evidence Export
 
