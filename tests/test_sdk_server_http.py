@@ -72,7 +72,8 @@ def test_server_submit_and_halt(live_server):
             "request_id": "sdk-1",
             "actor": "unknown-agent",
             "intent": "inspect",
-            "params": {},
+            "tool_call": {"name": "echo", "params": {"text": "x"}},
+            "params": {"text": "x"},
         },
     )
     assert status == 200

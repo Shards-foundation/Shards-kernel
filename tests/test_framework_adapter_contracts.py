@@ -64,6 +64,7 @@ def test_autogpt_monitor_runtime_and_denial_limits(monkeypatch):
     assert monitor.should_halt() is True
     assert monitor.get_halt_reason() == "Maximum runtime exceeded"
     monitor.reset()
+    monitor.max_runtime_seconds = None
     monitor.record_command(allowed=False, risk_score=0)
     assert monitor.should_halt() is True
     assert monitor.get_halt_reason() == "Maximum denials reached"
@@ -72,18 +73,18 @@ def test_autogpt_monitor_runtime_and_denial_limits(monkeypatch):
 def test_huggingface_adapter_wrapping_and_permit_injector():
     kernel = boot_strict_kernel("hf-test")
     adapter = HuggingFaceAdapter(kernel)
-    tool = adapter.wrap_tool("echo", lambda value: value, inputs={"value": "string"})
-    assert adapter.get_tool("echo") is tool
-    assert adapter.list_tools() == ["echo"]
+    tool = adapter.wrap_tool("hf_echo", lambda value: value, inputs={"value": "string"})
+    assert adapter.get_tool("hf_echo") is tool
+    assert adapter.list_tools() == ["hf_echo"]
     assert tool.inputs_schema == {"value": "string"}
     assert tool.outputs == "any"
     with pytest.raises(PermitError):
         tool.forward(value="blocked")
     injector = PermitInjector(adapter)
-    assert injector.get_permit("echo") is None
-    injector.set_permit("echo", object())
-    assert injector.get_permit("echo") is not None
-    injector.clear_permit("echo")
+    assert injector.get_permit("hf_echo") is None
+    injector.set_permit("hf_echo", object())
+    assert injector.get_permit("hf_echo") is not None
+    injector.clear_permit("hf_echo")
     injector.clear_permit("missing")
     injector.set_permit("one", object())
     injector.set_permit("two", object())

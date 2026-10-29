@@ -34,7 +34,8 @@ def test_flask_adapter_submit_route_denies_unpermitted_request():
             "request_id": "http-1",
             "actor": "unknown-agent",
             "intent": "read status",
-            "params": {},
+            "tool_call": {"name": "echo", "params": {"text": "x"}},
+            "params": {"text": "x"},
         },
     )
     assert response.status_code == 200

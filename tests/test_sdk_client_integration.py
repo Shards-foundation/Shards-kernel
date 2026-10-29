@@ -24,7 +24,7 @@ def test_sync_client_round_trip_against_local_server():
         assert "ledger_entries" in client.evidence()
         assert "allowed_actors" in client.policy()
 
-        req = request().with_id("sync-1").with_actor("operator").with_intent("inspect").build()
+        req = request().with_id("sync-1").with_actor("operator").with_intent("inspect").with_tool("echo", {"text": "x"}).build()
         receipt = client.submit(req)
         assert receipt.request_id == "sync-1"
         assert receipt.decision.value in {"DENY", "HALT"}
