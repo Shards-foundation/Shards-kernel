@@ -160,13 +160,14 @@ python -m kernels --help
 ## Runnable Demos
 
 The repository includes deterministic, offline examples for request handling,
-evidence verification, and SQLite evidence archiving. Start with
+fail-closed decisions, evidence verification, and durable SQLite audit recovery. Start with
 [the demo guide](docs/DEMOS.md).
 
 ```bash
 python -m pip install -e ".[dev]"
 python examples/01_minimal_request.py
 python examples/02_verify_evidence.py
+python examples/03_fail_closed_ambiguity.py
 python examples/04_sqlite_persistent_ledger.py
 ```
 
