@@ -4,7 +4,7 @@ import pytest
 
 
 def test_flask_adapter_exposes_read_endpoints_and_halt():
-    flask = pytest.importorskip("flask")
+    pytest.importorskip("flask")
     from kernels.integrations.flask_adapter import create_flask_app
 
     app = create_flask_app(kernel_id="test-flask")
@@ -43,7 +43,7 @@ def test_flask_adapter_submit_route_denies_unpermitted_request():
 
 def test_fastapi_adapter_exposes_read_endpoints_and_halt():
     pytest.importorskip("fastapi")
-    httpx = pytest.importorskip("httpx")
+    pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
     from kernels.integrations.fastapi_adapter import create_fastapi_app
 
