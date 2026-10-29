@@ -80,5 +80,5 @@ jobs:
           "$wheel_venv/bin/python" -m pip install --upgrade pip
           "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
           cd "$RUNNER_TEMP"
-          "$wheel_venv/bin/python" -c "import kernels; from kernels.api import StrictKernel; print('Installed wheel import: OK')"
+          "$wheel_venv/bin/python" -c "import kernels; from kernels.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
           "$wheel_venv/bin/kernels" --help
