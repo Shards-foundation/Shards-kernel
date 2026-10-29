@@ -1,5 +1,7 @@
 """Integration tests for durable audit-ledger storage."""
 
+import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,6 +68,46 @@ class TestPersistentAuditLedger(unittest.TestCase):
             )
         self.assertEqual(ledger.length, 0)
         self.assertEqual(ledger.root_hash, genesis_hash())
+
+    def test_tampered_persisted_payload_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "audit.sqlite3")
+            ledger = AuditLedger(
+                "tamper-kernel",
+                "strict",
+                storage=SQLiteAuditStorage(database),
+            )
+            ledger.append(
+                request_id="req-tamper",
+                actor="operator",
+                intent="original intent",
+                decision=Decision.ALLOW,
+                state_from=KernelState.IDLE,
+                state_to=KernelState.IDLE,
+                ts_ms=1000,
+            )
+
+            with sqlite3.connect(database) as connection:
+                row = connection.execute(
+                    "SELECT payload_json FROM audit_entries WHERE kernel_id = ?",
+                    ("tamper-kernel",),
+                ).fetchone()
+                payload = json.loads(row[0])
+                payload["intent"] = "tampered intent"
+                connection.execute(
+                    "UPDATE audit_entries SET payload_json = ? WHERE kernel_id = ?",
+                    (
+                        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                        "tamper-kernel",
+                    ),
+                )
+
+            with self.assertRaises(AuditError):
+                AuditLedger(
+                    "tamper-kernel",
+                    "strict",
+                    storage=SQLiteAuditStorage(database),
+                )
 
     def test_database_rejects_variant_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
