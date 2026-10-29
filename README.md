@@ -157,6 +157,22 @@ python examples/01_minimal_request.py
 python -m kernels --help
 ```
 
+## Runnable Demos
+
+The repository includes deterministic, offline examples for request handling,
+evidence verification, and SQLite evidence archiving. Start with
+[the demo guide](docs/DEMOS.md).
+
+```bash
+python -m pip install -e ".[dev]"
+python examples/01_minimal_request.py
+python examples/02_verify_evidence.py
+python examples/03_sqlite_evidence_archive.py
+```
+
+The SQLite demo archives evidence after a request completes. It is not a claim
+that the live kernel currently enforces durable audit-before-execution.
+
 ## Organisation-wide repository review automation
 
 Use the helper below to clone every repository in a GitHub organisation, run
