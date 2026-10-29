@@ -12,6 +12,7 @@ nav:
   - Home: README.md
   - Architecture: ARCHITECTURE.md
   - Threat Model: THREAT_MODEL.md
+  - Demos: DEMOS.md
   - Pipelines:
       - Phases: pipelines/PHASES.md
       - Gates: pipelines/GATES.md
