@@ -1,13 +1,10 @@
 """Tests for async kernel wrappers and helper control flow."""
 
 import asyncio
-from types import SimpleNamespace
-
 import pytest
 
 from kernels.async_support.async_kernel import (
     AsyncStrictKernel,
-    AsyncKernel,
     submit_batch,
     submit_with_retry,
     submit_with_timeout,
