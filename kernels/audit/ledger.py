@@ -53,7 +53,15 @@ class AuditLedger:
         self._last_hash = genesis_hash()
         self._next_seq = 0  # Monotonic sequence counter for deterministic ordering
         if self._storage is not None:
-            self._restore_from_storage()
+            try:
+                bind_kernel = getattr(self._storage, "bind_kernel", None)
+                if callable(bind_kernel):
+                    bind_kernel(self._kernel_id, self._variant)
+                self._restore_from_storage()
+            except AuditError:
+                raise
+            except Exception as exc:
+                raise AuditError(f"Failed to initialize persistent audit ledger: {exc}") from exc
 
     def _restore_from_storage(self) -> None:
         """Restore and verify previously committed entries before use.
