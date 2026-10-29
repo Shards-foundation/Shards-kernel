@@ -2,8 +2,6 @@
 
 from types import SimpleNamespace
 
-import pytest
-
 from kernels.common.types import (
     Decision,
     EvidenceBundle,
