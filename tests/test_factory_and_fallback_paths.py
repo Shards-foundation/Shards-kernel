@@ -11,7 +11,6 @@ import pytest
 
 from kernels.integrations.autogpt_adapter import create_autogpt_adapter
 from kernels.integrations.generic_adapter import (
-    GenericAdapter,
     MoltbookAdapter,
     create_generic_adapter,
     create_moltbook_adapter,
