@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -44,7 +44,7 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
           --cov-report=json:coverage.json
-          --cov-fail-under=70
+          --cov-fail-under=90
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
@@ -63,7 +63,7 @@ jobs:
 
       - name: Upload coverage report to Codecov
         if: matrix.python-version == '3.12' && steps.codecov-token.outputs.available == 'true'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Shards-foundation/kernels
@@ -76,6 +76,7 @@ jobs:
         run: |
           python examples/01_minimal_request.py
           python examples/02_verify_evidence.py
+          python examples/03_fail_closed_ambiguity.py
           python examples/04_sqlite_persistent_ledger.py
 
       - name: Build source and wheel distributions
