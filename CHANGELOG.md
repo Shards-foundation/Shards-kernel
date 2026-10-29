@@ -12,40 +12,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Executable demos for minimal request handling, evidence verification, and persistent audit recovery; CI runs them across the supported Python matrix.
 - Release workflow now runs tests, governance coverage, demos, dependency and source security scans, clean-wheel verification, and publishes the exact verified distributions. Dependabot checks Python and GitHub Actions dependencies weekly.
 - Isolated wheel-install verification, Bandit source scanning, pip-audit dependency scanning, and URL-scheme validation in the HTTP SDK client.
-
-### Changed
-
-- The PyPI distribution name is `shards-kernel`. The import package remains `kernels`.
-- Replaced the truncated `LICENSE` stub with the SPDX MIT text. Copyright line: `Copyright (c) 2026 Shards Inc Ltd`.
-
-### Security
-
-- `python -m kernels.cli.verify` reads `ledger_entries` and checks internal consistency by delegating to `verify_evidence_bundle`. Replay recomputes each entry hash from the entry content and compares `prev_hash` links and `root_hash`. A missing, empty, or unknown entries key, an empty bundle, malformed JSON, an unknown schema, or the legacy `entries` key is a failure with a non-zero exit. An empty entry list is rejected in the CLI before replay, because `replay_and_verify` reports an empty list as consistent. `root_hash` is stored in the bundle, so a match shows only that the bundle is internally consistent (integrity only).
-- Tool execution is fail-closed. A tool call requires a permit whose parameters are the parameters that run, even when no HMAC key is configured. Set `KernelConfig.allow_insecure_unpermitted_execution` to opt out on a non-strict kernel. `StrictKernel` ignores that flag.
-- Unknown permit constraints, and the documented but previously unimplemented constraints `max_memory_mb` and `allowed_domains`, are rejected. `require_evidence` now requires a non-empty evidence string.
-- An intent audit record is appended before a tool runs. If that append fails, the tool does not run. The outcome record stores the parameters that executed.
-- A rejected request does not consume a permit's `max_executions` budget.
-- Loading an audit bundle verifies the hash chain. A broken chain halts the kernel and does not install the entries.
-- An unexpected exception during request processing moves the kernel to `HALTED`. That halt is recorded on the kernel. `StateMachine.reset()` does not clear it, so a halted kernel does not accept another request.
-- Ambiguous requests are always denied. `KernelConfig.fail_closed = False` is not an opt-out.
-- The async kernel classes delegate to the synchronous kernels. They do not keep a second state machine. `AsyncDispatcher.dispatch` does not run a tool.
-
-### Changed
-
-- Successful tool execution visits `COMPLETED` before returning to `IDLE`. The lifecycle is BOOTING, IDLE, VALIDATING, ARBITRATING, EXECUTING, AUDITING, COMPLETED, HALTED.
-- `KernelConfig.jurisdiction` is the jurisdiction name checked against a permit. It defaults to `"default"`.
-- A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
-- CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 65%, which this suite meets (measured combined coverage 65.8%: 2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
-- The audit ledger remains process-local by default; optional `SQLiteAuditStorage` commits each ledger entry before the in-memory chain advances and verifies persisted history on boot. SQLite is single-host storage, not an independently protected archive.
-- `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected. The overall coverage gate is 66%.
-- Examples, the HTTP adapters, the SDK client and server, and MCP submit tool calls with a permit bound to the exact parameters. Adapter `halt()` passes a reason. Adapter evidence export returns a mapping.
-
-### Removed
-
-- Removed the GitHub Actions workflows `hpc-matrix`, `gpu-hardware`, `benchmark`, `codex-self-heal`, and `codex-pr-generator`. They do not test this package. `codex-self-heal.yml` did not parse: a Python heredoc at column 0 inside a `run: |` block broke the YAML.
-
-### Added
-
 - Added autonomous Codex contribution scaffold workflows: issue-triggered PR generation and CI failure self-healing issue creation.
 - Added `scripts/agents/codex_generate_patch.py` and `scripts/agents/build_codex_prompt.py` for auditable run payload generation and skill-constrained prompt composition.
 - Added `scripts/agents/append_metrics.py` and `scripts/agents/evaluate_run.py` to persist benchmark deltas, score runs, and maintain `.codex/meta` leaderboard + `.codex/memory` learning artifacts.
@@ -68,9 +34,52 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Changed
 
+- **BREAKING:** `python -m kernels.cli.verify` requires `ledger_entries`. A missing or empty list, the legacy `entries` key, malformed JSON, an unknown schema (a non-object payload, or a `schema` or `schema_version` field), an empty object, and a missing `root_hash` exit 1. The LangChain, Hugging Face, generic, LangGraph, CrewAI, and AutoGPT adapters still export `entries`, so their bundles fail this command until they are migrated. `MoltbookAdapter` inherits the generic export and fails the same way.
+- **BREAKING:** Success output says `internally consistent (integrity only)`. `root_hash` is taken from the bundle and the bundle is not signed, so a match shows internal consistency only, not authenticity. A full rewrite that recomputes every `entry_hash`, `prev_hash`, and `root_hash` still passes. Dropping trailing entries and resetting `root_hash` to the new last entry still passes. Relabelling unhashed metadata (`kernel_id`, `variant`, `exported_at_ms`, `entry_count`, and `ledger_seq`) still passes.
+- **BREAKING:** Removed from the report: the five named checks and the `N/5` line, the statistics block, warnings, and the kernel ID and variant header. `--detailed` no longer shows the tool, permit status, or denial reason; it prints the sequence, decision, and a truncated `entry_hash`. `--json` reports `internally_consistent` instead of `passed`, and no longer includes `checks_passed`, `checks_failed`, `warnings`, or `stats`. Check failures exit 1. The previous exception handler exited 2; an uncaught error, such as a null `entry_hash`, now ends with status 1 and a traceback. Invalid arguments still exit 2.
+- **BREAKING:** `python -m kernels.cli.verify --json` currently prints the text report and then the JSON summary on stdout (`kernels/cli/verify.py:199-202`). Consumers that parse stdout as JSON fail. The previous output was JSON only. A fix is tracked separately.
+- **BREAKING:** The async kernel constructors changed from `AsyncStrictKernel(kernel_id, policy, tool_registry)` (and the same for `AsyncPermissiveKernel`, `AsyncEvidenceFirstKernel`, and `AsyncDualChannelKernel`) to `(kernel_id)`. The `policy` and `tool_registry` arguments are gone, and `AsyncPermissiveKernel` no longer builds its own wildcard policy. Install a policy with `set_policy` and permit keys with `set_keyring`.
+- **BREAKING:** `AsyncKernel.submit` now takes a `KernelRequest` and an optional `permit_token` and returns a `KernelReceipt`. It used to take a `Request` and return a `Receipt`. `halt` is now `async halt(reason)` and returns a `KernelReceipt`; it used to be a synchronous `halt()` that returned `None`.
+- **BREAKING:** The async helper signatures changed. `submit_batch(kernel, requests, permits=None)` submits one request after another on the kernel lock and has no `concurrency` argument. `submit_with_timeout` and `submit_with_retry` take an optional `permit_token`; in `submit_with_retry` it comes before `max_retries`, and `backoff` now defaults to `0.0` instead of `1.0`.
+- **BREAKING:** `AsyncDispatcher.dispatch` used to run the registered tool. It now always returns a failed result whose error starts with `MISSING_PERMIT`. It does not call the registered tool, and it ignores the tool call and timeout. `dispatch_batch` calls `dispatch` for each call, so no tool runs. It still returns one refusal per call, in order.
+- **BREAKING:** `AsyncKernel`, the base class of the four async wrappers, is not in `kernels.async_support.__all__`. It is reachable only as `kernels.async_support.async_kernel.AsyncKernel`.
+- The PyPI distribution name is `shards-kernel`. The import package remains `kernels`.
+- Replaced the truncated `LICENSE` stub with the SPDX MIT text. Copyright line: `Copyright (c) 2026 Shards Inc Ltd`.
+- Successful tool execution visits `COMPLETED` before returning to `IDLE`. The lifecycle is BOOTING, IDLE, VALIDATING, ARBITRATING, EXECUTING, AUDITING, COMPLETED, HALTED.
+- `KernelConfig.jurisdiction` is the jurisdiction name checked against a permit. It defaults to `"default"`.
+- A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
+- CI runs ruff, tests, and coverage on Python 3.9–3.12. The agreed coverage standard is a single 90% gate, which the CI quality job enforces with `--cov-fail-under=90`. Other coverage thresholds in the Makefile, the release workflow, and the docs differ from it; they are being unified in a separate coverage-scope PR, and this entry does not claim that work is done. A past measurement was 65.8% (2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
+- The audit ledger remains process-local by default; optional `SQLiteAuditStorage` commits each ledger entry before the in-memory chain advances and verifies persisted history on boot. SQLite is single-host storage, not an independently protected archive.
+- `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected.
+- Examples, the HTTP adapters, the SDK client and server, and MCP submit tool calls with a permit bound to the exact parameters. Adapter `halt()` passes a reason. Adapter evidence export returns a mapping.
 - Extended the security workflow with dependency review, CodeQL scheduling, vulnerability scans (`safety` and `pip-audit`), and secret scanning using gitleaks.
 - Extended smoke script coverage to execute reference implementation runtime checks.
 - Updated release workflow to verify distribution metadata with `twine check` before PyPI publishing.
+
+### Removed
+
+- **BREAKING:** Removed checks not yet rebuilt: sequence numbering (`ledger_seq`), permit enforcement, nonce replay, and state transitions.
+- **BREAKING:** Removed Python API: `EvidenceVerifier`, `VerificationResult`, and `print_verification_result`. `verify_evidence` and `verify_evidence_file` now return `ConsistencyResult`.
+- **BREAKING:** `AsyncBaseKernel` is removed, with no deprecation warning. The Python API never defined `submit_async`; `AsyncBaseKernel.submit` was the async entry point, and it is gone. `halt_async` and `export_evidence_async` are removed, also with no deprecation warning. `AsyncKernel.submit` and `AsyncKernel.halt` call the synchronous kernel, so its checks are the ones that run. `export_evidence` is synchronous and returns that kernel's bundle. `AsyncStrictKernel`, `AsyncPermissiveKernel`, `AsyncEvidenceFirstKernel`, and `AsyncDualChannelKernel` remain, as wrappers that boot the matching synchronous kernel.
+- Removed the GitHub Actions workflows `hpc-matrix`, `gpu-hardware`, `benchmark`, `codex-self-heal`, and `codex-pr-generator`. They do not test this package. `codex-self-heal.yml` did not parse: a Python heredoc at column 0 inside a `run: |` block broke the YAML.
+
+### Security
+
+- `python -m kernels.cli.verify` reads `ledger_entries` and checks internal consistency by delegating to `verify_evidence_bundle`. Replay recomputes each entry hash from the entry content and compares `prev_hash` links and `root_hash`. A missing, empty, or unknown entries key, an empty bundle, malformed JSON, an unknown schema, or the legacy `entries` key is a failure with a non-zero exit. An empty entry list is rejected in the CLI before replay, because `replay_and_verify` reports an empty list as consistent. `root_hash` is stored in the bundle, so a match shows only that the bundle is internally consistent (integrity only).
+- Tool execution is fail-closed. A tool call requires a permit whose parameters are the parameters that run, even when no HMAC key is configured. Set `KernelConfig.allow_insecure_unpermitted_execution` to opt out on a non-strict kernel. `StrictKernel` ignores that flag.
+- Unknown permit constraints, and the documented but previously unimplemented constraints `max_memory_mb` and `allowed_domains`, are rejected. `require_evidence` now requires a non-empty evidence string.
+- An intent audit record is appended before a tool runs. If that append fails, the tool does not run. The outcome record stores the parameters that executed.
+- A rejected request does not consume a permit's `max_executions` budget.
+- Loading an audit bundle verifies the hash chain. A broken chain halts the kernel and does not install the entries.
+- An unexpected exception during request processing moves the kernel to `HALTED`. That halt is recorded on the kernel. `StateMachine.reset()` does not clear it, so a halted kernel does not accept another request.
+- Ambiguous requests are always denied. `KernelConfig.fail_closed = False` is not an opt-out.
+- The async kernel classes delegate to the synchronous kernels. They do not keep a second state machine. `AsyncDispatcher.dispatch` does not run a tool.
+
+### Migration
+
+- Async callers: build a `KernelRequest` and pass it to `AsyncKernel.submit(request, permit_token=...)` with a permit bound to the exact parameters. Construct the async wrappers with `kernel_id` only, then call `set_policy` and `set_keyring`. `AsyncDispatcher.dispatch` does not run tools; submit tool calls through the kernel.
+- Evidence bundles for `python -m kernels.cli.verify`: the command reads `ledger_entries`. The LangChain, Hugging Face, generic, LangGraph, CrewAI, AutoGPT, and Moltbook adapters still export `entries`. Rename `entries` to `ledger_entries` in the bundle, or build the bundle with `evidence_to_mapping`. There is no CLI flag or alias for `entries`.
+- Scripts that parse `verify --json` output: until the separately tracked fix lands, stdout holds the text report followed by the JSON object, so do not pass it directly to a JSON parser.
 
 ## [0.1.0] - 2026-01-01
 
