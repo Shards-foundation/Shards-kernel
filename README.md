@@ -170,8 +170,9 @@ python examples/02_verify_evidence.py
 python examples/03_sqlite_evidence_archive.py
 ```
 
-The SQLite demo archives evidence after a request completes. It is not a claim
-that the live kernel currently enforces durable audit-before-execution.
+The SQLite demo injects a SQLite-backed audit ledger into the kernel and checks
+that verified evidence is restored after restart. See the demo guide for the
+scope and operational limitations.
 
 ## Organisation-wide repository review automation
 
