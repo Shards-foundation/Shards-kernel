@@ -115,7 +115,7 @@ jobs:
           python-version: "3.12"
 
       - name: Download verified distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: verified-release-dist
           path: dist/
