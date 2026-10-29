@@ -54,7 +54,7 @@ version = {attr = "kernels._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["kernels*"]
+include = ["kernels*", "implementations*"]
 
 [tool.ruff]
 line-length = 100
