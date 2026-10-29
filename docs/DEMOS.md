@@ -18,7 +18,8 @@ Python 3.9–3.12 are the supported versions declared by the project.
 ```bash
 python examples/01_minimal_request.py
 python examples/02_verify_evidence.py
-python examples/03_sqlite_evidence_archive.py
+python examples/03_fail_closed_ambiguity.py
+python examples/04_sqlite_persistent_ledger.py
 ```
 
 ### 01 — Minimal request
@@ -31,7 +32,11 @@ exports the evidence bundle.
 Submits a deterministic request and independently recomputes the exported
 hash chain. The process exits non-zero if verification fails.
 
-### 03 — Durable SQLite audit ledger
+### 03 — Fail-closed ambiguity
+
+Demonstrates that ambiguous or invalid requests do not silently become permission to execute. See the example source for the exact request and expected rejection.
+
+### 04 — Durable SQLite audit ledger
 
 Injects `SQLiteAuditStorage` into the kernel, commits each ledger entry to
 SQLite before the in-memory ledger advances, then creates a new kernel instance
