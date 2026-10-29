@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   quality:
     runs-on: ubuntu-24.04
@@ -30,9 +33,6 @@ jobs:
           pip install build
 
       - name: Ruff lint
-        # pyproject ignores E501. Passing --select on the CLI replaces that
-        # ignore, so E501 is ignored here explicitly. Import order and pyupgrade
-        # findings are pre-existing and are not part of this gate.
         run: ruff check . --select E,F --ignore E501
 
       - name: Run tests with coverage
@@ -61,5 +61,24 @@ jobs:
       - name: Smoke checks
         run: ./scripts/smoke.sh
 
-      - name: Build package
+      - name: Run documented demos
+        run: |
+          python examples/01_minimal_request.py
+          python examples/02_verify_evidence.py
+          python examples/03_sqlite_evidence_archive.py
+
+      - name: Build source and wheel distributions
         run: python -m build
+
+      - name: Verify wheel in an isolated environment
+        if: matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_venv="$RUNNER_TEMP/kernels-wheel-venv"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --upgrade pip
+          "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$wheel_venv/bin/python" -c "import kernels; from kernels.api import StrictKernel; print('Installed wheel import: OK')"
+          "$wheel_venv/bin/kernels" --help
