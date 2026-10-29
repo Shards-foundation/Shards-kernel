@@ -19,6 +19,5 @@ jobs:
     steps:
     - name: Apply path labels when labeler configuration exists
       uses: actions/labeler@v4
-      continue-on-error: true
       with:
         repo-token: "${{ secrets.GITHUB_TOKEN }}"
