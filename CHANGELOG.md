@@ -13,6 +13,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Removed from the report: the five named checks and the `N/5` line, the statistics block, warnings, and the kernel ID and variant header. `--detailed` no longer shows the tool, permit status, or denial reason; it prints the sequence, decision, and a truncated `entry_hash`. `--json` reports `internally_consistent` instead of `passed`, and no longer includes `checks_passed`, `checks_failed`, `warnings`, or `stats`. Check failures exit 1. The previous exception handler exited 2; an uncaught error, such as a null `entry_hash`, now ends with status 1 and a traceback. Invalid arguments still exit 2.
 - Removed checks not yet rebuilt: sequence numbering (`ledger_seq`), permit enforcement, nonce replay, and state transitions.
 - Removed Python API: `EvidenceVerifier`, `VerificationResult`, and `print_verification_result`. `verify_evidence` and `verify_evidence_file` now return `ConsistencyResult`.
+- `AsyncBaseKernel` is removed, with no deprecation warning. The Python API never defined `submit_async`; `AsyncBaseKernel.submit` was the async entry point, and it is gone. `halt_async` and `export_evidence_async` are removed, also with no deprecation warning. `AsyncKernel.submit` and `AsyncKernel.halt` call the synchronous kernel, so its checks are the ones that run. `export_evidence` is synchronous and returns that kernel's bundle. `AsyncStrictKernel`, `AsyncPermissiveKernel`, `AsyncEvidenceFirstKernel`, and `AsyncDualChannelKernel` remain, as wrappers that boot the matching synchronous kernel.
+- `AsyncDispatcher.dispatch` always returns a failed result whose error starts with `MISSING_PERMIT`. It does not call the registered tool, and it ignores the tool call and timeout. `dispatch_batch` calls `dispatch` for each call, so no tool runs. It still returns one refusal per call, in order.
 
 ### Added
 
@@ -43,9 +45,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Successful tool execution visits `COMPLETED` before returning to `IDLE`. The lifecycle is BOOTING, IDLE, VALIDATING, ARBITRATING, EXECUTING, AUDITING, COMPLETED, HALTED.
 - `KernelConfig.jurisdiction` is the jurisdiction name checked against a permit. It defaults to `"default"`.
 - A tool call's `params` and `request.params` must be the same object contents. The kernel binds one canonical copy and checks it again immediately before execution.
-- CI runs ruff, tests, and coverage on Python 3.9–3.12. The overall coverage gate is 65%, which this suite meets (measured combined coverage 65.8%: 2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
+- CI runs ruff, tests, and coverage on Python 3.9–3.12. `make test-cov` uses `--cov-fail-under=66`. The CI quality job uses `--cov-fail-under=90`. The release workflow uses `--cov-fail-under=70`. A measurement taken against the earlier 65% gate was 65.8% (2365/3482 statements, 477/838 branches). Governance modules must stay at or above 90% branch coverage. Workflows for a PyTorch GPU stack, and the self-heal workflow whose YAML did not parse, are removed.
 - The audit ledger remains process-local by default; optional `SQLiteAuditStorage` commits each ledger entry before the in-memory chain advances and verifies persisted history on boot. SQLite is single-host storage, not an independently protected archive.
-- `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected. The overall coverage gate is 66%.
+- `RequestBuilder` and `PolicyBuilder` emit a `KernelRequest` and a `JurisdictionPolicy`. Custom policy callables are rejected.
 - Examples, the HTTP adapters, the SDK client and server, and MCP submit tool calls with a permit bound to the exact parameters. Adapter `halt()` passes a reason. Adapter evidence export returns a mapping.
 
 ### Removed
