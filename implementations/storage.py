@@ -17,10 +17,22 @@ class SQLiteAuditStorage:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._database_path)
+        """Open a connection with SQLite's strongest standard sync setting."""
+        connection = sqlite3.connect(self._database_path)
+        connection.execute("PRAGMA synchronous = FULL")
+        return connection
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_kernel_metadata (
+                    kernel_id TEXT PRIMARY KEY,
+                    variant TEXT NOT NULL
+                )
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS audit_entries (
