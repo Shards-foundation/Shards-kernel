@@ -43,7 +43,7 @@ def test_ambiguity_checks_empty_long_and_invalid_tool_calls():
 
 
 def test_param_size_uses_utf8_serialized_size():
-    assert check_param_size({}, max_bytes=0)
+    assert not check_param_size({}, max_bytes=0)
     assert check_param_size({"x": "é"}, max_bytes=10)
     assert not check_param_size({"x": "é"}, max_bytes=7)
 
