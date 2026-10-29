@@ -230,7 +230,16 @@ kernel.set_policy(policy)
 
 ## 5. Audit
 
-`kernel.export_evidence()` returns an `EvidenceBundle` with `ledger_entries`, `root_hash`, `exported_at_ms`, `kernel_id`, and `variant`. The reference ledger is process memory. It does not write a file and does not fsync.
+`kernel.export_evidence()` returns an `EvidenceBundle` with `ledger_entries`, `root_hash`, `exported_at_ms`, `kernel_id`, and `variant`. By default, the ledger is process-local. To enable local durable persistence, inject a storage adapter when constructing a kernel:
+
+```python
+from implementations.storage import SQLiteAuditStorage
+from kernels.variants.strict_kernel import StrictKernel
+
+kernel = StrictKernel(audit_storage=SQLiteAuditStorage("audit.sqlite3"))
+```
+
+With SQLite storage configured, each entry is committed before the in-memory ledger advances. On boot, the kernel restores and verifies stored history; persistence or verification failures prevent normal startup. This adapter is local to one host and does not protect against a privileged actor rewriting the database.
 
 A successful tool call appends two entries: `audit_phase="intent"` before the tool runs, then `audit_phase="outcome"`. `replay_and_verify(entries, expected_root_hash)` returns `(is_valid, errors)`.
 
