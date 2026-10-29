@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import asyncio
@@ -49,11 +50,29 @@ class KernelClient:
         api_key: Optional[str] = None,
         timeout: float = 30.0,
     ):
+        self._validate_http_url(base_url)
         self.config = ClientConfig(
             base_url=base_url.rstrip("/"),
             api_key=api_key,
             timeout=timeout,
         )
+
+    @staticmethod
+    def _validate_http_url(url: str) -> None:
+        """Reject non-HTTP(S) URLs and embedded credentials."""
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            hostname = parsed.hostname
+        except ValueError as exc:
+            raise ValueError(f"Invalid kernel server URL: {exc}") from exc
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise ValueError("Kernel server URL must be an HTTP(S) URL without credentials or fragments")
 
     def _make_request(
         self,
@@ -63,6 +82,10 @@ class KernelClient:
     ) -> Dict[str, Any]:
         """Make HTTP request to kernel server."""
         url = f"{self.config.base_url}{path}"
+        try:
+            self._validate_http_url(url)
+        except ValueError as exc:
+            raise KernelError(str(exc)) from exc
 
         headers = {
             "Content-Type": "application/json",
@@ -85,7 +108,7 @@ class KernelClient:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:  # nosec B310: URL is validated as HTTP(S) above
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
