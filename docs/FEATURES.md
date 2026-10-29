@@ -101,7 +101,7 @@ Every request is recorded in an **immutable, hash-chained ledger**.
 - Hash-chained (tamper-evident)
 - Externally verifiable
 - Complete history
-- Process memory only. The reference ledger does not write a file and does not fsync. Export the bundle to keep it.
+- Process memory by default; optional SQLite-backed persistence commits entries before the in-memory ledger advances and verifies history on boot. The SQLite adapter is single-host storage, not an independently protected archive.
 
 **Example:**
 ```python
