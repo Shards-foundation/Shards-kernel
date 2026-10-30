@@ -64,11 +64,11 @@ python -m pip install shards-kernel
 python -c "import shards_kernel"
 ```
 
-A PyPI release is pending, so that command is not published yet. Do not run `pip install shards-kernel`. That name belongs to a different package. The import package in this repository remains `shards_kernel`.
+A verified PyPI release is pending. Do **not** install the unrelated PyPI distribution `kernels` (maintained by Hugging Face). After an approved release, install `shards-kernel` and import `shards_kernel`. Until then, install this repository directly from GitHub.
 
 ### 2.3 From GitHub
 
-This repository has no published release tarball (`kernels-0.1.0.tar.gz` is not a release asset). Install from the Git repository:
+This repository has no published release tarball (`shards_kernel-0.1.0.tar.gz` is not a release asset). Install from the Git repository:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
@@ -89,7 +89,7 @@ RUN git clone https://github.com/Shards-foundation/Shards-kernel.git . && \
 # Run smoke test
 RUN python -m shards_kernel info
 
-CMD ["python", "-m", "kernels", "info"]
+CMD ["python", "-m", "shards_kernel", "info"]
 ```
 
 ```bash

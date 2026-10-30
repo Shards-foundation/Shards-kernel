@@ -23,7 +23,7 @@ python -m shards_kernel info
 
 ### Option B: Install the distribution
 
-The distribution name is `shards-kernel`. Import it as `shards_kernel`. A PyPI release is pending, so `pip install shards-kernel` is not published yet. Do not run `pip install shards-kernel` (that name is a different package). Until the release exists, install from GitHub:
+The distribution name is `shards-kernel`, and its import namespace is `shards_kernel`. An approved PyPI release is pending. Do not install the unrelated PyPI project `kernels`. Until a verified Shards-Kernel release exists, install from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"

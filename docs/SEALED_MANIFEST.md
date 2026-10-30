@@ -215,8 +215,8 @@ Everything not listed above is internal and may change without notice.
 
 | Artifact | SHA-256 |
 |----------|---------|
-| kernels-0.1.0.tar.gz | not published (no GitHub release) |
-| kernels-0.1.0-py3-none-any.whl | not published (no GitHub release) |
+| shards_kernel-0.1.0.tar.gz | not published (no GitHub release) |
+| shards_kernel-0.1.0-py3-none-any.whl | not published (no GitHub release) |
 
 ### 9.2 Verification
 

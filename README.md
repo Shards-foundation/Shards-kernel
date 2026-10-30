@@ -145,6 +145,8 @@ python -m pip install -e .
 
 Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
+For existing users migrating from the old `kernels` Python import path, see [the package migration guide](docs/PACKAGE_MIGRATION.md).
+
 ## Quickstart
 
 ```bash

@@ -49,7 +49,7 @@ print(f"State: {kernel.state}")  # Should print: State: KernelState.IDLE
 
 ### 3.1 Installation Issues
 
-#### Issue: ModuleNotFoundError: No module named 'kernels'
+#### Issue: ModuleNotFoundError: No module named 'shards_kernel'
 
 **Cause:** Package not installed or wrong Python environment.
 

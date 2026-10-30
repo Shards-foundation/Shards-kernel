@@ -22,7 +22,9 @@ This guide covers migration scenarios for Shards-Kernel deployments.
 - None planned
 
 **Migration Steps:**
-1. Update package: `pip install --upgrade kernels`
+
+For the Python import namespace change, consult [PACKAGE_MIGRATION.md](../PACKAGE_MIGRATION.md).
+1. Update package: `pip install --upgrade shards-kernel` (after an approved release)
 2. Review changelog for new features
 3. Test in staging environment
 4. Deploy to production

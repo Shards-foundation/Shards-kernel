@@ -1,4 +1,4 @@
-# Contributing to kernels
+# Contributing to Shards-Kernel
 
 We love your input! We want to make contributing to this project as easy and transparent as possible.
 
@@ -16,9 +16,9 @@ Install the development dependencies, then run:
 ```bash
 python -m pip install -e ".[dev]"
 ruff check .
-pytest --cov=kernels --cov=implementations --cov-branch --cov-report=term-missing --cov-report=xml --cov-report=json:coverage.json --cov-fail-under=90
+pytest --cov=shards_kernel --cov=implementations --cov-branch --cov-report=term-missing --cov-report=xml --cov-report=json:coverage.json --cov-fail-under=90
 python scripts/ci/check_governance_coverage.py coverage.json
-python scripts/ci/smoke.py
+./scripts/smoke.sh
 python examples/01_minimal_request.py
 python examples/02_verify_evidence.py
 python examples/03_fail_closed_ambiguity.py
