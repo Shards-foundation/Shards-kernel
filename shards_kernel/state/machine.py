@@ -6,9 +6,9 @@ behavior. Invalid transitions raise StateError.
 
 from typing import Callable, Optional
 
-from kernels.common.types import KernelState
-from kernels.common.errors import StateError
-from kernels.state.transitions import can_transition, is_terminal
+from shards_kernel.common.types import KernelState
+from shards_kernel.common.errors import StateError
+from shards_kernel.state.transitions import can_transition, is_terminal
 
 
 class StateMachine:

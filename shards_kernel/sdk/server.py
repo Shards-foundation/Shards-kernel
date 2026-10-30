@@ -1,5 +1,5 @@
 """
-KERNELS SDK Server
+Shards-Kernel SDK Server
 
 HTTP server for exposing kernel functionality.
 """
@@ -11,7 +11,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional, Type
 import threading
 
-from kernels.integrations.wire import (
+from shards_kernel.integrations.wire import (
     boot_strict_kernel,
     evidence_to_mapping,
     policy_to_mapping,
@@ -19,8 +19,8 @@ from kernels.integrations.wire import (
     request_from_mapping,
     status_mapping,
 )
-from kernels.variants.base import BaseKernel
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 
 class KernelRequestHandler(BaseHTTPRequestHandler):
@@ -80,7 +80,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         self._send_json(
             200,
             {
-                "name": "KERNELS",
+                "name": "Shards-Kernel",
                 "version": "0.1.0",
                 "kernel_id": self.kernel.config.kernel_id if self.kernel else None,
             },
@@ -164,7 +164,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
 
 class KernelServer:
     """
-    HTTP server for KERNELS.
+    HTTP server for Shards-Kernel.
 
     Exposes kernel functionality via REST API.
 
@@ -208,13 +208,13 @@ class KernelServer:
         self._server = HTTPServer((self.host, self.port), handler)
 
         if blocking:
-            print(f"KERNELS server running on http://{self.host}:{self.port}")
+            print(f"Shards-Kernel server running on http://{self.host}:{self.port}")
             self._server.serve_forever()
         else:
             self._thread = threading.Thread(target=self._server.serve_forever)
             self._thread.daemon = True
             self._thread.start()
-            print(f"KERNELS server started on http://{self.host}:{self.port}")
+            print(f"Shards-Kernel server started on http://{self.host}:{self.port}")
 
     def stop(self) -> None:
         """Stop the server."""

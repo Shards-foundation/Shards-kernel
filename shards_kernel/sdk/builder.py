@@ -1,5 +1,5 @@
 """
-KERNELS SDK Builders
+Shards-Kernel SDK Builders
 
 Fluent builders for constructing requests and policies.
 """
@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import uuid
 
-from kernels.common.types import Request, ToolCall
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.common.types import Request, ToolCall
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 
 class RequestBuilder:

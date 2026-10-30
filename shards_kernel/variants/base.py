@@ -8,7 +8,7 @@ import copy
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     Decision,
     DecisionEnvelope,
     EvidenceBundle,
@@ -19,25 +19,25 @@ from kernels.common.types import (
     ReceiptStatus,
     ToolCall,
 )
-from kernels.common.errors import (
+from shards_kernel.common.errors import (
     AuditError,
     BootError,
     StateError,
 )
-from kernels.common.validate import validate_request, check_ambiguity
-from kernels.audit.ledger import AuditLedger
-from kernels.jurisdiction.policy import JurisdictionPolicy
-from kernels.jurisdiction.rules import evaluate_policy
-from kernels.state.machine import StateMachine
-from kernels.execution.tools import create_default_registry
-from kernels.execution.dispatcher import Dispatcher, resolve_bound_params
-from kernels.core.runtime import (
+from shards_kernel.common.validate import validate_request, check_ambiguity
+from shards_kernel.audit.ledger import AuditLedger
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.jurisdiction.rules import evaluate_policy
+from shards_kernel.state.machine import StateMachine
+from shards_kernel.execution.tools import create_default_registry
+from shards_kernel.execution.dispatcher import Dispatcher, resolve_bound_params
+from shards_kernel.core.runtime import (
     ExecutionContext,
     KernelRuntime,
     RuntimeEvent,
     RuntimeExecutionResult,
 )
-from kernels.permits import (
+from shards_kernel.permits import (
     NonceRegistry,
     PermitToken,
     _params_satisfy_permit,

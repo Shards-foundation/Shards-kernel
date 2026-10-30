@@ -1,5 +1,5 @@
 """
-Permit Token System for KERNELS.
+Permit Token System for Shards-Kernel.
 
 Implements HMAC-based capability tokens that bind authorization scope,
 cryptographic verification, replay protection, and audit linkage.
@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from kernels.common.types import Decision
+from shards_kernel.common.types import Decision
 
 # ============================================================================
 # PERMIT TOKEN DATA MODEL

@@ -1,7 +1,7 @@
 """State machine implementation for Kernels."""
 
-from kernels.state.machine import StateMachine
-from kernels.state.transitions import (
+from shards_kernel.state.machine import StateMachine
+from shards_kernel.state.transitions import (
     ALLOWED_TRANSITIONS,
     can_transition,
     get_next_states,

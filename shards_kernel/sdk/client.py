@@ -1,7 +1,7 @@
 """
-KERNELS SDK Client
+Shards-Kernel SDK Client
 
-HTTP client for interacting with KERNELS servers.
+HTTP client for interacting with Shards-Kernel servers.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import asyncio
 
-from kernels.common.types import Decision, KernelState, Receipt, ReceiptStatus, Request
-from kernels.common.errors import KernelError
-from kernels.integrations.wire import permit_to_mapping
-from kernels.permits import PermitToken
+from shards_kernel.common.types import Decision, KernelState, Receipt, ReceiptStatus, Request
+from shards_kernel.common.errors import KernelError
+from shards_kernel.integrations.wire import permit_to_mapping
+from shards_kernel.permits import PermitToken
 
 
 @dataclass
@@ -34,7 +34,7 @@ class ClientConfig:
 
 class KernelClient:
     """
-    Synchronous HTTP client for KERNELS.
+    Synchronous HTTP client for Shards-Kernel.
 
     Provides methods for submitting requests, checking status,
     and exporting evidence.
@@ -225,7 +225,7 @@ class KernelClient:
 
 class AsyncKernelClient:
     """
-    Async HTTP client for KERNELS.
+    Async HTTP client for Shards-Kernel.
 
     Provides async methods for submitting requests.
     Uses asyncio for non-blocking I/O.

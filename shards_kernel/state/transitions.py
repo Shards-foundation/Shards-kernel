@@ -6,7 +6,7 @@ transition validity.
 
 from typing import Optional
 
-from kernels.common.types import KernelState
+from shards_kernel.common.types import KernelState
 
 
 # Allowed transitions: from_state -> set of allowed to_states
