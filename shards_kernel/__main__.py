@@ -1,4 +1,4 @@
-"""CLI entrypoint for Kernels."""
+"""CLI entrypoint for Shards-Kernel."""
 
 import argparse
 import sys
@@ -9,7 +9,7 @@ def main() -> int:
     """Main CLI entrypoint."""
     parser = argparse.ArgumentParser(
         prog="shards-kernel",
-        description="Kernels: Deterministic Control Planes for AI Systems",
+        description="Shards-Kernel: Deterministic Control Planes for AI Systems",
     )
     parser.add_argument(
         "--version",

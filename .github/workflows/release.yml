@@ -89,7 +89,7 @@ jobs:
           "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
           cd "$RUNNER_TEMP"
           "$wheel_venv/bin/python" -c "import shards_kernel; from shards_kernel.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Release wheel imports: OK')"
-          "$wheel_venv/bin/shards_kernel" --help
+          "$wheel_venv/bin/shards-kernel" --help
 
       - name: Upload verified release distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

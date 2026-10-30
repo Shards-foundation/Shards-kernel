@@ -6,7 +6,7 @@ set -e
 cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$(pwd)"
 
-echo "Kernels Smoke Test"
+echo "Shards-Kernel Smoke Test"
 echo "=================="
 
 echo ""
