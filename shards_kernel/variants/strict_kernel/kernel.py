@@ -7,8 +7,8 @@ The strict kernel enforces maximum constraints:
 - tool execution only if tool_call present and validated
 """
 
-from kernels.common.types import KernelConfig, KernelRequest
-from kernels.variants.base import BaseKernel
+from shards_kernel.common.types import KernelConfig, KernelRequest
+from shards_kernel.variants.base import BaseKernel
 
 
 class StrictKernel(BaseKernel):

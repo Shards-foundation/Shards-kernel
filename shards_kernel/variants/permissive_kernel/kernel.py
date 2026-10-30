@@ -6,12 +6,12 @@ The permissive kernel has relaxed constraints:
 - Audits and returns ALLOW without executing tools for intent-only requests
 """
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     KernelConfig,
     KernelRequest,
 )
-from kernels.jurisdiction.policy import JurisdictionPolicy
-from kernels.variants.base import BaseKernel
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.variants.base import BaseKernel
 
 
 class PermissiveKernel(BaseKernel):

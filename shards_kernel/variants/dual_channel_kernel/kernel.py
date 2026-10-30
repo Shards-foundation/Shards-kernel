@@ -7,8 +7,8 @@ The dual-channel kernel requires both intent and constraints:
 - Produces richer receipts with constraint information
 """
 
-from kernels.common.types import KernelConfig, KernelRequest
-from kernels.variants.base import BaseKernel
+from shards_kernel.common.types import KernelConfig, KernelRequest
+from shards_kernel.variants.base import BaseKernel
 
 
 REQUIRED_CONSTRAINT_KEYS = frozenset({"scope", "non_goals", "success_criteria"})

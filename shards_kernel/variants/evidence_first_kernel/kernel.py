@@ -6,8 +6,8 @@ The evidence-first kernel requires evidence for ALLOW decisions:
 - Emphasizes audit and export capabilities
 """
 
-from kernels.common.types import KernelConfig, KernelRequest
-from kernels.variants.base import BaseKernel
+from shards_kernel.common.types import KernelConfig, KernelRequest
+from shards_kernel.variants.base import BaseKernel
 
 
 class EvidenceFirstKernel(BaseKernel):
