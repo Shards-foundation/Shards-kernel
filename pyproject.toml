@@ -28,12 +28,12 @@ classifiers = [
 keywords = ["kernel", "control-plane", "deterministic", "audit", "ai-systems"]
 
 [project.scripts]
-kernels = "kernels.__main__:main"
+shards-kernel = "shards_kernel.__main__:main"
 
 [project.urls]
-Repository = "https://github.com/Shards-foundation/kernels"
-Documentation = "https://github.com/Shards-foundation/kernels/tree/main/docs"
-Changelog = "https://github.com/Shards-foundation/kernels/blob/main/CHANGELOG.md"
+Repository = "https://github.com/Shards-foundation/Shards-kernel"
+Documentation = "https://github.com/Shards-foundation/Shards-kernel/tree/main/docs"
+Changelog = "https://github.com/Shards-foundation/Shards-kernel/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Test and lint tools only. The installed runtime package has no dependencies.
@@ -51,11 +51,11 @@ dev = [
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "kernels._version.__version__"}
+version = {attr = "shards_kernel._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["kernels*", "implementations*"]
+include = ["shards_kernel*", "implementations*"]
 
 [tool.ruff]
 line-length = 100

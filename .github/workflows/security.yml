@@ -71,7 +71,7 @@ jobs:
         run: pip-audit
 
       - name: Scan Python source with Bandit
-        run: bandit -r kernels implementations -ll
+        run: bandit -r shards_kernel implementations -ll
 
   secret-scanning:
     name: Secret scanning

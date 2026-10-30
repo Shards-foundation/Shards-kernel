@@ -1,6 +1,6 @@
-site_name: KERNELS
+site_name: Shards-Kernel
 site_description: Deterministic control planes and CI/CD governance documentation.
-repo_url: https://github.com/Shards-foundation/kernels
+repo_url: https://github.com/Shards-foundation/Shards-kernel
 edit_uri: edit/main/docs/
 
 theme:

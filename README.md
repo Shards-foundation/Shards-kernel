@@ -1,7 +1,7 @@
-# KERNELS - Deterministic Control Planes for AI Systems
+# Shards-Kernel — Deterministic Control Planes for AI Systems
 
-[![CI](https://github.com/Shards-foundation/kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/kernels/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/Shards-foundation/kernels/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/kernels)
+[![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/Shards-kernel)
 
 A **kernel** is a deterministic state machine that governs AI agent execution via **jurisdiction**, **fail-closed arbitration**, and an **append-only hash-chained audit ledger**.
 
@@ -21,7 +21,7 @@ Ungoverned agent systems fail in predictable ways:
 | Logs are advisory | Missing transitions = missing truth |
 | Accountability diffuses | No single place to prove "why this happened" |
 
-KERNELS exists to make those failure modes **structurally expensive** and **forensically obvious**.
+Shards-Kernel exists to make those failure modes **structurally expensive** and **forensically obvious**.
 
 ---
 
@@ -80,7 +80,7 @@ Any unhandled exception ──────────────────�
 Treat everything else as internal. Your stable integration points:
 
 ```python
-from kernels import (
+from shards_kernel import (
     # Core types
     Kernel,              # Protocol / interface
     KernelRequest,       # Request structure
@@ -103,7 +103,7 @@ from kernels import (
 )
 ```
 
-If a module is not reachable via `kernels.api`, it is **not** a supported API surface.
+If a module is not reachable via `shards_kernel.api`, it is **not** a supported API surface.
 
 ---
 
@@ -122,39 +122,39 @@ Variants tune posture while preserving invariants:
 
 ## Install
 
-The PyPI distribution name is `shards-kernel`. The import package is still `kernels`:
+The PyPI distribution name is `shards-kernel`, the import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install shards-kernel
-python -c "import kernels"
+python -m pip install shards-kernel  # after the approved PyPI release
+python -c "import shards_kernel"
 ```
 
-A PyPI release is pending, so that install is not published yet. Do not run `pip install kernels`: the PyPI project `kernels` is a different package ([Hugging Face kernels](https://pypi.org/project/kernels/)). Until `shards-kernel` is released, install this repository from GitHub:
+A verified PyPI release is pending. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face. Do **not** install `kernels` when intending to install Shards-Kernel. Until the approved release, install this repository from GitHub:
 
 ```bash
-python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
+python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
 ```
 
 Or clone it and install the checkout in editable mode:
 
 ```bash
-git clone https://github.com/Shards-foundation/kernels.git
-cd kernels
+git clone https://github.com/Shards-foundation/Shards-kernel.git
+cd Shards-kernel
 python -m pip install -e .
 ```
 
-Either of those also provides `import kernels`.
+Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/Shards-foundation/kernels.git
-cd kernels
+git clone https://github.com/Shards-foundation/Shards-kernel.git
+cd Shards-kernel
 python -m pip install -e .
 python -m unittest discover -s tests -v
 bash scripts/smoke.sh
 python examples/01_minimal_request.py
-python -m kernels --help
+python -m shards_kernel --help
 ```
 
 ## Runnable Demos
@@ -239,12 +239,12 @@ python scripts/agents/run_end_to_end.py .github/ISSUE_TEMPLATE/feature_request.m
 
 | Document | Content |
 |----------|---------|
-| [spec/SPEC.md](https://github.com/Shards-foundation/kernels/blob/main/spec/SPEC.md) | Normative requirements |
-| [spec/STATES.md](https://github.com/Shards-foundation/kernels/blob/main/spec/STATES.md) | State machine + transitions |
-| [spec/JURISDICTION.md](https://github.com/Shards-foundation/kernels/blob/main/spec/JURISDICTION.md) | Policy rules |
-| [spec/AUDIT.md](https://github.com/Shards-foundation/kernels/blob/main/spec/AUDIT.md) | Ledger + hashing + evidence bundle |
-| [spec/ERROR_MODEL.md](https://github.com/Shards-foundation/kernels/blob/main/spec/ERROR_MODEL.md) | Error taxonomy |
-| [spec/VARIANTS.md](https://github.com/Shards-foundation/kernels/blob/main/spec/VARIANTS.md) | Posture variants |
+| [spec/SPEC.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/spec/SPEC.md) | Normative requirements |
+| [spec/STATES.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/spec/STATES.md) | State machine + transitions |
+| [spec/JURISDICTION.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/spec/JURISDICTION.md) | Policy rules |
+| [spec/AUDIT.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/spec/AUDIT.md) | Ledger + hashing + evidence bundle |
+| [spec/ERROR_MODEL.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/spec/ERROR_MODEL.md) | Error taxonomy |
+| [spec/VARIANTS.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/spec/VARIANTS.md) | Posture variants |
 
 **Architecture + Threat Model**:
 

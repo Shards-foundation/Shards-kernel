@@ -23,7 +23,7 @@ addopts = "-q"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["kernels"]
+source = ["shards_kernel"]
 branch = true
 
 [tool.coverage.report]
