@@ -2,10 +2,10 @@
 
 import unittest
 
-from kernels.common.types import KernelState
-from kernels.common.errors import StateError
-from kernels.state.machine import StateMachine
-from kernels.state.transitions import (
+from shards_kernel.common.types import KernelState
+from shards_kernel.common.errors import StateError
+from shards_kernel.state.machine import StateMachine
+from shards_kernel.state.transitions import (
     can_transition,
     get_next_states,
     is_terminal,

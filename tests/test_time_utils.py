@@ -1,10 +1,10 @@
-"""Tests for kernels.common.time utilities."""
+"""Tests for shards_kernel.common.time utilities."""
 
 import datetime
 
 import pytest
 
-from kernels.common.time import (
+from shards_kernel.common.time import (
     create_clock,
     iso_to_timestamp,
     monotonic_ms,
