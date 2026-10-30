@@ -18,7 +18,7 @@ on:
 jobs:
   dependency-health:
     name: Dependency health (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +36,7 @@ jobs:
       - name: Install package and dependency tooling
         run: |
           python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools
           pip install -e .
           pip install pip-audit
           if [ "${{ matrix.python-version }}" != "3.9" ]; then
@@ -60,4 +61,4 @@ jobs:
           fi
 
       - name: Ensure package still imports
-        run: python -c "import kernels; print('kernels import OK')"
+        run: python -c "import shards_kernel; print('shards_kernel import OK')"
