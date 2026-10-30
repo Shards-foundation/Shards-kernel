@@ -76,6 +76,9 @@ jobs:
       - name: Build distributions
         run: python -m build
 
+      - name: Reject legacy namespace in wheel
+        run: python scripts/ci/check_wheel_identity.py dist/*.whl
+
       - name: Verify package metadata
         run: twine check dist/*
 
