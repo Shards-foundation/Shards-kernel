@@ -1,4 +1,4 @@
-# KERNELS Demos
+# Shards-Kernel Demos
 
 These demos use deterministic clocks and synthetic requests. They do not connect
 to external services, invoke real-world tools, or require API keys.

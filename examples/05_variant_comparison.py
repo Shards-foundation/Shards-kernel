@@ -5,16 +5,16 @@ Demonstrates behavioral differences between kernel variants using the same
 request patterns.
 """
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     KernelConfig,
     KernelRequest,
     ToolCall,
     VirtualClock,
 )
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.variants.permissive_kernel import PermissiveKernel
-from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
-from kernels.variants.dual_channel_kernel import DualChannelKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
+from shards_kernel.variants.dual_channel_kernel import DualChannelKernel
 from _permit import issue_permit
 
 KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}

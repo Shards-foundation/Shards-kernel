@@ -12,9 +12,9 @@ import copy
 import unittest
 from dataclasses import replace
 
-from kernels.common.errors import AuditError, StateError
-from kernels.common.hashing import compute_hash_dict
-from kernels.common.types import (
+from shards_kernel.common.errors import AuditError, StateError
+from shards_kernel.common.hashing import compute_hash_dict
+from shards_kernel.common.types import (
     Decision,
     KernelConfig,
     KernelRequest,
@@ -23,11 +23,11 @@ from kernels.common.types import (
     ToolCall,
     VirtualClock,
 )
-from kernels.execution.dispatcher import Dispatcher
-from kernels.execution.tools import ToolRegistry
-from kernels.permits import NonceRegistry, PermitBuilder, verify_permit
-from kernels.variants.permissive_kernel import PermissiveKernel
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.execution.dispatcher import Dispatcher
+from shards_kernel.execution.tools import ToolRegistry
+from shards_kernel.permits import NonceRegistry, PermitBuilder, verify_permit
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 KEY = b"test-secret-key-32-bytes-long123"
 KEYRING = {"key1": KEY}
@@ -499,7 +499,7 @@ class TestStateMachineGovernance(unittest.TestCase):
             intent="This will explode in validation",
         )
 
-        import kernels.variants.base as base_module
+        import shards_kernel.variants.base as base_module
 
         original = base_module.validate_request
 

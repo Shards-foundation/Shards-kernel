@@ -2,9 +2,9 @@
 
 import pytest
 
-from kernels.common.codec import deserialize, serialize_deterministic, serialize_for_audit
-from kernels.common.types import KernelRequest, ToolCall
-from kernels.common.validate import check_ambiguity, check_param_size, validate_tool_call
+from shards_kernel.common.codec import deserialize, serialize_deterministic, serialize_for_audit
+from shards_kernel.common.types import KernelRequest, ToolCall
+from shards_kernel.common.validate import check_ambiguity, check_param_size, validate_tool_call
 
 
 def req(**changes):

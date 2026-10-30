@@ -1,1 +1,1 @@
-"""Optional implementation adapters shipped with KERNELS."""
+"""Optional implementation adapters shipped with Shards-Kernel."""

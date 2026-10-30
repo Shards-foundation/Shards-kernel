@@ -88,16 +88,16 @@ set -e
 echo "Running lint gate..."
 
 echo "[1/4] Running ruff..."
-ruff check kernels/ tests/
+ruff check shards_kernel/ tests/
 
 echo "[2/4] Running mypy..."
-mypy kernels/
+mypy shards_kernel/
 
 echo "[3/4] Running black..."
-black --check kernels/ tests/
+black --check shards_kernel/ tests/
 
 echo "[4/4] Running isort..."
-isort --check-only kernels/ tests/
+isort --check-only shards_kernel/ tests/
 
 echo "Lint gate passed."
 ```
@@ -157,7 +157,7 @@ set -e
 echo "Running security gate..."
 
 echo "[1/4] Running bandit..."
-bandit -r kernels/ -ll
+bandit -r shards_kernel/ -ll
 
 echo "[2/4] Running safety..."
 safety check
@@ -166,7 +166,7 @@ echo "[3/4] Running detect-secrets..."
 detect-secrets scan --all-files
 
 echo "[4/4] Running semgrep..."
-semgrep --config=auto kernels/
+semgrep --config=auto shards_kernel/
 
 echo "Security gate passed."
 ```
@@ -203,7 +203,7 @@ echo "[2/3] Installing wheel..."
 pip install dist/*.whl
 
 echo "[3/3] Testing import..."
-python -c "import kernels; print(kernels.__version__)"
+python -c "import shards_kernel; print(shards_kernel.__version__)"
 
 echo "Build gate passed."
 ```
@@ -238,8 +238,8 @@ for f in examples/*.py; do
 done
 
 echo "[3/3] Running CLI tests..."
-python -m kernels info
-python -m kernels --version
+python -m shards_kernel info
+python -m shards_kernel --version
 
 echo "Integration gate passed."
 ```

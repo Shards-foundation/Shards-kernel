@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     Decision,
     EvidenceBundle,
     KernelReceipt,
@@ -10,13 +10,13 @@ from kernels.common.types import (
     ReceiptStatus,
     VirtualClock,
 )
-from kernels.integrations.autogpt_adapter import AutoGPTAdapter
-from kernels.integrations.crewai_adapter import CrewAIAdapter
-from kernels.integrations.generic_adapter import GenericAdapter
-from kernels.integrations.huggingface_adapter import HuggingFaceAdapter
-from kernels.integrations.langchain_adapter import LangChainAdapter
-from kernels.integrations.langgraph_adapter import LangGraphAdapter
-from kernels.integrations.mcp_adapter import MCPAdapter, MCPToolCall
+from shards_kernel.integrations.autogpt_adapter import AutoGPTAdapter
+from shards_kernel.integrations.crewai_adapter import CrewAIAdapter
+from shards_kernel.integrations.generic_adapter import GenericAdapter
+from shards_kernel.integrations.huggingface_adapter import HuggingFaceAdapter
+from shards_kernel.integrations.langchain_adapter import LangChainAdapter
+from shards_kernel.integrations.langgraph_adapter import LangGraphAdapter
+from shards_kernel.integrations.mcp_adapter import MCPAdapter, MCPToolCall
 
 
 class Registry:

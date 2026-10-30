@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from kernels.permits import PermitBuilder
+from shards_kernel.permits import PermitBuilder
 
 
 def issue_permit(

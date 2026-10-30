@@ -7,15 +7,15 @@ replay.
 
 import json
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     KernelConfig,
     KernelRequest,
     ToolCall,
     VirtualClock,
 )
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.audit.replay import verify_evidence_bundle
-from kernels.common.codec import audit_entry_to_dict
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.audit.replay import verify_evidence_bundle
+from shards_kernel.common.codec import audit_entry_to_dict
 from _permit import issue_permit
 
 KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}

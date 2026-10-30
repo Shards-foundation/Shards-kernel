@@ -2,8 +2,8 @@
 
 import pytest
 
-from kernels.common.errors import ToolError
-from kernels.execution.tools import ToolRegistry, create_default_registry
+from shards_kernel.common.errors import ToolError
+from shards_kernel.execution.tools import ToolRegistry, create_default_registry
 
 
 def test_registry_lookup_registration_and_removal():

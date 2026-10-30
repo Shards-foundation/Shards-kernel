@@ -1,4 +1,4 @@
-# KERNELS Setup Guide
+# Shards-Kernel Setup Guide
 
 **Version:** 0.1.0  
 **Classification:** Installation  
@@ -30,7 +30,7 @@
 
 ### 1.3 Dependencies
 
-KERNELS has **zero external dependencies**. It uses only Python standard library.
+Shards-Kernel has **zero external dependencies**. It uses only Python standard library.
 
 ---
 
@@ -40,8 +40,8 @@ KERNELS has **zero external dependencies**. It uses only Python standard library
 
 ```bash
 # Clone repository
-git clone https://github.com/Shards-foundation/kernels.git
-cd kernels
+git clone https://github.com/Shards-foundation/Shards-kernel.git
+cd Shards-kernel
 
 # Create virtual environment
 python3.11 -m venv venv
@@ -52,7 +52,7 @@ source venv/bin/activate  # Linux/macOS
 pip install -e .
 
 # Verify installation
-python -m kernels info
+python -m shards_kernel info
 ```
 
 ### 2.2 PyPI
@@ -61,17 +61,17 @@ The distribution name is `shards-kernel`. After it is published:
 
 ```bash
 python -m pip install shards-kernel
-python -c "import kernels"
+python -c "import shards_kernel"
 ```
 
-A PyPI release is pending, so that command is not published yet. Do not run `pip install kernels`. That name belongs to a different package. The import package in this repository remains `kernels`.
+A verified PyPI release is pending. Do **not** install the unrelated PyPI distribution `kernels` (maintained by Hugging Face). After an approved release, install `shards-kernel` and import `shards_kernel`. Until then, install this repository directly from GitHub.
 
 ### 2.3 From GitHub
 
-This repository has no published release tarball (`kernels-0.1.0.tar.gz` is not a release asset). Install from the Git repository:
+This repository has no published release tarball (`shards_kernel-0.1.0.tar.gz` is not a release asset). Install from the Git repository:
 
 ```bash
-python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
+python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
 ```
 
 ### 2.4 Using Docker
@@ -83,13 +83,13 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Clone and install
-RUN git clone https://github.com/Shards-foundation/kernels.git . && \
+RUN git clone https://github.com/Shards-foundation/Shards-kernel.git . && \
     pip install -e .
 
 # Run smoke test
-RUN python -m kernels info
+RUN python -m shards_kernel info
 
-CMD ["python", "-m", "kernels", "info"]
+CMD ["python", "-m", "shards_kernel", "info"]
 ```
 
 ```bash
@@ -106,10 +106,10 @@ docker run kernels
 
 ```bash
 # Check version
-python -m kernels --version
+python -m shards_kernel --version
 
 # Check info
-python -m kernels info
+python -m shards_kernel info
 
 # Run smoke test
 ./scripts/smoke.sh
@@ -129,7 +129,7 @@ python -m unittest tests.test_state_machine -v
 
 ```python
 # Verify imports work
-from kernels import (
+from shards_kernel import (
     StrictKernel,
     PermissiveKernel,
     EvidenceFirstKernel,
@@ -160,15 +160,15 @@ print("All imports successful!")
 ```bash
 # Set environment variables
 export KERNELS_LOG_LEVEL=DEBUG
-export KERNELS_EVIDENCE_PATH=/var/lib/kernels/evidence
+export KERNELS_EVIDENCE_PATH=/var/lib/shards_kernel/evidence
 ```
 
 ### 4.2 Configuration File
 
-Create `kernels.yaml`:
+Create `shards_kernel.yaml`:
 
 ```yaml
-# kernels.yaml
+# shards_kernel.yaml
 kernel:
   id: "prod-001"
   variant: "strict"
@@ -188,7 +188,7 @@ logging:
   format: "%(asctime)s %(levelname)s %(message)s"
 
 evidence:
-  path: /var/lib/kernels/evidence
+  path: /var/lib/shards_kernel/evidence
   rotation: weekly
   retention_days: 2555  # 7 years
 ```
@@ -197,10 +197,10 @@ evidence:
 
 ```python
 import yaml
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
 # Load config
-with open("kernels.yaml") as f:
+with open("shards_kernel.yaml") as f:
     config = yaml.safe_load(f)
 
 # Create policy from config
@@ -226,8 +226,8 @@ kernel = StrictKernel(
 
 ```bash
 # Clone repository
-git clone https://github.com/Shards-foundation/kernels.git
-cd kernels
+git clone https://github.com/Shards-foundation/Shards-kernel.git
+cd Shards-kernel
 
 # Create virtual environment
 python3.11 -m venv venv
@@ -272,7 +272,7 @@ pip install pytest pytest-cov black isort mypy ruff
 **PyCharm**:
 1. Open project
 2. Set Python interpreter to `./venv/bin/python`
-3. Mark `kernels/` as Sources Root
+3. Mark `shards_kernel/` as Sources Root
 4. Mark `tests/` as Test Sources Root
 
 ---
@@ -281,11 +281,11 @@ pip install pytest pytest-cov black isort mypy ruff
 
 ### 6.1 System Service
 
-Create `/etc/systemd/system/kernels.service`:
+Create `/etc/systemd/system/shards_kernel.service`:
 
 ```ini
 [Unit]
-Description=KERNELS Control Plane
+Description=Shards-Kernel Control Plane
 After=network.target
 
 [Service]
@@ -294,7 +294,7 @@ User=kernels
 Group=kernels
 WorkingDirectory=/opt/kernels
 Environment=KERNELS_LOG_LEVEL=INFO
-ExecStart=/opt/kernels/venv/bin/python -m kernels.server
+ExecStart=/opt/shards_kernel/venv/bin/python -m shards_kernel.server
 Restart=always
 RestartSec=5
 
@@ -313,10 +313,10 @@ sudo systemctl status kernels
 ### 6.2 Directory Structure
 
 ```
-/opt/kernels/
+/opt/shards_kernel/
 ├── venv/                 # Virtual environment
 ├── config/
-│   └── kernels.yaml      # Configuration
+│   └── shards_kernel.yaml      # Configuration
 ├── evidence/             # Evidence storage
 ├── logs/                 # Log files
 └── scripts/              # Operational scripts
@@ -333,8 +333,8 @@ sudo chown -R kernels:kernels /opt/kernels
 
 # Set permissions
 sudo chmod 750 /opt/kernels
-sudo chmod 700 /opt/kernels/evidence
-sudo chmod 640 /opt/kernels/config/kernels.yaml
+sudo chmod 700 /opt/shards_kernel/evidence
+sudo chmod 640 /opt/shards_kernel/config/shards_kernel.yaml
 ```
 
 ### 6.4 Log Rotation
@@ -342,7 +342,7 @@ sudo chmod 640 /opt/kernels/config/kernels.yaml
 Create `/etc/logrotate.d/kernels`:
 
 ```
-/opt/kernels/logs/*.log {
+/opt/shards_kernel/logs/*.log {
     daily
     rotate 30
     compress
@@ -379,10 +379,10 @@ USER kernels
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "from kernels import StrictKernel; k = StrictKernel('health'); print(k.state)"
+    CMD python -c "from shards_kernel import StrictKernel; k = StrictKernel('health'); print(k.state)"
 
 # Run
-CMD ["python", "-m", "kernels.server"]
+CMD ["python", "-m", "shards_kernel.server"]
 ```
 
 ### 7.2 Docker Compose
@@ -403,7 +403,7 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "python", "-c", "import kernels; print('ok')"]
+      test: ["CMD", "python", "-c", "import shards_kernel; print('ok')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -491,7 +491,7 @@ spec:
 export KERNELS_LOG_LEVEL=DEBUG
 
 # Run with verbose output
-python -m kernels info -v
+python -m shards_kernel info -v
 ```
 
 ### 8.3 Check Installation
@@ -504,7 +504,7 @@ python --version
 pip list | grep kernels
 
 # Check import
-python -c "import kernels; print(kernels.__version__)"
+python -c "import shards_kernel; print(shards_kernel.__version__)"
 ```
 
 ---
@@ -527,7 +527,7 @@ pip install -e .
 python -m unittest discover -s tests -v
 
 # Verify
-python -m kernels info
+python -m shards_kernel info
 ```
 
 ### 9.2 Version Compatibility

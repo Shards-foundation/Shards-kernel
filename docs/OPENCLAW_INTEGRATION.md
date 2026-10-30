@@ -9,7 +9,7 @@
 >
 > — CNBC, February 2026
 
-**KERNELS Solution:**
+**Shards-Kernel Solution:**
 Cryptographic permit-based governance ensures OpenClaw AgentSkills can only execute dangerous operations with explicit authorization and complete audit trails.
 
 ---
@@ -35,13 +35,13 @@ export const shellExecute = {
 };
 ```
 
-### KERNELS Governance Layer
+### Shards-Kernel Governance Layer
 
-KERNELS wraps these skills with permit-based governance:
+Shards-Kernel wraps these skills with permit-based governance:
 
 ```python
-# KERNELS governed wrapper (Python)
-from kernels.integrations import GenericAdapter
+# Shards-Kernel governed wrapper (Python)
+from shards_kernel.integrations import GenericAdapter
 
 adapter = GenericAdapter(kernel, actor="openclaw-assistant")
 
@@ -64,11 +64,11 @@ result = governed_shell(
 
 ## Quick Start
 
-### 1. Set Up KERNELS Kernel
+### 1. Set Up Shards-Kernel Kernel
 
 ```python
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 # Initialize kernel
 kernel = StrictKernel()
@@ -87,7 +87,7 @@ kernel.set_keyring(keyring)
 ### 2. Create GenericAdapter
 
 ```python
-from kernels.integrations import GenericAdapter
+from shards_kernel.integrations import GenericAdapter
 
 adapter = GenericAdapter(
     kernel=kernel,
@@ -145,7 +145,7 @@ governed_slack = adapter.create_wrapper(
 ### 4. Create Permits for Authorized Operations
 
 ```python
-from kernels.permits import PermitBuilder
+from shards_kernel.permits import PermitBuilder
 
 # Create permit for calendar event
 calendar_permit = (
@@ -208,7 +208,7 @@ with open("openclaw_audit.json", "w") as f:
 ### 7. Verify Audit Trail
 
 ```bash
-python -m kernels.cli.verify openclaw_audit.json
+python -m shards_kernel.cli.verify openclaw_audit.json
 
 # Output:
 # ✓ Verification: PASSED
@@ -302,9 +302,9 @@ print(result.error)         # Error message if denied
 
 ## Security Benefits
 
-### What KERNELS Prevents in OpenClaw
+### What Shards-Kernel Prevents in OpenClaw
 
-| Attack Vector | Without KERNELS | With KERNELS |
+| Attack Vector | Without Shards-Kernel | With Shards-Kernel |
 |---------------|----------------|--------------|
 | **Prompt Injection** | Agent executes `rm -rf /` from malicious prompt | DENIED: MISSING_PERMIT |
 | **Data Exfiltration** | Agent emails sensitive files to attacker | DENIED: Permit required for email |
@@ -315,7 +315,7 @@ print(result.error)         # Error message if denied
 
 ### Compliance Alignment
 
-OpenClaw + KERNELS addresses regulatory requirements:
+OpenClaw + Shards-Kernel addresses regulatory requirements:
 
 - **EU AI Act (Art. 12)**: Record-keeping through immutable audit chain
 - **EU AI Act (Art. 14)**: Human oversight through permit authorization
@@ -377,7 +377,7 @@ for entry in evidence["entries"]:
 
 ```bash
 # Automated verification in CI
-python -m kernels.cli.verify audit_trail.json || exit 1
+python -m shards_kernel.cli.verify audit_trail.json || exit 1
 
 # Expected output:
 # ✓ Hash Chain: PASSED
@@ -421,19 +421,19 @@ While this guide focuses on Python, OpenClaw is primarily TypeScript/JavaScript.
 
 ### Option 1: Python Backend with TS Frontend
 
-- OpenClaw (TypeScript) → HTTP API → KERNELS (Python)
+- OpenClaw (TypeScript) → HTTP API → Shards-Kernel (Python)
 - Use FastAPI adapter: `create_fastapi_app(kernel)`
 - OpenClaw skills call governed HTTP endpoints
 
 ### Option 2: TypeScript Port (Future)
 
-- TypeScript implementation of KERNELS protocol
+- TypeScript implementation of Shards-Kernel protocol
 - Native integration with OpenClaw skills
 - See roadmap in main README
 
 ### Option 3: Protocol Bridge
 
-- Implement KERNELS permit protocol in TypeScript
+- Implement Shards-Kernel permit protocol in TypeScript
 - Python kernel validates permits over gRPC/HTTP
 - Shared cryptographic keyring
 
@@ -445,7 +445,7 @@ While this guide focuses on Python, OpenClaw is primarily TypeScript/JavaScript.
 
 **A:** Minimal overhead (~1-5ms per tool call for permit verification). The security benefits far outweigh the negligible latency.
 
-### Q: Can I use KERNELS with existing OpenClaw deployments?
+### Q: Can I use Shards-Kernel with existing OpenClaw deployments?
 
 **A:** Yes! Wrap existing skills progressively. Start with high-risk tools (shell, email, file operations) and expand coverage.
 
@@ -469,7 +469,7 @@ if user_approves_action(action, params):
 **A:** Yes! Export evidence bundle and use verification CLI:
 
 ```bash
-python -m kernels.cli.verify historical_audit.json --detailed
+python -m shards_kernel.cli.verify historical_audit.json --detailed
 ```
 
 Shows all tool executions with timestamps, decisions, and permit status.
@@ -480,15 +480,15 @@ Shows all tool executions with timestamps, decisions, and permit status.
 
 - **Example Code**: `examples/08_openclaw_governed_agent.py`
 - **Compliance Mapping**: `docs/COMPLIANCE_MAPPING.md`
-- **Verification CLI**: `kernels/cli/verify.py`
+- **Verification CLI**: `shards_kernel/cli/verify.py`
 - **OpenClaw Project**: https://openclaw.ai/
-- **KERNELS Repository**: https://github.com/Shards-foundation/kernels
+- **Shards-Kernel Repository**: https://github.com/Shards-foundation/Shards-kernel
 
 ---
 
 ## Summary
 
-KERNELS transforms OpenClaw from a powerful-but-risky autonomous agent into a **governed, auditable, and compliant** AI assistant:
+Shards-Kernel transforms OpenClaw from a powerful-but-risky autonomous agent into a **governed, auditable, and compliant** AI assistant:
 
 ✓ **Fail-closed**: Dangerous operations denied by default
 ✓ **Cryptographic**: HMAC-SHA256 signed permits

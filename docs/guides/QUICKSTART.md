@@ -1,4 +1,4 @@
-# KERNELS Quick Start Guide
+# Shards-Kernel Quick Start Guide
 
 **Version:** 0.1.0  
 **Time to Complete:** 10 minutes
@@ -11,23 +11,23 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/Shards-foundation/kernels.git
-cd kernels
+git clone https://github.com/Shards-foundation/Shards-kernel.git
+cd Shards-kernel
 
 # Install in development mode
 pip install -e .
 
 # Verify installation
-python -m kernels info
+python -m shards_kernel info
 ```
 
 ### Option B: Install the distribution
 
-The distribution name is `shards-kernel`. Import it as `kernels`. A PyPI release is pending, so `pip install shards-kernel` is not published yet. Do not run `pip install kernels` (that name is a different package). Until the release exists, install from GitHub:
+The distribution name is `shards-kernel`, and its import namespace is `shards_kernel`. An approved PyPI release is pending. Do not install the unrelated PyPI project `kernels`. Until a verified Shards-Kernel release exists, install from GitHub:
 
 ```bash
-python -m pip install "git+https://github.com/Shards-foundation/kernels.git"
-python -c "import kernels"
+python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
+python -c "import shards_kernel"
 ```
 
 ---
@@ -37,8 +37,8 @@ python -c "import kernels"
 ### Step 1: Create a Kernel
 
 ```python
-from kernels import StrictKernel
-from kernels.common.types import KernelConfig, VirtualClock
+from shards_kernel import StrictKernel
+from shards_kernel.common.types import KernelConfig, VirtualClock
 
 kernel = StrictKernel()
 kernel.boot(KernelConfig(kernel_id="my-first-kernel", variant="strict", clock=VirtualClock(0)))
@@ -59,8 +59,8 @@ State: KernelState.IDLE
 A tool call needs a permit bound to the same parameters the tool will receive. `request.params` and `tool_call.params` must match.
 
 ```python
-from kernels.common.types import KernelRequest, ToolCall
-from kernels.permits import PermitBuilder
+from shards_kernel.common.types import KernelRequest, ToolCall
+from shards_kernel.permits import PermitBuilder
 
 params = {"text": "Hello, World!"}
 keyring = {"k": b"test-secret-key-32-bytes-long123"}
@@ -113,7 +113,7 @@ A successful tool call writes two ledger entries: the intent record, then the ou
 ## 3. Configure Policy
 
 ```python
-from kernels import JurisdictionPolicy
+from shards_kernel import JurisdictionPolicy
 
 kernel.set_policy(JurisdictionPolicy(
     allowed_actors=frozenset({"agent-001", "agent-002"}),
@@ -142,8 +142,8 @@ kernel.set_policy(JurisdictionPolicy(
 ## 5. Verify the Audit Trail
 
 ```python
-from kernels.audit import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
+from shards_kernel.audit import replay_and_verify
+from shards_kernel.common.codec import audit_entry_to_dict
 
 bundle = kernel.export_evidence()
 entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
@@ -154,7 +154,7 @@ print(is_valid, errors)
 ## 6. Halt the Kernel
 
 ```python
-from kernels.common.errors import StateError
+from shards_kernel.common.errors import StateError
 
 kernel.halt("operator stop")
 print(kernel.get_state())  # KernelState.HALTED

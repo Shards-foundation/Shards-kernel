@@ -1,4 +1,4 @@
-# KERNELS Migration Guide
+# Shards-Kernel Migration Guide
 
 **Version:** 0.1.0  
 **Classification:** Guide  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This guide covers migration scenarios for KERNELS deployments.
+This guide covers migration scenarios for Shards-Kernel deployments.
 
 ---
 
@@ -22,7 +22,9 @@ This guide covers migration scenarios for KERNELS deployments.
 - None planned
 
 **Migration Steps:**
-1. Update package: `pip install --upgrade kernels`
+
+For the Python import namespace change, consult [PACKAGE_MIGRATION.md](../PACKAGE_MIGRATION.md).
+1. Update package: `pip install --upgrade shards-kernel` (after an approved release)
 2. Review changelog for new features
 3. Test in staging environment
 4. Deploy to production
@@ -31,9 +33,9 @@ This guide covers migration scenarios for KERNELS deployments.
 
 ## 3. Kernel Replacement
 
-### 3.1 Why Replace Kernels
+### 3.1 Why Replace Shards-Kernel
 
-Kernels are designed to be **replaced, not restarted**. Replace when:
+Shards-Kernel are designed to be **replaced, not restarted**. Replace when:
 
 - Kernel has halted
 - Policy needs updating
@@ -44,7 +46,7 @@ Kernels are designed to be **replaced, not restarted**. Replace when:
 ### 3.2 Replacement Procedure
 
 ```python
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 import time
 import json
 
@@ -69,7 +71,7 @@ def replace_kernel(old_kernel, new_policy):
     print(f"Evidence archived to {archive_path}")
     
     # Step 3: Verify evidence integrity
-    from kernels.audit import replay_and_verify
+    from shards_kernel.audit import replay_and_verify
     is_valid, errors = replay_and_verify(
         evidence["ledger_entries"],
         evidence["root_hash"]
@@ -211,7 +213,7 @@ new_kernel = StrictKernel(kernel_id="restricted", policy=new_policy)
 ### 4.4 Adding Custom Rules
 
 ```python
-from kernels.jurisdiction import RuleResult
+from shards_kernel.jurisdiction import RuleResult
 
 # New custom rule
 def require_business_hours(request):
@@ -241,7 +243,7 @@ new_kernel = StrictKernel(kernel_id="with-rules", policy=new_policy)
 For development/testing:
 
 ```python
-from kernels import StrictKernel, PermissiveKernel
+from shards_kernel import StrictKernel, PermissiveKernel
 
 # Production: Strict
 prod_kernel = StrictKernel(
@@ -283,7 +285,7 @@ prod_kernel = StrictKernel(
 For audit-heavy environments:
 
 ```python
-from kernels import EvidenceFirstKernel
+from shards_kernel import EvidenceFirstKernel
 
 # Migrate to evidence-first
 kernel = EvidenceFirstKernel(
@@ -306,7 +308,7 @@ request = Request(
 For structured workflows:
 
 ```python
-from kernels import DualChannelKernel
+from shards_kernel import DualChannelKernel
 
 # Migrate to dual-channel
 kernel = DualChannelKernel(
@@ -372,7 +374,7 @@ def archive_evidence(evidence, archive_dir="evidence/archive"):
 
 ```python
 import gzip
-from kernels.audit import replay_and_verify
+from shards_kernel.audit import replay_and_verify
 
 def verify_archived_evidence(archive_path):
     """Verify archived evidence integrity."""
@@ -402,13 +404,13 @@ def verify_archived_evidence(archive_path):
 
 ```python
 # Before: Built-in server
-from kernels.sdk import KernelServer
+from shards_kernel.sdk import KernelServer
 
 server = KernelServer(kernel, port=8080)
 server.start()
 
 # After: FastAPI
-from kernels.integrations import create_fastapi_app
+from shards_kernel.integrations import create_fastapi_app
 import uvicorn
 
 app = create_fastapi_app(kernel)
@@ -419,13 +421,13 @@ uvicorn.run(app, host="0.0.0.0", port=8080)
 
 ```python
 # Before: Built-in server
-from kernels.sdk import KernelServer
+from shards_kernel.sdk import KernelServer
 
 server = KernelServer(kernel, port=8080)
 server.start()
 
 # After: Flask
-from kernels.integrations import create_flask_app
+from shards_kernel.integrations import create_flask_app
 
 app = create_flask_app(kernel)
 app.run(host="0.0.0.0", port=8080)
@@ -451,7 +453,7 @@ server {
     }
     
     location /health {
-        proxy_pass http://kernels/health;
+        proxy_pass http://shards_kernel/health;
     }
 }
 ```
@@ -478,8 +480,8 @@ response = requests.post(
 result = response.json()
 
 # After: SDK Client
-from kernels.sdk import KernelClient
-from kernels import Request, ToolCall
+from shards_kernel.sdk import KernelClient
+from shards_kernel import Request, ToolCall
 
 client = KernelClient("http://localhost:8080")
 
@@ -497,13 +499,13 @@ receipt = client.submit(request)
 
 ```python
 # Before: Sync client
-from kernels.sdk import KernelClient
+from shards_kernel.sdk import KernelClient
 
 client = KernelClient("http://localhost:8080")
 receipt = client.submit(request)
 
 # After: Async client
-from kernels.sdk import AsyncKernelClient
+from shards_kernel.sdk import AsyncKernelClient
 
 client = AsyncKernelClient("http://localhost:8080")
 receipt = await client.submit(request)
@@ -575,7 +577,7 @@ def rollback(current_kernel, previous_policy, previous_registry):
 sudo systemctl stop kernels
 
 # Restore previous configuration
-cp /etc/kernels/backup/kernels.yaml /etc/kernels/kernels.yaml
+cp /etc/shards_kernel/backup/shards_kernel.yaml /etc/shards_kernel/shards_kernel.yaml
 
 # Start service
 sudo systemctl start kernels

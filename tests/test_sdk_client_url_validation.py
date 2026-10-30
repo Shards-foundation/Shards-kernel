@@ -2,8 +2,8 @@
 
 import unittest
 
-from kernels.common.errors import KernelError
-from kernels.sdk.client import KernelClient
+from shards_kernel.common.errors import KernelError
+from shards_kernel.sdk.client import KernelClient
 
 
 class TestKernelClientURLValidation(unittest.TestCase):

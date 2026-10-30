@@ -5,9 +5,9 @@ A tool runs only when request.params and the tool-call params are the same,
 and a permit authorises that exact call. An unpermitted call is denied.
 """
 
-from kernels.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
-from kernels.permits import PermitBuilder
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
+from shards_kernel.permits import PermitBuilder
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}
 

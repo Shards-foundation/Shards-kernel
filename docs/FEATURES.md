@@ -1,4 +1,4 @@
-# KERNELS Key Features
+# Shards-Kernel Key Features
 
 **Version:** 0.1.0  
 **Classification:** Overview  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-KERNELS is a deterministic control plane for AI systems. This document describes its key features.
+Shards-Kernel is a deterministic control plane for AI systems. This document describes its key features.
 
 ---
 
@@ -16,7 +16,7 @@ KERNELS is a deterministic control plane for AI systems. This document describes
 
 ### 2.1 Deterministic State Machine
 
-KERNELS operates as a **finite state machine** with eight states and deterministic transitions. `HALTED` is the only terminal state. `COMPLETED` means one request has been audited; the kernel then returns to `IDLE`.
+Shards-Kernel operates as a **finite state machine** with eight states and deterministic transitions. `HALTED` is the only terminal state. `COMPLETED` means one request has been audited; the kernel then returns to `IDLE`.
 
 ```
 BOOTING → IDLE → VALIDATING → ARBITRATING → AUDITING (intent)
@@ -32,7 +32,7 @@ Any unhandled exception → HALTED
 
 **Example:**
 ```python
-from kernels import KernelConfig, StrictKernel, VirtualClock
+from shards_kernel import KernelConfig, StrictKernel, VirtualClock
 
 kernel = StrictKernel()
 kernel.boot(KernelConfig(kernel_id="demo", variant="strict", clock=VirtualClock(0)))
@@ -46,7 +46,7 @@ print(kernel.get_state())  # KernelState.IDLE after COMPLETED
 
 ### 2.2 Fail-Closed Semantics
 
-KERNELS **defaults to DENY** when policy is ambiguous or errors occur. An ambiguous request is denied even if `fail_closed` is set to false. A tool call is denied unless `submit` receives a permit whose parameters are the parameters that run.
+Shards-Kernel **defaults to DENY** when policy is ambiguous or errors occur. An ambiguous request is denied even if `fail_closed` is set to false. A tool call is denied unless `submit` receives a permit whose parameters are the parameters that run.
 
 **Principle:** When in doubt, deny.
 
@@ -57,9 +57,9 @@ KERNELS **defaults to DENY** when policy is ambiguous or errors occur. An ambigu
 
 **Example:**
 ```python
-from kernels import StrictKernel
-from kernels.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
-from kernels.permits import PermitBuilder
+from shards_kernel import StrictKernel
+from shards_kernel.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
+from shards_kernel.permits import PermitBuilder
 
 kernel = StrictKernel()
 kernel.boot(KernelConfig(kernel_id="secure", variant="strict", clock=VirtualClock(0)))
@@ -105,8 +105,8 @@ Every request is recorded in an **immutable, hash-chained ledger**.
 
 **Example:**
 ```python
-from kernels.audit import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
+from shards_kernel.audit import replay_and_verify
+from shards_kernel.common.codec import audit_entry_to_dict
 
 bundle = kernel.export_evidence()
 print(f"Entries: {len(bundle.ledger_entries)}")
@@ -130,7 +130,7 @@ Fine-grained control over **who can do what**.
 
 **Example:**
 ```python
-from kernels import JurisdictionPolicy
+from shards_kernel import JurisdictionPolicy
 
 policy = JurisdictionPolicy(
     allowed_actors=frozenset({"agent-001", "agent-002"}),
@@ -161,7 +161,7 @@ Choose the **enforcement posture** that fits your use case.
 
 **Example:**
 ```python
-from kernels import KernelConfig, PermissiveKernel, StrictKernel, VirtualClock
+from shards_kernel import KernelConfig, PermissiveKernel, StrictKernel, VirtualClock
 
 prod = StrictKernel()
 prod.boot(KernelConfig(kernel_id="prod", variant="strict", clock=VirtualClock(0)))
@@ -175,7 +175,7 @@ dev.boot(KernelConfig(kernel_id="dev", variant="permissive", clock=VirtualClock(
 
 ### 2.7 Zero External Dependencies
 
-KERNELS has **no external dependencies**. Uses only Python standard library.
+Shards-Kernel has **no external dependencies**. Uses only Python standard library.
 
 **Benefits:**
 - Simple installation
@@ -198,7 +198,7 @@ Full **async/await support** for high-throughput scenarios.
 
 **Example:**
 ```python
-from kernels.async_support.async_kernel import AsyncStrictKernel, submit_batch
+from shards_kernel.async_support.async_kernel import AsyncStrictKernel, submit_batch
 
 kernel = AsyncStrictKernel("async")
 kernel.set_keyring(keyring)
@@ -226,7 +226,7 @@ Ready-to-use **client libraries and framework integrations**.
 
 **Example:**
 ```python
-from kernels.sdk import KernelClient, RequestBuilder
+from shards_kernel.sdk import KernelClient, RequestBuilder
 
 client = KernelClient("http://localhost:8080")
 
@@ -264,7 +264,7 @@ with open("evidence.json", "w") as f:
 with open("evidence.json") as f:
     evidence = json.load(f)
 
-from kernels.audit import replay_and_verify
+from shards_kernel.audit import replay_and_verify
 is_valid, errors = replay_and_verify(
     evidence["ledger_entries"],
     evidence["root_hash"]
@@ -277,7 +277,7 @@ is_valid, errors = replay_and_verify(
 
 ### 3.1 Four Planes Architecture
 
-KERNELS implements a **four-plane governance model**.
+Shards-Kernel implements a **four-plane governance model**.
 
 | Plane | Purpose | Components |
 |-------|---------|------------|
@@ -328,7 +328,7 @@ Requests can include **evidence packets** for context.
 
 ### 3.5 Halt Semantics
 
-Kernels can be **halted** for safety.
+Shards-Kernel can be **halted** for safety.
 
 **Properties:**
 - Immediate effect
@@ -367,7 +367,7 @@ kernel.submit(request, permit_token=permit)  # Raises StateError
 
 ### 5.1 vs. Traditional Access Control
 
-| Aspect | Traditional | KERNELS |
+| Aspect | Traditional | Shards-Kernel |
 |--------|-------------|---------|
 | Model | RBAC/ABAC | Jurisdiction |
 | Audit | Optional | Built-in |
@@ -377,7 +377,7 @@ kernel.submit(request, permit_token=permit)  # Raises StateError
 
 ### 5.2 vs. AI Guardrails
 
-| Aspect | Guardrails | KERNELS |
+| Aspect | Guardrails | Shards-Kernel |
 |--------|------------|---------|
 | Focus | Content | Actions |
 | Enforcement | Probabilistic | Deterministic |

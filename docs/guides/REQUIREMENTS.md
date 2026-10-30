@@ -1,4 +1,4 @@
-# KERNELS System Requirements
+# Shards-Kernel System Requirements
 
 **Version:** 0.1.0  
 **Classification:** Requirements  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document specifies the system requirements for deploying and operating KERNELS.
+This document specifies the system requirements for deploying and operating Shards-Kernel.
 
 ---
 
@@ -82,7 +82,7 @@ This document specifies the system requirements for deploying and operating KERN
 
 ### 4.1 Core Dependencies
 
-**KERNELS has zero external dependencies.** It uses only Python standard library.
+**Shards-Kernel has zero external dependencies.** It uses only Python standard library.
 
 | Module | Purpose | Source |
 |--------|---------|--------|
@@ -278,7 +278,7 @@ For production:
 
 ### 10.2 Audit Requirements
 
-| Requirement | KERNELS Support |
+| Requirement | Shards-Kernel Support |
 |-------------|-----------------|
 | Immutable logs | ✅ Hash chain |
 | Tamper detection | ✅ Verification |
@@ -318,7 +318,7 @@ For production:
 
 ## 12. Version Compatibility
 
-### 12.1 KERNELS Versions
+### 12.1 Shards-Kernel Versions
 
 | Version | Python | Status |
 |---------|--------|--------|
@@ -328,7 +328,7 @@ For production:
 
 ### 12.2 API Compatibility
 
-| API Version | KERNELS Version |
+| API Version | Shards-Kernel Version |
 |-------------|-----------------|
 | v1 | 0.1.x - 1.x |
 

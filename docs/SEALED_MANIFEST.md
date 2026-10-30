@@ -1,4 +1,4 @@
-# KERNELS Sealed Manifest
+# Shards-Kernel Sealed Manifest
 
 **Version:** 0.1.0  
 **Sealed:** January 2025  
@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-This document serves as the authoritative sealed manifest for KERNELS v0.1.0. It captures the complete state of the project at release, enabling verification and reproducibility.
+This document serves as the authoritative sealed manifest for Shards-Kernel v0.1.0. It captures the complete state of the project at release, enabling verification and reproducibility.
 
 ---
 
@@ -16,10 +16,10 @@ This document serves as the authoritative sealed manifest for KERNELS v0.1.0. It
 
 | Field | Value |
 |-------|-------|
-| Name | KERNELS |
+| Name | Shards-Kernel |
 | Version | 0.1.0 |
 | License | MIT |
-| Repository | https://github.com/Shards-foundation/kernels |
+| Repository | https://github.com/Shards-foundation/Shards-kernel |
 | Language | Python 3.11+ |
 | Dependencies | None (stdlib only) |
 
@@ -92,29 +92,29 @@ The following invariants are guaranteed by this release:
 
 | Path | Lines | Hash (SHA-256) |
 |------|-------|----------------|
-| kernels/__init__.py | 45 | [computed at build] |
-| kernels/api.py | 120 | [computed at build] |
-| kernels/_version.py | 5 | [computed at build] |
-| kernels/__main__.py | 85 | [computed at build] |
-| kernels/common/types.py | 180 | [computed at build] |
-| kernels/common/errors.py | 95 | [computed at build] |
-| kernels/common/hashing.py | 75 | [computed at build] |
-| kernels/common/time.py | 35 | [computed at build] |
-| kernels/common/codec.py | 65 | [computed at build] |
-| kernels/common/validate.py | 85 | [computed at build] |
-| kernels/audit/ledger.py | 200 | [computed at build] |
-| kernels/audit/replay.py | 120 | [computed at build] |
-| kernels/jurisdiction/policy.py | 130 | [computed at build] |
-| kernels/jurisdiction/rules.py | 110 | [computed at build] |
-| kernels/state/transitions.py | 90 | [computed at build] |
-| kernels/state/machine.py | 180 | [computed at build] |
-| kernels/execution/tools.py | 95 | [computed at build] |
-| kernels/execution/dispatcher.py | 110 | [computed at build] |
-| kernels/variants/base.py | 320 | [computed at build] |
-| kernels/variants/strict_kernel/kernel.py | 85 | [computed at build] |
-| kernels/variants/permissive_kernel/kernel.py | 75 | [computed at build] |
-| kernels/variants/evidence_first_kernel/kernel.py | 95 | [computed at build] |
-| kernels/variants/dual_channel_kernel/kernel.py | 105 | [computed at build] |
+| shards_kernel/__init__.py | 45 | [computed at build] |
+| shards_kernel/api.py | 120 | [computed at build] |
+| shards_kernel/_version.py | 5 | [computed at build] |
+| shards_kernel/__main__.py | 85 | [computed at build] |
+| shards_kernel/common/types.py | 180 | [computed at build] |
+| shards_kernel/common/errors.py | 95 | [computed at build] |
+| shards_kernel/common/hashing.py | 75 | [computed at build] |
+| shards_kernel/common/time.py | 35 | [computed at build] |
+| shards_kernel/common/codec.py | 65 | [computed at build] |
+| shards_kernel/common/validate.py | 85 | [computed at build] |
+| shards_kernel/audit/ledger.py | 200 | [computed at build] |
+| shards_kernel/audit/replay.py | 120 | [computed at build] |
+| shards_kernel/jurisdiction/policy.py | 130 | [computed at build] |
+| shards_kernel/jurisdiction/rules.py | 110 | [computed at build] |
+| shards_kernel/state/transitions.py | 90 | [computed at build] |
+| shards_kernel/state/machine.py | 180 | [computed at build] |
+| shards_kernel/execution/tools.py | 95 | [computed at build] |
+| shards_kernel/execution/dispatcher.py | 110 | [computed at build] |
+| shards_kernel/variants/base.py | 320 | [computed at build] |
+| shards_kernel/variants/strict_kernel/kernel.py | 85 | [computed at build] |
+| shards_kernel/variants/permissive_kernel/kernel.py | 75 | [computed at build] |
+| shards_kernel/variants/evidence_first_kernel/kernel.py | 95 | [computed at build] |
+| shards_kernel/variants/dual_channel_kernel/kernel.py | 105 | [computed at build] |
 
 ### 6.2 Specification Files
 
@@ -215,8 +215,8 @@ Everything not listed above is internal and may change without notice.
 
 | Artifact | SHA-256 |
 |----------|---------|
-| kernels-0.1.0.tar.gz | not published (no GitHub release) |
-| kernels-0.1.0-py3-none-any.whl | not published (no GitHub release) |
+| shards_kernel-0.1.0.tar.gz | not published (no GitHub release) |
+| shards_kernel-0.1.0-py3-none-any.whl | not published (no GitHub release) |
 
 ### 9.2 Verification
 
@@ -239,6 +239,6 @@ This manifest attests that:
 4. Documentation is complete
 5. API is stable for listed exports
 
-**Sealed by:** KERNELS Project  
+**Sealed by:** Shards-Kernel Project  
 **Date:** January 2025  
 **Version:** 0.1.0

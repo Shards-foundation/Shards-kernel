@@ -2,12 +2,12 @@
 
 import asyncio
 
-from kernels.async_support.async_dispatcher import (
+from shards_kernel.async_support.async_dispatcher import (
     AsyncDispatcher,
     AsyncToolRegistry,
     create_default_async_registry,
 )
-from kernels.common.types import ToolCall
+from shards_kernel.common.types import ToolCall
 
 
 def test_registry_decorator_and_direct_registration_metadata():
@@ -59,7 +59,7 @@ def test_dispatcher_fails_closed_and_batch_preserves_order():
 
 
 def test_mock_async_echo_fetch_and_delay():
-    from kernels.async_support.async_dispatcher import async_delay, async_echo, async_fetch
+    from shards_kernel.async_support.async_dispatcher import async_delay, async_echo, async_fetch
 
     async def scenario():
         assert await async_echo({"message": "hello"}) == {"echoed": "hello"}

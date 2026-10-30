@@ -2,19 +2,19 @@
 
 import unittest
 
-from kernels.common.types import KernelConfig, KernelRequest, ReceiptStatus, ToolCall, VirtualClock
-from kernels.core.runtime import (
+from shards_kernel.common.types import KernelConfig, KernelRequest, ReceiptStatus, ToolCall, VirtualClock
+from shards_kernel.core.runtime import (
     ArtifactRef,
     ExecutionContext,
     KernelRuntime,
     TaskGraph,
     TaskNode,
 )
-from kernels.execution.dispatcher import Dispatcher
-from kernels.execution.tools import create_default_registry
-from kernels.memory.artifact_store import ArtifactStore
-from kernels.permits import PermitBuilder
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.execution.dispatcher import Dispatcher
+from shards_kernel.execution.tools import create_default_registry
+from shards_kernel.memory.artifact_store import ArtifactStore
+from shards_kernel.permits import PermitBuilder
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 class TestKernelRuntimeHooks(unittest.TestCase):

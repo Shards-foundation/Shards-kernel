@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the internal architecture of the Kernels system.
+This document describes the internal architecture of the Shards-Kernel system.
 
 ## Overview
 
-Kernels is structured as a layered system with clear separation between components. Each layer has explicit responsibilities and interfaces.
+Shards-Kernel is structured as a layered system with clear separation between components. Each layer has explicit responsibilities and interfaces.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -15,21 +15,21 @@ Kernels is structured as a layered system with clear separation between componen
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        BASE KERNEL                              │
-│                    (kernels/variants/base.py)                   │
+│                    (shards_kernel/variants/base.py)                   │
 └─────────────────────────────────────────────────────────────────┘
                               │
           ┌───────────────────┼───────────────────┐
           ▼                   ▼                   ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │  STATE MACHINE  │ │  JURISDICTION   │ │     AUDIT       │
-│ (kernels/state) │ │(kernels/juris.) │ │ (kernels/audit) │
+│ (shards_kernel/state) │ │(shards_kernel/juris.) │ │ (shards_kernel/audit) │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
           │                   │                   │
           └───────────────────┼───────────────────┘
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        EXECUTION                                │
-│                  (kernels/execution)                            │
+│                  (shards_kernel/execution)                            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼

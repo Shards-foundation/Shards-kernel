@@ -6,8 +6,8 @@ import urllib.request
 
 import pytest
 
-from kernels.integrations.wire import boot_strict_kernel
-from kernels.sdk.server import KernelServer
+from shards_kernel.integrations.wire import boot_strict_kernel
+from shards_kernel.sdk.server import KernelServer
 
 
 @pytest.fixture

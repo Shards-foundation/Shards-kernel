@@ -1,7 +1,7 @@
 """
-Example: AutoGPT Autonomous Agent with KERNELS Governance & Kill-Switch
+Example: AutoGPT Autonomous Agent with Shards-Kernel Governance & Kill-Switch
 
-This example demonstrates KERNELS governance for AutoGPT autonomous agents,
+This example demonstrates Shards-Kernel governance for AutoGPT autonomous agents,
 including autonomous loop monitoring and kill-switch functionality.
 
 AutoGPT Context:
@@ -18,7 +18,7 @@ The Problem:
     - Cause system damage through unchecked file/shell access
 
 The Solution:
-    KERNELS provides:
+    Shards-Kernel provides:
     - Autonomous loop monitoring with configurable limits
     - Kill-switch that halts unsafe execution
     - Per-command risk scoring
@@ -28,13 +28,13 @@ The Solution:
 Scenario:
     AutoGPT agent tasked with "research and publish article on AI governance"
 
-    Without KERNELS: Agent could:
+    Without Shards-Kernel: Agent could:
     - Execute arbitrary shell commands
     - Write files anywhere in filesystem
     - Make unlimited web requests
     - Run for hours consuming resources
 
-    With KERNELS: Agent requires:
+    With Shards-Kernel: Agent requires:
     - Permits for file writes
     - Permits for shell execution
     - Runtime limits (kill-switch after 1 hour)
@@ -48,11 +48,11 @@ Usage:
 import json
 import os
 
-# KERNELS imports
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.integrations.autogpt_adapter import AutoGPTAdapter
-from kernels.permits import PermitBuilder
+# Shards-Kernel imports
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.autogpt_adapter import AutoGPTAdapter
+from shards_kernel.permits import PermitBuilder
 from _permit import issue_permit
 
 
@@ -137,7 +137,7 @@ def delete_file(path: str) -> str:
 
 def main():
     print("=" * 80)
-    print("KERNELS + AutoGPT Autonomous Agent Governance")
+    print("Shards-Kernel + AutoGPT Autonomous Agent Governance")
     print("=" * 80)
     print()
     print("Scenario: AutoGPT agent with autonomous loop monitoring")
@@ -163,10 +163,10 @@ def main():
     print()
 
     # ========================================================================
-    # Step 1: Set up KERNELS kernel
+    # Step 1: Set up Shards-Kernel kernel
     # ========================================================================
 
-    print("Step 1: Initialize KERNELS governance with kill-switch")
+    print("Step 1: Initialize Shards-Kernel governance with kill-switch")
     print("-" * 80)
 
     kernel = StrictKernel()
@@ -338,7 +338,7 @@ def main():
         result = governed_shell(command="rm -rf /tmp/cache")
         print(f"✗ ERROR: Should have been denied! Result: {result}")
     except PermissionError as e:
-        print("✓ CORRECTLY DENIED by KERNELS")
+        print("✓ CORRECTLY DENIED by Shards-Kernel")
         print(f"  Error: {e}")
         print()
         print("Kill-switch prevents unauthorized shell execution!")
@@ -382,7 +382,7 @@ def main():
         permit_token=write_permit,
     )
 
-    print("✓ ALLOWED by KERNELS")
+    print("✓ ALLOWED by Shards-Kernel")
     print(f"  Result: {result}")
     print()
 
@@ -505,19 +505,19 @@ def main():
     # ========================================================================
 
     print("=" * 80)
-    print("SUMMARY: AutoGPT Autonomous Agent Governance with KERNELS")
+    print("SUMMARY: AutoGPT Autonomous Agent Governance with Shards-Kernel")
     print("=" * 80)
     print()
-    print("What KERNELS prevents in autonomous agents:")
+    print("What Shards-Kernel prevents in autonomous agents:")
     print()
-    print("WITHOUT KERNELS:")
+    print("WITHOUT Shards-Kernel:")
     print("  ✗ Agent can run indefinitely consuming resources")
     print("  ✗ Agent can execute dangerous commands without authorization")
     print("  ✗ No safety limits or kill-switch")
     print("  ✗ Agent can create infinite loops")
     print("  ✗ No audit trail of autonomous actions")
     print()
-    print("WITH KERNELS:")
+    print("WITH Shards-Kernel:")
     print("  ✓ Autonomous loop monitoring with configurable limits")
     print("  ✓ Kill-switch activates on unsafe behavior")
     print("  ✓ Risk-based command authorization")
@@ -537,7 +537,7 @@ def main():
     print("  - 1.0: CRITICAL RISK (requires permits + human oversight)")
     print()
     print("Integration usage:")
-    print("  from kernels.integrations import AutoGPTAdapter")
+    print("  from shards_kernel.integrations import AutoGPTAdapter")
     print()
     print("  adapter = AutoGPTAdapter(kernel, enable_monitoring=True)")
     print()

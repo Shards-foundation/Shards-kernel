@@ -1,4 +1,4 @@
-"""SQLite persistence backend for KERNELS audit ledger entries."""
+"""SQLite persistence backend for Shards-Kernel audit ledger entries."""
 
 from __future__ import annotations
 

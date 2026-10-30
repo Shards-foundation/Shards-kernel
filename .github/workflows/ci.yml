@@ -38,7 +38,7 @@ jobs:
       - name: Run tests with coverage
         run: >
           pytest
-          --cov=kernels
+          --cov=shards_kernel
           --cov=implementations
           --cov-branch
           --cov-report=term-missing
@@ -66,7 +66,7 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Shards-foundation/kernels
+          slug: Shards-foundation/Shards-kernel
           fail_ci_if_error: true
 
       - name: Smoke checks
@@ -82,15 +82,18 @@ jobs:
       - name: Build source and wheel distributions
         run: python -m build
 
+      - name: Reject legacy namespace in wheel
+        run: python scripts/ci/check_wheel_identity.py dist/*.whl
+
       - name: Verify wheel in an isolated environment
         if: matrix.python-version == '3.12'
         shell: bash
         run: |
           set -euo pipefail
-          wheel_venv="$RUNNER_TEMP/kernels-wheel-venv"
+          wheel_venv="$RUNNER_TEMP/shards_kernel-wheel-venv"
           python -m venv "$wheel_venv"
           "$wheel_venv/bin/python" -m pip install --upgrade pip
           "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
           cd "$RUNNER_TEMP"
-          "$wheel_venv/bin/python" -c "import kernels; from kernels.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
-          "$wheel_venv/bin/kernels" --help
+          "$wheel_venv/bin/python" -c "import shards_kernel; from shards_kernel.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
+          "$wheel_venv/bin/shards-kernel" --help

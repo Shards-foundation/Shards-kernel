@@ -1,4 +1,4 @@
-# KERNELS Checklists
+# Shards-Kernel Checklists
 
 **Version:** 0.1.0  
 **Last Updated:** January 2025

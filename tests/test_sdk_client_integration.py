@@ -2,15 +2,15 @@
 
 import asyncio
 
-from kernels.integrations.wire import boot_strict_kernel
-from kernels.sdk.builder import request
-from kernels.sdk.client import (
+from shards_kernel.integrations.wire import boot_strict_kernel
+from shards_kernel.sdk.builder import request
+from shards_kernel.sdk.client import (
     AsyncKernelClient,
     KernelClient,
     create_async_client,
     create_client,
 )
-from kernels.sdk.server import KernelServer
+from shards_kernel.sdk.server import KernelServer
 
 
 def test_sync_client_round_trip_against_local_server():

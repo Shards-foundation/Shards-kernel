@@ -2,8 +2,8 @@
 
 import pytest
 
-from kernels import PermitBuilder
-from kernels.integrations.wire import (
+from shards_kernel import PermitBuilder
+from shards_kernel.integrations.wire import (
     boot_strict_kernel,
     evidence_to_mapping,
     permit_from_mapping,

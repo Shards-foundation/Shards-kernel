@@ -2,9 +2,9 @@
 
 import unittest
 
-from kernels.common.types import Decision, KernelState
-from kernels.audit.ledger import AuditLedger
-from kernels.audit.replay import replay_and_verify, verify_evidence_bundle
+from shards_kernel.common.types import Decision, KernelState
+from shards_kernel.audit.ledger import AuditLedger
+from shards_kernel.audit.replay import replay_and_verify, verify_evidence_bundle
 
 
 class TestReplay(unittest.TestCase):

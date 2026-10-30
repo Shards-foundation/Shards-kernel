@@ -2,21 +2,21 @@
 
 ## General
 
-### What is Kernels?
+### What is Shards-Kernel?
 
-Kernels is a deterministic control plane for AI systems. It provides a state machine that governs AI agent execution through explicit jurisdiction, append-only audit, and fail-closed semantics.
+Shards-Kernel is a deterministic control plane for AI systems. It provides a state machine that governs AI agent execution through explicit jurisdiction, append-only audit, and fail-closed semantics.
 
-### What problem does Kernels solve?
+### What problem does Shards-Kernel solve?
 
-AI systems without deterministic control planes exhibit failure modes including ambiguity propagation, non-deterministic state, unbounded execution, audit gaps, and authority diffusion. Kernels addresses these by enforcing explicit boundaries and producing immutable audit records.
+AI systems without deterministic control planes exhibit failure modes including ambiguity propagation, non-deterministic state, unbounded execution, audit gaps, and authority diffusion. Shards-Kernel addresses these by enforcing explicit boundaries and producing immutable audit records.
 
-### Is Kernels an AI framework?
+### Is Shards-Kernel an AI framework?
 
-No. Kernels is a control plane, not an AI framework. It does not implement AI capabilities. It governs systems that may include AI components.
+No. Shards-Kernel is a control plane, not an AI framework. It does not implement AI capabilities. It governs systems that may include AI components.
 
-### Is Kernels an LLM wrapper?
+### Is Shards-Kernel an LLM wrapper?
 
-No. Kernels does not call language models. It validates and arbitrates requests from systems that may use language models.
+No. Shards-Kernel does not call language models. It validates and arbitrates requests from systems that may use language models.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ Yes. Implement the `Kernel` protocol and extend `BaseKernel`. Custom variants mu
 Register the tool with the `ToolRegistry`:
 
 ```python
-from kernels.execution.tools import ToolRegistry
+from shards_kernel.execution.tools import ToolRegistry
 
 registry = ToolRegistry()
 registry.register(
@@ -59,7 +59,7 @@ registry.register(
 Create a `JurisdictionPolicy` and set it on the kernel:
 
 ```python
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 policy = JurisdictionPolicy(
     allowed_actors=frozenset({"alice", "bob"}),
@@ -73,7 +73,7 @@ kernel.set_policy(policy)
 Use the replay verification functions:
 
 ```python
-from kernels.audit.replay import replay_and_verify
+from shards_kernel.audit.replay import replay_and_verify
 
 entries = ledger.to_list()
 is_valid, errors = replay_and_verify(entries)
@@ -114,15 +114,15 @@ Invariant changes require a major version bump, documented consensus, and a migr
 
 ## Integration
 
-### Does Kernels require external dependencies?
+### Does Shards-Kernel require external dependencies?
 
-No. Kernels uses only the Python 3.11+ standard library.
+No. Shards-Kernel uses only the Python 3.11+ standard library.
 
-### Can Kernels be used with async/await?
+### Can Shards-Kernel be used with async/await?
 
 The current implementation is synchronous. Async support may be added in future versions.
 
-### How do I integrate Kernels with my AI system?
+### How do I integrate Shards-Kernel with my AI system?
 
 1. Create a kernel instance with appropriate variant
 2. Configure jurisdiction policy

@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from kernels.common.types import ToolCall
-from kernels.core.runtime import (
+from shards_kernel.common.types import ToolCall
+from shards_kernel.core.runtime import (
     ArtifactRef,
     ExecutionContext,
     KernelRuntime,
@@ -14,8 +14,8 @@ from kernels.core.runtime import (
     TaskGraph,
     TaskNode,
 )
-from kernels.execution.dispatcher import Dispatcher
-from kernels.execution.tools import create_default_registry
+from shards_kernel.execution.dispatcher import Dispatcher
+from shards_kernel.execution.tools import create_default_registry
 
 
 def context(**overrides):
@@ -96,7 +96,7 @@ def test_before_hook_denial_calls_error_hook_but_not_after_hook():
 
 def test_execution_time_budget_converts_success_to_failure():
     rt = runtime()
-    with patch("kernels.core.runtime.perf_counter", side_effect=[1.0, 1.1]):
+    with patch("shards_kernel.core.runtime.perf_counter", side_effect=[1.0, 1.1]):
         result = rt.execute(
             ToolCall("echo", {"text": "hello"}),
             context(max_time_ms=1, idempotency_key="time-budget-test"),

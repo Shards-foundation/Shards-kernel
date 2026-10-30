@@ -1,5 +1,5 @@
 """
-End-to-end example: Using permit tokens with KERNELS.
+End-to-end example: Using permit tokens with Shards-Kernel.
 
 This example demonstrates:
 1. Setting up a kernel with permit verification
@@ -8,7 +8,7 @@ This example demonstrates:
 4. Extracting audit evidence
 """
 
-from kernels.api import (
+from shards_kernel.api import (
     KernelConfig,
     KernelRequest,
     PermitBuilder,
@@ -20,7 +20,7 @@ from kernels.api import (
 
 def main() -> None:
     """Run permit integration example."""
-    print("=== KERNELS Permit Integration Example ===\n")
+    print("=== Shards-Kernel Permit Integration Example ===\n")
 
     # Step 1: Boot kernel with configuration
     print("1. Booting StrictKernel...")
@@ -53,7 +53,7 @@ def main() -> None:
         .subject("ai-agent-001")
         .jurisdiction("production")
         .action("echo")  # Authorize 'echo' tool
-        .params({"text": "Hello KERNELS"})
+        .params({"text": "Hello Shards-Kernel"})
         .constraints(
             {
                 "max_time_ms": 5000,
@@ -80,8 +80,8 @@ def main() -> None:
         ts_ms=clock.now_ms(),
         actor="ai-agent-001",
         intent="Echo a greeting message",
-        tool_call=ToolCall(name="echo", params={"text": "Hello KERNELS"}),
-        params={"text": "Hello KERNELS"},
+        tool_call=ToolCall(name="echo", params={"text": "Hello Shards-Kernel"}),
+        params={"text": "Hello Shards-Kernel"},
     )
 
     receipt = kernel.submit(request, permit_token=permit)
@@ -121,8 +121,8 @@ def main() -> None:
         ts_ms=clock.now_ms(),
         actor="ai-agent-001",
         intent="Try to replay permit",
-        tool_call=ToolCall(name="echo", params={"text": "Hello KERNELS"}),
-        params={"text": "Hello KERNELS"},
+        tool_call=ToolCall(name="echo", params={"text": "Hello Shards-Kernel"}),
+        params={"text": "Hello Shards-Kernel"},
     )
 
     receipt2 = kernel.submit(request2, permit_token=permit)  # Same permit!

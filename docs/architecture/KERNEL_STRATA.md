@@ -4,7 +4,7 @@
 
 This document disambiguates the overloaded term "agent kernel" into explicit
 strata and maps those strata to the current repository implementation.
-It also records the architectural gaps that must be closed for KERNELS to
+It also records the architectural gaps that must be closed for Shards-Kernel to
 function as a full microkernel-style substrate rather than a governance-focused
 framework with a thin runtime.
 
@@ -21,10 +21,10 @@ framework with a thin runtime.
 
 | Repository area | Primary stratum | Status |
 |---|---|---|
-| `kernels/jurisdiction/*`, `kernels/permits.py`, kernel variants | Governance | **Strong** |
-| `kernels/audit/*`, replay tests | Governance / verification | **Strong** |
-| `kernels/execution/*`, adapters under `kernels/integrations/*` | Runtime | **Partial** |
-| `kernels/state/*` | Control-flow state only | **Partial** |
+| `shards_kernel/jurisdiction/*`, `shards_kernel/permits.py`, kernel variants | Governance | **Strong** |
+| `shards_kernel/audit/*`, replay tests | Governance / verification | **Strong** |
+| `shards_kernel/execution/*`, adapters under `shards_kernel/integrations/*` | Runtime | **Partial** |
+| `shards_kernel/state/*` | Control-flow state only | **Partial** |
 | Dedicated memory modules | Memory | **Missing** |
 | Dedicated multi-agent contracts/protocols | Multi-agent | **Missing** |
 
@@ -90,8 +90,8 @@ Create a core execution entrypoint that every adapter and workflow must use.
 
 Suggested layout:
 
-- `kernels/core/runtime.py`
-- `kernels/core/syscall.py`
+- `shards_kernel/core/runtime.py`
+- `shards_kernel/core/syscall.py`
 
 Core path responsibilities:
 
@@ -105,9 +105,9 @@ Core path responsibilities:
 
 Suggested layout:
 
-- `kernels/events/schema.py`
-- `kernels/events/bus.py`
-- `kernels/events/store.py`
+- `shards_kernel/events/schema.py`
+- `shards_kernel/events/bus.py`
+- `shards_kernel/events/store.py`
 
 Requirements:
 
@@ -119,10 +119,10 @@ Requirements:
 
 Suggested layout:
 
-- `kernels/memory/working.py`
-- `kernels/memory/episodic.py`
-- `kernels/memory/semantic.py`
-- `kernels/memory/procedural.py`
+- `shards_kernel/memory/working.py`
+- `shards_kernel/memory/episodic.py`
+- `shards_kernel/memory/semantic.py`
+- `shards_kernel/memory/procedural.py`
 
 Minimum metadata per memory record:
 

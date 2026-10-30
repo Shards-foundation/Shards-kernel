@@ -2,9 +2,9 @@
 
 import unittest
 
-from kernels.common.types import KernelRequest, ToolCall
-from kernels.jurisdiction.policy import JurisdictionPolicy
-from kernels.jurisdiction.rules import (
+from shards_kernel.common.types import KernelRequest, ToolCall
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.jurisdiction.rules import (
     check_actor_allowed,
     check_tool_allowed,
     check_required_fields,

@@ -1,7 +1,7 @@
 """
-Example: OpenClaw/Moltbook Agent with KERNELS Governance
+Example: OpenClaw/Moltbook Agent with Shards-Kernel Governance
 
-This example demonstrates how to integrate KERNELS governance into OpenClaw
+This example demonstrates how to integrate Shards-Kernel governance into OpenClaw
 (formerly Clawdbot/Moltbook), addressing security concerns raised by researchers.
 
 OpenClaw Context (Jan 2026):
@@ -21,32 +21,32 @@ The Problem:
     — CNBC, Feb 2026
 
 The Solution:
-    KERNELS provides cryptographic permit-based governance for OpenClaw tools,
+    Shards-Kernel provides cryptographic permit-based governance for OpenClaw tools,
     ensuring dangerous operations require explicit authorization with complete
     audit trails.
 
 Integration Approach:
     - OpenClaw tools (AgentSkills) are JavaScript/TypeScript functions
-    - KERNELS GenericAdapter wraps Python implementations of these tools
+    - Shards-Kernel GenericAdapter wraps Python implementations of these tools
     - Each dangerous operation requires a cryptographically signed permit
     - All executions are logged in an immutable audit chain
 
 Usage:
-    # Without KERNELS: OpenClaw can execute any tool without oversight
+    # Without Shards-Kernel: OpenClaw can execute any tool without oversight
     agent.run("Delete all my emails from last month")  # Executes immediately!
 
-    # With KERNELS: Dangerous tools require permits
+    # With Shards-Kernel: Dangerous tools require permits
     agent.run("Delete all my emails from last month")  # DENIED: MISSING_PERMIT
 """
 
 import json
 import os
 
-# KERNELS imports
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.integrations.generic_adapter import GenericAdapter
-from kernels.permits import PermitBuilder
+# Shards-Kernel imports
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.generic_adapter import GenericAdapter
+from shards_kernel.permits import PermitBuilder
 
 
 # ============================================================================
@@ -63,7 +63,7 @@ def shell_execute(command: str) -> str:
     DANGEROUS: Can execute arbitrary commands with user's permissions.
 
     Without governance: "rm -rf /" could be executed by mistake.
-    With KERNELS: Requires cryptographically signed permit.
+    With Shards-Kernel: Requires cryptographically signed permit.
     """
     print("\n🚨 SHELL EXECUTION:")
     print(f"   Command: {command}")
@@ -81,7 +81,7 @@ def email_delete(mailbox: str, filter_query: str) -> str:
     DANGEROUS: Can permanently delete user's emails.
 
     Without governance: Agent could delete important emails.
-    With KERNELS: Requires permit with exact filter parameters.
+    With Shards-Kernel: Requires permit with exact filter parameters.
     """
     print("\n🚨 EMAIL DELETION:")
     print(f"   Mailbox: {mailbox}")
@@ -98,7 +98,7 @@ def calendar_create_event(title: str, start_time: str, attendees: str) -> str:
     MODERATE RISK: Can spam calendars or create unwanted meetings.
 
     Without governance: Agent could schedule meetings without confirmation.
-    With KERNELS: Requires permit for each event creation.
+    With Shards-Kernel: Requires permit for each event creation.
     """
     print("\n📅 CALENDAR EVENT:")
     print(f"   Title: {title}")
@@ -116,7 +116,7 @@ def web_browse(url: str, action: str = "read") -> str:
     LOW RISK for reading, HIGH RISK for actions.
 
     Without governance: Could submit forms, make purchases, etc.
-    With KERNELS: Write actions require permits.
+    With Shards-Kernel: Write actions require permits.
     """
     if action in ["submit", "click", "purchase"]:
         print("\n🚨 WEB ACTION:")
@@ -134,7 +134,7 @@ def slack_send_message(channel: str, message: str, mention_all: bool = False) ->
     DANGEROUS with @channel/@here mentions.
 
     Without governance: Could spam team channels.
-    With KERNELS: Mentions require permits.
+    With Shards-Kernel: Mentions require permits.
     """
     if mention_all:
         print("\n🚨 SLACK @CHANNEL:")
@@ -152,10 +152,10 @@ def slack_send_message(channel: str, message: str, mention_all: bool = False) ->
 
 def main():
     print("=" * 80)
-    print("KERNELS + OpenClaw Integration Example")
+    print("Shards-Kernel + OpenClaw Integration Example")
     print("=" * 80)
     print()
-    print("Scenario: Securing OpenClaw AgentSkills with KERNELS governance")
+    print("Scenario: Securing OpenClaw AgentSkills with Shards-Kernel governance")
     print()
     print("OpenClaw tools (simulated in Python):")
     print("  - shell_execute (DANGEROUS)")
@@ -171,7 +171,7 @@ def main():
     # Step 1: Set up kernel with governance
     # ========================================================================
 
-    print("Step 1: Initialize KERNELS governance for OpenClaw")
+    print("Step 1: Initialize Shards-Kernel governance for OpenClaw")
     print("-" * 80)
 
     kernel = StrictKernel()
@@ -260,7 +260,7 @@ def main():
         print(f"  Error: {e}")
         print()
         print("This prevents the '60k GitHub stars' honeypot attack!")
-        print("Without KERNELS, a malicious prompt could execute arbitrary commands.")
+        print("Without Shards-Kernel, a malicious prompt could execute arbitrary commands.")
         print()
 
     # ========================================================================
@@ -406,12 +406,12 @@ def main():
     # ========================================================================
 
     print("=" * 80)
-    print("SUMMARY: OpenClaw + KERNELS Integration")
+    print("SUMMARY: OpenClaw + Shards-Kernel Integration")
     print("=" * 80)
     print()
-    print("What KERNELS prevents in OpenClaw:")
+    print("What Shards-Kernel prevents in OpenClaw:")
     print()
-    print("WITHOUT KERNELS (current OpenClaw security concerns):")
+    print("WITHOUT Shards-Kernel (current OpenClaw security concerns):")
     print("  ✗ Agent can execute shell commands without authorization")
     print("  ✗ Agent can delete emails without confirmation")
     print("  ✗ Agent can create calendar events for entire team")
@@ -420,7 +420,7 @@ def main():
     print("  ✗ No audit trail of what agent did")
     print("  ✗ No replay protection")
     print()
-    print("WITH KERNELS:")
+    print("WITH Shards-Kernel:")
     print("  ✓ Dangerous operations require cryptographically signed permits")
     print("  ✓ Replay protection prevents permit reuse")
     print("  ✓ Complete immutable audit trail (hash-chained)")
@@ -428,7 +428,7 @@ def main():
     print("  ✓ Addresses security researcher concerns")
     print()
     print("Integration usage:")
-    print("  from kernels.integrations import GenericAdapter")
+    print("  from shards_kernel.integrations import GenericAdapter")
     print()
     print("  adapter = GenericAdapter(kernel, actor='openclaw-assistant')")
     print("  governed_tool = adapter.create_wrapper('skill_name', skill_fn)")

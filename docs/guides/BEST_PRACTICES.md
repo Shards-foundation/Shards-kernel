@@ -1,4 +1,4 @@
-# KERNELS Best Practices
+# Shards-Kernel Best Practices
 
 **Version:** 0.1.0  
 **Classification:** Guide  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This guide provides best practices for deploying and operating KERNELS in production environments.
+This guide provides best practices for deploying and operating Shards-Kernel in production environments.
 
 ---
 
@@ -270,7 +270,7 @@ schedule.every().day.at("00:00").do(verify_audit)
 
 ### 5.4 Plan for Kernel Replacement
 
-**Kernels are designed to be replaced, not restarted.**
+**Shards-Kernel are designed to be replaced, not restarted.**
 
 ```python
 def replace_kernel(old_kernel, policy):
@@ -296,7 +296,7 @@ def replace_kernel(old_kernel, policy):
 **Use async kernel for concurrent requests.**
 
 ```python
-from kernels.async import AsyncStrictKernel
+from shards_kernel.async import AsyncStrictKernel
 
 kernel = AsyncStrictKernel(kernel_id="async-prod")
 
@@ -481,7 +481,7 @@ HEALTHCHECK --interval=30s --timeout=5s \
   CMD curl -f http://localhost:8080/health || exit 1
 
 # Run
-CMD ["python", "-m", "kernels.sdk.server"]
+CMD ["python", "-m", "shards_kernel.sdk.server"]
 ```
 
 ---

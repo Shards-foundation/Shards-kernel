@@ -1,4 +1,4 @@
-# KERNELS Operations Playbook
+# Shards-Kernel Operations Playbook
 
 **Version:** 0.1.0  
 **Classification:** Operations  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This playbook provides step-by-step procedures for operating KERNELS in production environments. Follow these plays to handle common operational scenarios.
+This playbook provides step-by-step procedures for operating Shards-Kernel in production environments. Follow these plays to handle common operational scenarios.
 
 ---
 
@@ -16,14 +16,14 @@ This playbook provides step-by-step procedures for operating KERNELS in producti
 
 ### Play 2.1: Initial Deployment
 
-**Trigger:** First-time deployment of KERNELS
+**Trigger:** First-time deployment of Shards-Kernel
 
 **Steps:**
 
 ```bash
 # Step 1: Clone repository
-git clone https://github.com/Shards-foundation/kernels.git
-cd kernels
+git clone https://github.com/Shards-foundation/Shards-kernel.git
+cd Shards-kernel
 
 # Step 2: Create virtual environment
 python3.11 -m venv venv
@@ -33,7 +33,7 @@ source venv/bin/activate
 pip install -e .
 
 # Step 4: Verify installation
-python -m kernels info
+python -m shards_kernel info
 
 # Step 5: Run smoke test
 ./scripts/smoke.sh
@@ -53,7 +53,7 @@ EOF
 
 # Step 7: Start kernel
 python -c "
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 import yaml
 
 with open('config/policy.yaml') as f:
@@ -66,7 +66,7 @@ print(f'Kernel {kernel.kernel_id} started in state {kernel.state}')
 ```
 
 **Verification:**
-- [ ] `python -m kernels info` shows version
+- [ ] `python -m shards_kernel info` shows version
 - [ ] Smoke test passes
 - [ ] Kernel state is IDLE
 
@@ -81,7 +81,7 @@ print(f'Kernel {kernel.kernel_id} started in state {kernel.state}')
 ```bash
 # Step 1: Export current evidence (if possible)
 python -c "
-from kernels import StrictKernel
+from shards_kernel import StrictKernel
 kernel = get_running_kernel()  # Your method to get kernel
 evidence = kernel.export_evidence()
 save_evidence(evidence, 'backup/evidence_$(date +%Y%m%d_%H%M%S).json')
@@ -120,8 +120,8 @@ curl http://localhost:8080/health
 
 ```python
 # daily_health_check.py
-from kernels import StrictKernel
-from kernels.audit import replay_and_verify
+from shards_kernel import StrictKernel
+from shards_kernel.audit import replay_and_verify
 
 def daily_health_check(kernel):
     checks = []
@@ -191,7 +191,7 @@ def daily_health_check(kernel):
 
 ```python
 # investigate_anomaly.py
-from kernels import StrictKernel
+from shards_kernel import StrictKernel
 
 def investigate_anomaly(kernel, start_ts, end_ts):
     evidence = kernel.export_evidence()
@@ -255,7 +255,7 @@ def investigate_anomaly(kernel, start_ts, end_ts):
 ```python
 # emergency_halt.py
 import time
-from kernels import StrictKernel
+from shards_kernel import StrictKernel
 
 def emergency_halt(kernel, reason):
     # Step 1: Record pre-halt state
@@ -370,7 +370,7 @@ def preserve_evidence(kernel, incident_id):
 
 ```python
 # post_incident_recovery.py
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
 def post_incident_recovery(incident_id, policy_updates=None):
     # Step 1: Review incident
@@ -426,7 +426,7 @@ def post_incident_recovery(incident_id, policy_updates=None):
 
 ```python
 # update_policy.py
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
 def update_policy(kernel, new_policy_config):
     # Step 1: Validate new policy
@@ -479,7 +479,7 @@ def update_policy(kernel, new_policy_config):
 
 ```python
 # rotate_evidence.py
-from kernels import StrictKernel
+from shards_kernel import StrictKernel
 
 def rotate_evidence(kernel):
     # Step 1: Export current evidence
@@ -491,7 +491,7 @@ def rotate_evidence(kernel):
         json.dump(evidence, f)
     
     # Step 3: Verify archive
-    from kernels.audit import replay_and_verify
+    from shards_kernel.audit import replay_and_verify
     with open(filename, 'r') as f:
         archived = json.load(f)
     
@@ -534,7 +534,7 @@ def rotate_evidence(kernel):
 
 ```python
 # add_kernel_instance.py
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
 def add_kernel_instance(cluster_id, instance_number):
     # Step 1: Load shared policy

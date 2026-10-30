@@ -20,18 +20,18 @@ format-check:
 	ruff format --check .
 
 typecheck:
-	mypy kernels implementations
+	mypy shards_kernel implementations
 
 test:
 	pytest
 
 test-cov:
-	pytest --cov=kernels --cov=implementations --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=66
+	pytest --cov=shards_kernel --cov=implementations --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=66
 	$(PYTHON) scripts/ci/check_governance_coverage.py coverage.json
 
 security:
 	@if command -v bandit >/dev/null 2>&1; then \
-		bandit -r kernels implementations -q; \
+		bandit -r shards_kernel implementations -q; \
 	else \
 		echo "bandit not installed; skipping security scan"; \
 	fi

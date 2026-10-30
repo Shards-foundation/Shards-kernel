@@ -4,8 +4,8 @@ import io
 import json
 import sys
 
-from kernels.integrations.mcp_adapter import MCPServer
-from kernels.integrations.wire import boot_strict_kernel
+from shards_kernel.integrations.mcp_adapter import MCPServer
+from shards_kernel.integrations.wire import boot_strict_kernel
 
 
 def test_mcp_server_list_call_and_unknown_method():

@@ -6,7 +6,7 @@ set -e
 cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$(pwd)"
 
-echo "Kernels Smoke Test"
+echo "Shards-Kernel Smoke Test"
 echo "=================="
 
 echo ""
@@ -25,16 +25,16 @@ echo ""
 echo "[3b] Running the remaining examples..."
 for example in examples/0{3,4,5,6,7,8,9}*.py examples/1{0,1}*.py; do
   echo "  $example"
-  python3 "$example" >/tmp/kernels-example.out
+  python3 "$example" >/tmp/shards_kernel-example.out
 done
 
 echo ""
 echo "[4/7] Checking CLI help..."
-python3 -m kernels --help
+python3 -m shards_kernel --help
 
 echo ""
 echo "[5/7] Checking CLI version..."
-python3 -m kernels --version
+python3 -m shards_kernel --version
 
 echo ""
 echo "[6/7] Exercising thread-safe nonce registry..."

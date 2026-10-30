@@ -13,7 +13,7 @@ Tests cover:
 
 import unittest
 
-from kernels.permits import (
+from shards_kernel.permits import (
     NonceRegistry,
     PermitBuilder,
     PermitToken,
@@ -25,7 +25,7 @@ from kernels.permits import (
     verify_permit,
     verify_signature,
 )
-from kernels.common.types import Decision
+from shards_kernel.common.types import Decision
 
 
 class TestCanonicalSerialization(unittest.TestCase):
@@ -735,7 +735,7 @@ class TestPermitVerificationNegative(unittest.TestCase):
         )
 
         # Re-sign permit
-        from kernels.permits import sign_permit
+        from shards_kernel.permits import sign_permit
 
         permit_with_constraint = replace(permit_with_constraint, signature="")
         permit_id = compute_permit_id(permit_with_constraint)
@@ -1044,7 +1044,7 @@ class TestPermitVerificationNegative(unittest.TestCase):
         )
 
         # Re-sign
-        from kernels.permits import sign_permit
+        from shards_kernel.permits import sign_permit
 
         permit_bad_constraint = replace(permit_bad_constraint, signature="")
         permit_id = compute_permit_id(permit_bad_constraint)
@@ -1304,7 +1304,7 @@ class TestPermitVerificationPositive(unittest.TestCase):
             self.valid_permit, params={"text": "hello", "extra": "allowed"}
         )
         # Re-sign
-        from kernels.permits import sign_permit
+        from shards_kernel.permits import sign_permit
 
         permit = replace(permit, signature="")
         permit_id = compute_permit_id(permit)
@@ -1330,7 +1330,7 @@ class TestPermitVerificationPositive(unittest.TestCase):
 
         multi_permit = replace(self.valid_permit, max_executions=3)
         # Re-sign
-        from kernels.permits import sign_permit
+        from shards_kernel.permits import sign_permit
 
         multi_permit = replace(
             multi_permit, signature="", nonce="multi-nonce-123456789012345678901234"

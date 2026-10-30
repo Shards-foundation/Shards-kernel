@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document maps KERNELS capabilities to common compliance frameworks and provides guidance for achieving certification readiness.
+This document maps Shards-Kernel capabilities to common compliance frameworks and provides guidance for achieving certification readiness.
 
 ---
 
@@ -16,7 +16,7 @@ This document maps KERNELS capabilities to common compliance frameworks and prov
 
 ### 2.1 SOC 2 Type II
 
-| Trust Service Criteria | KERNELS Control | Status |
+| Trust Service Criteria | Shards-Kernel Control | Status |
 |------------------------|-----------------|--------|
 | **CC1: Control Environment** | | |
 | CC1.1 Integrity and ethical values | Fail-closed design | ✅ |
@@ -54,7 +54,7 @@ This document maps KERNELS capabilities to common compliance frameworks and prov
 
 ### 2.2 ISO 27001
 
-| Control | KERNELS Mapping | Status |
+| Control | Shards-Kernel Mapping | Status |
 |---------|-----------------|--------|
 | A.5.1 Information security policies | Jurisdiction policy | ✅ |
 | A.6.1 Internal organization | Four planes architecture | ✅ |
@@ -71,7 +71,7 @@ This document maps KERNELS capabilities to common compliance frameworks and prov
 
 ### 2.3 NIST Cybersecurity Framework
 
-| Function | Category | KERNELS Control |
+| Function | Category | Shards-Kernel Control |
 |----------|----------|-----------------|
 | **IDENTIFY** | | |
 | ID.AM | Asset Management | Tool registry |
@@ -97,7 +97,7 @@ This document maps KERNELS capabilities to common compliance frameworks and prov
 
 ### 2.4 GDPR (Article 25)
 
-| Requirement | KERNELS Control | Status |
+| Requirement | Shards-Kernel Control | Status |
 |-------------|-----------------|--------|
 | Data protection by design | Fail-closed default | ✅ |
 | Data protection by default | Explicit allow required | ✅ |
@@ -233,7 +233,7 @@ def verify_compliance_evidence(evidence_path):
 
 ### 5.1 AI-Specific Regulations
 
-| Regulation | Jurisdiction | KERNELS Relevance |
+| Regulation | Jurisdiction | Shards-Kernel Relevance |
 |------------|--------------|-------------------|
 | EU AI Act | European Union | High-risk AI governance |
 | NIST AI RMF | United States | AI risk management |
@@ -242,7 +242,7 @@ def verify_compliance_evidence(evidence_path):
 
 ### 5.2 EU AI Act Mapping
 
-| Requirement | KERNELS Control |
+| Requirement | Shards-Kernel Control |
 |-------------|-----------------|
 | Human oversight | Halt capability, approvals |
 | Transparency | Audit trail, evidence export |
@@ -253,7 +253,7 @@ def verify_compliance_evidence(evidence_path):
 
 ### 5.3 Industry-Specific
 
-| Industry | Regulation | KERNELS Relevance |
+| Industry | Regulation | Shards-Kernel Relevance |
 |----------|------------|-------------------|
 | Finance | SOX, PCI-DSS | Audit trail, access control |
 | Healthcare | HIPAA | Audit logging, access control |

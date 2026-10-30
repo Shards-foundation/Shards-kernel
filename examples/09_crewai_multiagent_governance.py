@@ -1,7 +1,7 @@
 """
-Example: CrewAI Multi-Agent System with KERNELS Governance
+Example: CrewAI Multi-Agent System with Shards-Kernel Governance
 
-This example demonstrates KERNELS governance for CrewAI multi-agent orchestration,
+This example demonstrates Shards-Kernel governance for CrewAI multi-agent orchestration,
 addressing the critical security challenge of agent-to-agent privilege escalation.
 
 CrewAI Context:
@@ -18,7 +18,7 @@ The Problem:
     - Access resources outside their intended scope
 
 The Solution:
-    KERNELS provides:
+    Shards-Kernel provides:
     - Tool-level governance for all agent actions
     - Agent identity and role attestation
     - Inter-agent permission matrix
@@ -44,11 +44,11 @@ Usage:
 import json
 import os
 
-# KERNELS imports
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.integrations.crewai_adapter import CrewAIAdapter
-from kernels.permits import PermitBuilder
+# Shards-Kernel imports
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.crewai_adapter import CrewAIAdapter
+from shards_kernel.permits import PermitBuilder
 from _permit import issue_permit
 
 
@@ -128,7 +128,7 @@ def publish_blog(title: str, content: str, publish: bool = False) -> str:
 
 def main():
     print("=" * 80)
-    print("KERNELS + CrewAI Multi-Agent Governance")
+    print("Shards-Kernel + CrewAI Multi-Agent Governance")
     print("=" * 80)
     print()
     print("Scenario: Research & Publishing Crew")
@@ -148,10 +148,10 @@ def main():
     print()
 
     # ========================================================================
-    # Step 1: Set up KERNELS kernel
+    # Step 1: Set up Shards-Kernel kernel
     # ========================================================================
 
-    print("Step 1: Initialize KERNELS governance")
+    print("Step 1: Initialize Shards-Kernel governance")
     print("-" * 80)
 
     kernel = StrictKernel()
@@ -383,7 +383,7 @@ def main():
         )
         print(f"✗ ERROR: Should have been denied! Result: {result}")
     except PermissionError as e:
-        print("✓ CORRECTLY DENIED by KERNELS")
+        print("✓ CORRECTLY DENIED by Shards-Kernel")
         print(f"  Error: {e}")
         print()
         print("This prevents unauthorized file system modifications!")
@@ -428,7 +428,7 @@ def main():
         permit_token=write_permit,
     )
 
-    print("✓ ALLOWED by KERNELS")
+    print("✓ ALLOWED by Shards-Kernel")
     print(f"  Result: {result}")
     print()
 
@@ -589,19 +589,19 @@ def main():
     # ========================================================================
 
     print("=" * 80)
-    print("SUMMARY: CrewAI Multi-Agent Governance with KERNELS")
+    print("SUMMARY: CrewAI Multi-Agent Governance with Shards-Kernel")
     print("=" * 80)
     print()
-    print("What KERNELS prevents in multi-agent systems:")
+    print("What Shards-Kernel prevents in multi-agent systems:")
     print()
-    print("WITHOUT KERNELS:")
+    print("WITHOUT Shards-Kernel:")
     print("  ✗ Any agent can execute any dangerous operation")
     print("  ✗ Agents can delegate to bypass security controls")
     print("  ✗ Privilege escalation via delegation chains")
     print("  ✗ No audit trail of inter-agent interactions")
     print("  ✗ No role-based access control")
     print()
-    print("WITH KERNELS:")
+    print("WITH Shards-Kernel:")
     print("  ✓ Dangerous operations require cryptographic permits")
     print("  ✓ Delegation matrix prevents privilege escalation")
     print("  ✓ Agent identity and role attestation")
@@ -616,7 +616,7 @@ def main():
     print("  - Permits are bound to specific agent identities")
     print()
     print("Integration usage:")
-    print("  from kernels.integrations import CrewAIAdapter")
+    print("  from shards_kernel.integrations import CrewAIAdapter")
     print()
     print("  adapter = CrewAIAdapter(kernel)")
     print("  governed_tool = adapter.wrap_tool('tool_name', func, actor='agent-id')")

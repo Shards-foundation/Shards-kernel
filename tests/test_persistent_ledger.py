@@ -7,12 +7,12 @@ import unittest
 from pathlib import Path
 
 from implementations.storage import SQLiteAuditStorage
-from kernels.common.errors import AuditError
-from kernels.common.types import Decision, KernelState
-from kernels.audit.ledger import AuditLedger
-from kernels.common.hashing import genesis_hash
-from kernels.common.types import KernelConfig, KernelRequest, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.common.errors import AuditError
+from shards_kernel.common.types import Decision, KernelState
+from shards_kernel.audit.ledger import AuditLedger
+from shards_kernel.common.hashing import genesis_hash
+from shards_kernel.common.types import KernelConfig, KernelRequest, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 class TestPersistentAuditLedger(unittest.TestCase):

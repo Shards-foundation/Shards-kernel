@@ -1,4 +1,4 @@
-# KERNELS Roadmap
+# Shards-Kernel Roadmap
 
 **Version:** 0.1.0  
 **Last Updated:** Capability progression (non-dated)
@@ -7,7 +7,7 @@
 
 ## Vision
 
-KERNELS becomes the standard control plane for governed AI agent execution, making deterministic arbitration and immutable audit the default for production AI systems.
+Shards-Kernel becomes the standard control plane for governed AI agent execution, making deterministic arbitration and immutable audit the default for production AI systems.
 
 ---
 

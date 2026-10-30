@@ -4,12 +4,12 @@
 Demonstrates the basic request/receipt cycle with a strict kernel.
 """
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     KernelConfig,
     KernelRequest,
     VirtualClock,
 )
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 def main() -> None:

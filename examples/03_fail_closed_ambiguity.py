@@ -5,13 +5,13 @@ Demonstrates how the kernel handles ambiguous requests with fail-closed
 semantics.
 """
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     KernelConfig,
     KernelRequest,
     ToolCall,
     VirtualClock,
 )
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 from _permit import issue_permit
 
 KEYRING = {"example-key": b"example-secret-key-32bytes-long!"}

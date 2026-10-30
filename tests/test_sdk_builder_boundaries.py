@@ -2,7 +2,7 @@
 
 import pytest
 
-from kernels.sdk.builder import (
+from shards_kernel.sdk.builder import (
     PolicyBuilder,
     RequestBuilder,
     ToolCallBuilder,

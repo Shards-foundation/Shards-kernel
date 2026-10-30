@@ -2,7 +2,7 @@
 
 ## Overview
 
-KERNELS provides first-class integrations with the leading AI agent frameworks, enabling permit-based governance for autonomous AI systems. This document covers integrations with **CrewAI**, **AutoGPT**, and **LangGraph** - three fundamentally different agent paradigms.
+Shards-Kernel provides first-class integrations with the leading AI agent frameworks, enabling permit-based governance for autonomous AI systems. This document covers integrations with **CrewAI**, **AutoGPT**, and **LangGraph** - three fundamentally different agent paradigms.
 
 **Why Agent Governance Matters:**
 - Agents can execute arbitrary code, shell commands, and API calls
@@ -11,7 +11,7 @@ KERNELS provides first-class integrations with the leading AI agent frameworks, 
 - Autonomous loops can consume unlimited resources
 - No built-in authorization or audit trails in most frameworks
 
-**KERNELS Solution:**
+**Shards-Kernel Solution:**
 - Cryptographic permit-based authorization
 - Multi-agent delegation control
 - State transition validation
@@ -63,7 +63,7 @@ KERNELS provides first-class integrations with the leading AI agent frameworks, 
 │  Publisher  │ (HIGH RISK: file write, email, publish)
 └─────────────┘
 
-KERNELS Policy Layer:
+Shards-Kernel Policy Layer:
 ├── Tool governance per agent role
 ├── Delegation matrix validation
 ├── Agent identity attestation
@@ -73,8 +73,8 @@ KERNELS Policy Layer:
 ### Quick Start
 
 ```python
-from kernels.integrations import CrewAIAdapter
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations import CrewAIAdapter
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 # Initialize kernel
 kernel = StrictKernel()
@@ -170,7 +170,7 @@ tool = adapter.wrap_tool(
 
 ### Security Model
 
-| Attack Vector | Without KERNELS | With KERNELS |
+| Attack Vector | Without Shards-Kernel | With Shards-Kernel |
 |---------------|----------------|--------------|
 | Privilege Escalation | Agent delegates to more powerful agent | Delegation matrix blocks invalid paths |
 | Unauthorized Tool Use | Any agent can use any tool | Tools bound to agent identities |
@@ -205,7 +205,7 @@ AutoGPT Autonomous Loop
 └────────────────────────┼──────┘
                          │
                          ▼
-               KERNELS Policy Gate
+               Shards-Kernel Policy Gate
                ├── Risk scoring (0.0-1.0)
                ├── Permit verification
                ├── Loop monitoring
@@ -215,7 +215,7 @@ AutoGPT Autonomous Loop
 ### Quick Start
 
 ```python
-from kernels.integrations import AutoGPTAdapter
+from shards_kernel.integrations import AutoGPTAdapter
 
 # Create adapter with autonomous loop monitoring
 adapter = AutoGPTAdapter(
@@ -272,7 +272,7 @@ risk = adapter.get_risk_score("my_command")  # Returns 0.8
 ### Kill-Switch Configuration
 
 ```python
-from kernels.integrations.autogpt_adapter import AutonomousLoopMonitor
+from shards_kernel.integrations.autogpt_adapter import AutonomousLoopMonitor
 
 monitor = AutonomousLoopMonitor(
     max_iterations=100,           # Halt after 100 autonomous steps
@@ -341,7 +341,7 @@ LangGraph Workflow
 │ Ship Order  │ (state: order_shipped = true)
 └─────────────┘
 
-KERNELS Governance:
+Shards-Kernel Governance:
 ├── Node execution permits
 ├── State transition tracking
 ├── Workflow invariants enforcement
@@ -351,7 +351,7 @@ KERNELS Governance:
 ### Quick Start
 
 ```python
-from kernels.integrations import LangGraphAdapter
+from shards_kernel.integrations import LangGraphAdapter
 
 # Create adapter with invariant enforcement
 adapter = LangGraphAdapter(
@@ -465,7 +465,7 @@ workflow_data = evidence["workflow_data"]
 All frameworks use the same permit format:
 
 ```python
-from kernels.permits import PermitBuilder
+from shards_kernel.permits import PermitBuilder
 
 permit = (
     PermitBuilder()
@@ -530,8 +530,8 @@ governed_node = langgraph_adapter.wrap_node("name", func)
 ### 1. Choose Kernel Variant
 
 ```python
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
 
 # StrictKernel: Deny by default (recommended for production)
 kernel = StrictKernel()
@@ -607,7 +607,7 @@ for entry in evidence["entries"]:
 
 ```bash
 # Automated verification
-python -m kernels.cli.verify audit_trail.json || exit 1
+python -m shards_kernel.cli.verify audit_trail.json || exit 1
 
 # Expected checks:
 # ✓ Hash Chain Integrity
@@ -623,7 +623,7 @@ python -m kernels.cli.verify audit_trail.json || exit 1
 
 All agent framework integrations support regulatory requirements:
 
-| Requirement | Framework | KERNELS Mechanism |
+| Requirement | Framework | Shards-Kernel Mechanism |
 |-------------|-----------|-------------------|
 | **EU AI Act Art. 12** (Record-keeping) | All | Immutable hash-chained audit log |
 | **EU AI Act Art. 14** (Human oversight) | All | Cryptographic permit issuance |
@@ -641,7 +641,7 @@ See [COMPLIANCE_MAPPING.md](COMPLIANCE_MAPPING.md) for detailed mappings.
 |---------|--------|---------|-----------|
 | **Paradigm** | Multi-agent | Autonomous loop | Stateful workflow |
 | **Main Risk** | Privilege escalation | Resource exhaustion | Invalid state |
-| **KERNELS Focus** | Delegation control | Kill-switch | Invariants |
+| **Shards-Kernel Focus** | Delegation control | Kill-switch | Invariants |
 | **Agent Identity** | ✅ Per-agent | ❌ Single agent | ❌ Single workflow |
 | **Loop Monitoring** | ❌ N/A | ✅ Iterations/runtime | ❌ N/A |
 | **State Validation** | ❌ Stateless | ❌ Stateless | ✅ Invariants |
@@ -714,12 +714,12 @@ researcher_actions = [
 - Main README - Architecture and getting started
 
 ### Code
-- `kernels/integrations/langchain_adapter.py`
-- `kernels/integrations/langgraph_adapter.py`
-- `kernels/integrations/crewai_adapter.py`
-- `kernels/integrations/autogpt_adapter.py`
-- `kernels/integrations/huggingface_adapter.py`
-- `kernels/integrations/generic_adapter.py`
+- `shards_kernel/integrations/langchain_adapter.py`
+- `shards_kernel/integrations/langgraph_adapter.py`
+- `shards_kernel/integrations/crewai_adapter.py`
+- `shards_kernel/integrations/autogpt_adapter.py`
+- `shards_kernel/integrations/huggingface_adapter.py`
+- `shards_kernel/integrations/generic_adapter.py`
 
 ### External Resources
 - [CrewAI Documentation](https://docs.crewai.com/)
@@ -731,7 +731,7 @@ researcher_actions = [
 
 ## Summary
 
-KERNELS transforms AI agent frameworks from powerful-but-risky autonomous systems into **governed, auditable, and compliant** production infrastructure:
+Shards-Kernel transforms AI agent frameworks from powerful-but-risky autonomous systems into **governed, auditable, and compliant** production infrastructure:
 
 ✓ **Framework-agnostic** - Works with CrewAI, AutoGPT, LangGraph, LangChain, HuggingFace, OpenClaw, and any tool-calling framework
 ✓ **Permit-based authorization** - Cryptographically signed permits (HMAC-SHA256)
@@ -745,4 +745,4 @@ KERNELS transforms AI agent frameworks from powerful-but-risky autonomous system
 
 ---
 
-*Framework integrations maintained by the KERNELS team. Contributions welcome.*
+*Framework integrations maintained by the Shards-Kernel team. Contributions welcome.*

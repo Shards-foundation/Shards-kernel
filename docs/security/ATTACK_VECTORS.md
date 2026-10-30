@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document catalogs potential attack vectors against KERNELS, their likelihood, impact, and mitigations. Use this for threat modeling and security testing.
+This document catalogs potential attack vectors against Shards-Kernel, their likelihood, impact, and mitigations. Use this for threat modeling and security testing.
 
 ---
 

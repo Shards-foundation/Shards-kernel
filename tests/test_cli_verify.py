@@ -18,12 +18,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from kernels.audit.replay import replay_and_verify, verify_evidence_bundle
-from kernels.cli import verify_evidence, verify_evidence_file
-from kernels.cli.verify import main
-from kernels.common.types import KernelConfig, KernelRequest, VirtualClock
-from kernels.integrations.wire import evidence_to_mapping
-from kernels.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.audit.replay import replay_and_verify, verify_evidence_bundle
+from shards_kernel.cli import verify_evidence, verify_evidence_file
+from shards_kernel.cli.verify import main
+from shards_kernel.common.types import KernelConfig, KernelRequest, VirtualClock
+from shards_kernel.integrations.wire import evidence_to_mapping
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
 
 _FORBIDDEN_SUCCESS_WORDS = ("verified", "authentic", "passed")
 
@@ -90,7 +90,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         self._assert_success_wording(stdout)
 
         completed = subprocess.run(
-            [sys.executable, "-m", "kernels.cli.verify", path],
+            [sys.executable, "-m", "shards_kernel.cli.verify", path],
             check=False,
             capture_output=True,
             text=True,
@@ -182,7 +182,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         legacy["entries"] = legacy.pop("ledger_entries")
         self.assertTrue(verify_evidence_bundle(legacy).is_valid)
 
-        with patch("kernels.cli.verify.verify_evidence_bundle") as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             result = verify_evidence(legacy)
         replay.assert_not_called()
         self.assertFalse(result.internally_consistent)
@@ -214,7 +214,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         self.assertNotIn("ledger_entries", missing)
         self.assertTrue(verify_evidence_bundle(missing).is_valid)
 
-        with patch("kernels.cli.verify.verify_evidence_bundle") as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             empty_result = verify_evidence(empty_export)
             missing_result = verify_evidence(missing)
             blank_result = verify_evidence({})
@@ -230,10 +230,10 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         coded = copy.deepcopy(self.valid)
         coded["schema_version"] = "other.vendor.v9"
         self.assertTrue(verify_evidence_bundle(coded).is_valid)
-        with patch("kernels.cli.verify.verify_evidence_bundle") as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             result = verify_evidence(coded)
             listed = verify_evidence([])
-            explicit = verify_evidence({"schema": "kernels.evidence.bundle", **self.valid})
+            explicit = verify_evidence({"schema": "shards_kernel.evidence.bundle", **self.valid})
         replay.assert_not_called()
         self.assertFalse(result.internally_consistent)
         self.assertIn("unknown schema", result.errors)
@@ -252,7 +252,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         not_a_list = {"ledger_entries": "nope", "root_hash": self.valid["root_hash"]}
         extra = copy.deepcopy(self.valid)
         extra["audit_entries"] = []
-        with patch("kernels.cli.verify.verify_evidence_bundle") as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             unknown_result = verify_evidence(unknown)
             type_result = verify_evidence(not_a_list)
             extra_result = verify_evidence(extra)
@@ -270,7 +270,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         blank["root_hash"] = "  "
         wrong_type = copy.deepcopy(self.valid)
         wrong_type["root_hash"] = 0
-        with patch("kernels.cli.verify.verify_evidence_bundle") as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             missing_result = verify_evidence(missing)
             blank_result = verify_evidence(blank)
             type_result = verify_evidence(wrong_type)
@@ -282,7 +282,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
     def test_malformed_entry_rejected_before_replay(self) -> None:
         malformed = copy.deepcopy(self.valid)
         malformed["ledger_entries"][0] = "not-an-entry"
-        with patch("kernels.cli.verify.verify_evidence_bundle") as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             result = verify_evidence(malformed)
         replay.assert_not_called()
         self.assertIn("malformed bundle", result.errors)
@@ -293,7 +293,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         self.assertIn("malformed entry", stdout)
 
     def test_valid_bundle_delegates_to_verify_evidence_bundle(self) -> None:
-        with patch("kernels.cli.verify.verify_evidence_bundle", wraps=verify_evidence_bundle) as replay:
+        with patch("shards_kernel.cli.verify.verify_evidence_bundle", wraps=verify_evidence_bundle) as replay:
             result = verify_evidence(self.valid)
         replay.assert_called_once_with(self.valid)
         self.assertTrue(result.delegated)
