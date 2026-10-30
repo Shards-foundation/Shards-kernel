@@ -1,4 +1,4 @@
-# KERNELS Schemas
+# Shards-Kernel Schemas
 
 **Version:** 0.1.0  
 **Classification:** Technical Reference  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document defines all data schemas used in KERNELS. Schemas are the contracts between components.
+This document defines all data schemas used in Shards-Kernel. Schemas are the contracts between components.
 
 ---
 

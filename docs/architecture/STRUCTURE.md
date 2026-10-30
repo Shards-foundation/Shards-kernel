@@ -1,4 +1,4 @@
-# KERNELS Repository Structure
+# Shards-Kernel Repository Structure
 
 **Version:** 0.1.0  
 **Last Updated:** January 2025
@@ -14,7 +14,7 @@ This document describes the repository structure, file organization, and module 
 ## 2. Directory Tree
 
 ```
-kernels/
+shards_kernel/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
 │   │   ├── bug_report.md
@@ -51,7 +51,7 @@ kernels/
 │   ├── 03_fail_closed_ambiguity.py
 │   ├── 04_external_audit_replay.py
 │   └── 05_variant_comparison.py
-├── kernels/
+├── shards_kernel/
 │   ├── audit/
 │   │   ├── __init__.py
 │   │   ├── ledger.py
@@ -133,7 +133,7 @@ kernels/
 
 ## 3. Module Responsibilities
 
-### 3.1 Core Library (`kernels/`)
+### 3.1 Core Library (`shards_kernel/`)
 
 | Module | Responsibility |
 |--------|----------------|
@@ -142,7 +142,7 @@ kernels/
 | `__main__.py` | CLI entrypoint |
 | `_version.py` | Version information |
 
-### 3.2 Common (`kernels/common/`)
+### 3.2 Common (`shards_kernel/common/`)
 
 | Module | Responsibility |
 |--------|----------------|
@@ -153,35 +153,35 @@ kernels/
 | `codec.py` | Serialization |
 | `validate.py` | Validation functions |
 
-### 3.3 State (`kernels/state/`)
+### 3.3 State (`shards_kernel/state/`)
 
 | Module | Responsibility |
 |--------|----------------|
 | `transitions.py` | Transition definitions |
 | `machine.py` | State machine implementation |
 
-### 3.4 Jurisdiction (`kernels/jurisdiction/`)
+### 3.4 Jurisdiction (`shards_kernel/jurisdiction/`)
 
 | Module | Responsibility |
 |--------|----------------|
 | `policy.py` | Policy definitions |
 | `rules.py` | Rule evaluation |
 
-### 3.5 Audit (`kernels/audit/`)
+### 3.5 Audit (`shards_kernel/audit/`)
 
 | Module | Responsibility |
 |--------|----------------|
 | `ledger.py` | Append-only ledger |
 | `replay.py` | Replay verification |
 
-### 3.6 Execution (`kernels/execution/`)
+### 3.6 Execution (`shards_kernel/execution/`)
 
 | Module | Responsibility |
 |--------|----------------|
 | `tools.py` | Tool registry |
 | `dispatcher.py` | Execution dispatch |
 
-### 3.7 Variants (`kernels/variants/`)
+### 3.7 Variants (`shards_kernel/variants/`)
 
 | Module | Responsibility |
 |--------|----------------|
@@ -286,7 +286,7 @@ kernels/
 ## 7. Import Graph
 
 ```
-kernels/
+shards_kernel/
 ├── api.py
 │   ├── common/types.py
 │   ├── common/errors.py

@@ -1,4 +1,4 @@
-# KERNELS Axioms
+# Shards-Kernel Axioms
 
 **Version:** 0.1.0  
 **Classification:** Foundational  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-Axioms are self-evident truths that form the foundation of KERNELS. They are not derived from other principles; they are the principles from which everything else derives.
+Axioms are self-evident truths that form the foundation of Shards-Kernel. They are not derived from other principles; they are the principles from which everything else derives.
 
 ---
 

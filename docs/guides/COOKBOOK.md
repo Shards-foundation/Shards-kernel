@@ -1,4 +1,4 @@
-# KERNELS Cookbook
+# Shards-Kernel Cookbook
 
 **Version:** 0.1.0  
 **Classification:** Developer Guide  
@@ -13,7 +13,7 @@ These recipes use the installed API. Boot a kernel, set a keyring, and pass a pe
 The snippets below share this setup:
 
 ```python
-from kernels import (
+from shards_kernel import (
     JurisdictionPolicy,
     KernelConfig,
     KernelRequest,
@@ -130,8 +130,8 @@ The ledger is process memory. Export the bundle if you need to keep it. A crash 
 ### Recipe 2.5: Verify evidence
 
 ```python
-from kernels.audit import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
+from shards_kernel.audit import replay_and_verify
+from shards_kernel.common.codec import audit_entry_to_dict
 
 entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
 is_valid, errors = replay_and_verify(entries, bundle.root_hash)
@@ -180,7 +180,7 @@ kernel.config.clock.advance(1_000)
 ### Recipe 4.1: Evidence-first
 
 ```python
-from kernels import EvidenceFirstKernel
+from shards_kernel import EvidenceFirstKernel
 
 kernel = boot("audit", EvidenceFirstKernel, "evidence-first")
 receipt = call(
@@ -197,7 +197,7 @@ A missing or blank `evidence` string is denied even when the permit is valid.
 Constraints are a dictionary inside `params`. The tool call must carry the same dictionary. This recipe is intent-only, so it needs no permit:
 
 ```python
-from kernels import DualChannelKernel
+from shards_kernel import DualChannelKernel
 
 kernel = boot("dual", DualChannelKernel, "dual-channel")
 params = {
@@ -235,7 +235,7 @@ receipt = kernel.submit(request)
 ### Recipe 5.1: FastAPI
 
 ```python
-from kernels.integrations import create_fastapi_app
+from shards_kernel.integrations import create_fastapi_app
 
 app = create_fastapi_app(kernel)
 ```
@@ -245,7 +245,7 @@ app = create_fastapi_app(kernel)
 ### Recipe 5.2: Flask
 
 ```python
-from kernels.integrations import create_flask_app
+from shards_kernel.integrations import create_flask_app
 
 app = create_flask_app(kernel)
 client = app.test_client()
@@ -257,14 +257,14 @@ The body is the same shape as the FastAPI body. A denial is HTTP 200 with `"deci
 ### Recipe 5.3: SDK server and client
 
 ```python
-from kernels.sdk import KernelClient, KernelServer
+from shards_kernel.sdk import KernelClient, KernelServer
 
 server = KernelServer(kernel, host="127.0.0.1", port=8080)
 client = KernelClient(server.url)
 receipt = client.submit(request, permit_token=permit)
 ```
 
-The CLI (`python -m kernels`) validates and replays files. It does not call `submit`.
+The CLI (`python -m shards_kernel`) validates and replays files. It does not call `submit`.
 
 ---
 
@@ -308,7 +308,7 @@ The default ledger is process-local. For local durable persistence, inject the S
 
 ```python
 from implementations.storage import SQLiteAuditStorage
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 kernel = StrictKernel(audit_storage=SQLiteAuditStorage("audit.sqlite3"))
 ```

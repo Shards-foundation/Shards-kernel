@@ -1,4 +1,4 @@
-# KERNELS Configuration Reference
+# Shards-Kernel Configuration Reference
 
 **Version:** 0.1.0  
 **Classification:** Reference  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document provides a complete reference for configuring KERNELS.
+This document provides a complete reference for configuring Shards-Kernel.
 
 ---
 
@@ -19,7 +19,7 @@ This document provides a complete reference for configuring KERNELS.
 Configure directly in Python code:
 
 ```python
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
 policy = JurisdictionPolicy(
     allowed_actors=["agent-001"],
@@ -39,7 +39,7 @@ kernel = StrictKernel(
 Load from YAML file:
 
 ```yaml
-# kernels.yaml
+# shards_kernel.yaml
 kernel:
   id: "prod-001"
   variant: "strict"
@@ -64,9 +64,9 @@ logging:
 
 ```python
 import yaml
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
-with open("kernels.yaml") as f:
+with open("shards_kernel.yaml") as f:
     config = yaml.safe_load(f)
 
 policy = JurisdictionPolicy(**config["policy"])
@@ -87,7 +87,7 @@ export KERNELS_ALLOWED_TOOLS="read_file,write_file"
 
 ```python
 import os
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
 policy = JurisdictionPolicy(
     allowed_actors=os.environ.get("KERNELS_ALLOWED_ACTORS", "").split(","),
@@ -225,7 +225,7 @@ List of custom rule functions.
 
 **Example:**
 ```python
-from kernels.jurisdiction import RuleResult
+from shards_kernel.jurisdiction import RuleResult
 
 def business_hours_only(request):
     from datetime import datetime
@@ -336,7 +336,7 @@ import logging
 handler = logging.StreamHandler()
 
 # File
-handler = logging.FileHandler("/var/log/kernels/kernels.log")
+handler = logging.FileHandler("/var/log/shards_kernel/shards_kernel.log")
 
 # Syslog
 handler = logging.handlers.SysLogHandler(address="/dev/log")
@@ -360,7 +360,7 @@ Directory for evidence storage.
 
 **Environment:**
 ```bash
-export KERNELS_EVIDENCE_PATH=/var/lib/kernels/evidence
+export KERNELS_EVIDENCE_PATH=/var/lib/shards_kernel/evidence
 ```
 
 ### 7.2 Evidence Rotation
@@ -369,7 +369,7 @@ Configure evidence rotation.
 
 ```yaml
 evidence:
-  path: /var/lib/kernels/evidence
+  path: /var/lib/shards_kernel/evidence
   rotation: weekly
   retention_days: 2555  # 7 years
   compression: gzip
@@ -392,7 +392,7 @@ evidence:
 Register tools for execution.
 
 ```python
-from kernels.execution import ToolRegistry
+from shards_kernel.execution import ToolRegistry
 
 registry = ToolRegistry()
 
@@ -450,7 +450,7 @@ registry.register(
 Configure API key authentication.
 
 ```python
-from kernels.sdk import KernelServer
+from shards_kernel.sdk import KernelServer
 
 server = KernelServer(
     kernel,
@@ -460,7 +460,7 @@ server = KernelServer(
 
 **Client:**
 ```python
-from kernels.sdk import KernelClient
+from shards_kernel.sdk import KernelClient
 
 client = KernelClient(
     "http://localhost:8080",
@@ -486,7 +486,7 @@ context.load_cert_chain("cert.pem", "key.pem")
 Configure Cross-Origin Resource Sharing.
 
 ```python
-from kernels.integrations import create_fastapi_app
+from shards_kernel.integrations import create_fastapi_app
 
 app = create_fastapi_app(
     kernel,
@@ -501,7 +501,7 @@ app = create_fastapi_app(
 ### 10.1 YAML Configuration File
 
 ```yaml
-# /etc/kernels/kernels.yaml
+# /etc/shards_kernel/shards_kernel.yaml
 
 # Kernel settings
 kernel:
@@ -532,11 +532,11 @@ server:
 logging:
   level: INFO
   format: "%(asctime)s %(levelname)s %(name)s %(message)s"
-  file: /var/log/kernels/kernels.log
+  file: /var/log/shards_kernel/shards_kernel.log
 
 # Evidence settings
 evidence:
-  path: /var/lib/kernels/evidence
+  path: /var/lib/shards_kernel/evidence
   rotation: weekly
   retention_days: 2555
   compression: gzip
@@ -545,8 +545,8 @@ evidence:
 security:
   api_key_required: true
   tls_enabled: true
-  tls_cert: /etc/kernels/cert.pem
-  tls_key: /etc/kernels/key.pem
+  tls_cert: /etc/shards_kernel/cert.pem
+  tls_key: /etc/shards_kernel/key.pem
 
 # Monitoring settings
 monitoring:
@@ -559,9 +559,9 @@ monitoring:
 
 ```python
 import yaml
-from kernels import StrictKernel, JurisdictionPolicy
+from shards_kernel import StrictKernel, JurisdictionPolicy
 
-def load_config(path: str = "/etc/kernels/kernels.yaml"):
+def load_config(path: str = "/etc/shards_kernel/shards_kernel.yaml"):
     with open(path) as f:
         return yaml.safe_load(f)
 

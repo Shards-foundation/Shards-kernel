@@ -1,4 +1,4 @@
-# KERNELS Framework Guide
+# Shards-Kernel Framework Guide
 
 **Version:** 0.1.0  
 **Classification:** Developer Guide  
@@ -8,11 +8,11 @@
 
 ## 1. Introduction
 
-KERNELS is a **deterministic control plane framework** for AI systems. It provides governance, audit, and policy enforcement for AI agent actions.
+Shards-Kernel is a **deterministic control plane framework** for AI systems. It provides governance, audit, and policy enforcement for AI agent actions.
 
-### 1.1 What is KERNELS?
+### 1.1 What is Shards-Kernel?
 
-KERNELS is a runtime governance layer that:
+Shards-Kernel is a runtime governance layer that:
 
 - **Interposes** between AI agent intent and action execution
 - **Arbitrates** every action against explicit policy
@@ -29,9 +29,9 @@ KERNELS is a runtime governance layer that:
 | **Extensible** | Custom policies, tools, and integrations |
 | **Zero Dependencies** | Python stdlib only |
 
-### 1.3 When to Use KERNELS
+### 1.3 When to Use Shards-Kernel
 
-Use KERNELS when you need:
+Use Shards-Kernel when you need:
 
 - Governance for AI agent actions
 - Audit trail for compliance
@@ -180,7 +180,7 @@ Each entry contains:
 ### 3.3 Module Structure
 
 ```
-kernels/
+shards_kernel/
 ├── api.py              # Public API surface
 ├── common/             # Shared utilities
 │   ├── types.py        # Core types
@@ -214,7 +214,7 @@ kernels/
 **Maximum enforcement.** Use in production.
 
 ```python
-from kernels import StrictKernel
+from shards_kernel import StrictKernel
 
 kernel = StrictKernel(kernel_id="prod-001")
 ```
@@ -230,7 +230,7 @@ kernel = StrictKernel(kernel_id="prod-001")
 **Relaxed thresholds.** Use in development.
 
 ```python
-from kernels import PermissiveKernel
+from shards_kernel import PermissiveKernel
 
 kernel = PermissiveKernel(kernel_id="dev-001")
 ```
@@ -246,7 +246,7 @@ kernel = PermissiveKernel(kernel_id="dev-001")
 **Evidence required.** Use for audit-heavy workloads.
 
 ```python
-from kernels import EvidenceFirstKernel
+from shards_kernel import EvidenceFirstKernel
 
 kernel = EvidenceFirstKernel(kernel_id="audit-001")
 ```
@@ -262,7 +262,7 @@ kernel = EvidenceFirstKernel(kernel_id="audit-001")
 **Constraints required.** Use for structured workflows.
 
 ```python
-from kernels import DualChannelKernel
+from shards_kernel import DualChannelKernel
 
 kernel = DualChannelKernel(kernel_id="structured-001")
 ```
@@ -286,7 +286,7 @@ kernel = DualChannelKernel(kernel_id="structured-001")
 
 ## 5. Core Invariants
 
-KERNELS guarantees these invariants:
+Shards-Kernel guarantees these invariants:
 
 | ID | Invariant | Guarantee |
 |----|-----------|-----------|
@@ -310,7 +310,7 @@ KERNELS guarantees these invariants:
 Register custom tools for execution:
 
 ```python
-from kernels.execution import ToolRegistry
+from shards_kernel.execution import ToolRegistry
 
 registry = ToolRegistry()
 
@@ -324,7 +324,7 @@ def my_tool(params):
 Add custom policy rules:
 
 ```python
-from kernels.jurisdiction import RuleResult
+from shards_kernel.jurisdiction import RuleResult
 
 def my_rule(request):
     if some_condition(request):
@@ -381,7 +381,7 @@ def on_decision(request, decision):
 ### 7.2 Error Handling
 
 ```python
-from kernels import KernelError, JurisdictionError, StateError
+from shards_kernel import KernelError, JurisdictionError, StateError
 
 try:
     receipt = kernel.submit(request)
