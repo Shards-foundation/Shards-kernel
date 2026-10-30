@@ -10,11 +10,11 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Callable, Optional
 
-from kernels.common.hashing import compute_hash_dict
-from kernels.common.types import ToolCall
-from kernels.execution.dispatcher import Dispatcher, ExecutionResult
-from kernels.memory.artifact_store import ArtifactStore
-from kernels.memory.idempotency_store import IdempotencyRecord, IdempotencyStore
+from shards_kernel.common.hashing import compute_hash_dict
+from shards_kernel.common.types import ToolCall
+from shards_kernel.execution.dispatcher import Dispatcher, ExecutionResult
+from shards_kernel.memory.artifact_store import ArtifactStore
+from shards_kernel.memory.idempotency_store import IdempotencyRecord, IdempotencyStore
 
 
 @dataclass(frozen=True)

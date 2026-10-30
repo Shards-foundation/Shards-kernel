@@ -7,7 +7,7 @@ All tools must be explicitly registered; no dynamic discovery is allowed.
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from kernels.common.errors import ToolError
+from shards_kernel.common.errors import ToolError
 
 
 @dataclass(frozen=True)

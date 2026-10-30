@@ -12,9 +12,9 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Optional, Union
 
-from kernels.common.types import ToolCall
-from kernels.common.errors import ToolError
-from kernels.execution.tools import ToolRegistry
+from shards_kernel.common.types import ToolCall
+from shards_kernel.common.errors import ToolError
+from shards_kernel.execution.tools import ToolRegistry
 
 
 @dataclass

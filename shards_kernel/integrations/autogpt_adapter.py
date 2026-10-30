@@ -1,5 +1,5 @@
 """
-AutoGPT Integration Adapter for KERNELS
+AutoGPT Integration Adapter for Shards-Kernel
 
 Provides permit-based governance for AutoGPT autonomous agents.
 
@@ -11,7 +11,7 @@ capable of:
 - Managing its own memory
 - Running in autonomous loops until goal completion
 
-KERNELS Governance Layer:
+Shards-Kernel Governance Layer:
 - All command executions require cryptographic permits
 - Autonomous loop monitoring and kill-switch
 - Dynamic risk scoring per action
@@ -19,9 +19,9 @@ KERNELS Governance Layer:
 - Complete audit trail of autonomous actions
 
 Usage:
-    from kernels.integrations import AutoGPTAdapter
+    from shards_kernel.integrations import AutoGPTAdapter
 
-    # Create KERNELS adapter
+    # Create Shards-Kernel adapter
     adapter = AutoGPTAdapter(kernel, actor="autogpt-agent")
 
     # Wrap AutoGPT commands
@@ -32,7 +32,7 @@ Usage:
     # Execute with governance
     result = execute_shell(command="ls -la", permit_token=permit)
 
-Author: KERNELS Team
+Author: Shards-Kernel Team
 License: MIT
 """
 
@@ -42,19 +42,19 @@ from functools import wraps
 import uuid
 import time
 
-# KERNELS imports
-from kernels.common.types import (
+# Shards-Kernel imports
+from shards_kernel.common.types import (
     KernelRequest,
     ToolCall,
     Decision,
 )
-from kernels.permits import PermitToken
-from kernels.variants.base import BaseKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.variants.base import BaseKernel
 
 
 @dataclass
 class AutoGPTCommandResult:
-    """Result from AutoGPT command execution with KERNELS governance."""
+    """Result from AutoGPT command execution with Shards-Kernel governance."""
 
     was_allowed: bool
     decision: Decision
@@ -187,7 +187,7 @@ class AutonomousLoopMonitor:
 
 class AutoGPTAdapter:
     """
-    KERNELS adapter for AutoGPT autonomous agents.
+    Shards-Kernel adapter for AutoGPT autonomous agents.
 
     This adapter provides permit-based governance for AutoGPT commands,
     autonomous loop monitoring, and kill-switch functionality.
@@ -228,7 +228,7 @@ class AutoGPTAdapter:
         Initialize AutoGPT adapter.
 
         Args:
-            kernel: KERNELS kernel instance
+            kernel: Shards-Kernel kernel instance
             actor: Actor identity for AutoGPT agent
             auto_register: Auto-register commands in kernel dispatcher
             enable_monitoring: Enable autonomous loop monitoring
@@ -286,7 +286,7 @@ class AutoGPTAdapter:
         risk_score: Optional[float] = None,
     ) -> Callable:
         """
-        Wrap AutoGPT command with KERNELS governance.
+        Wrap AutoGPT command with Shards-Kernel governance.
 
         Args:
             name: Command name
@@ -352,7 +352,7 @@ class AutoGPTAdapter:
                 result = str(receipt.tool_result)
                 return result
             else:
-                error_msg = f"Command {name} denied by KERNELS: {receipt.error}"
+                error_msg = f"Command {name} denied by Shards-Kernel: {receipt.error}"
                 raise PermissionError(error_msg)
 
         # Store command
@@ -398,7 +398,7 @@ class AutoGPTAdapter:
             Evidence bundle containing all command executions,
             decisions, and permit verifications.
         """
-        from kernels.common.codec import audit_entry_to_dict
+        from shards_kernel.common.codec import audit_entry_to_dict
 
         bundle = self.kernel.export_evidence()
         entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
@@ -447,7 +447,7 @@ def create_autogpt_adapter(
     Factory function to create AutoGPT adapter.
 
     Args:
-        kernel: KERNELS kernel instance
+        kernel: Shards-Kernel kernel instance
         actor: Actor identity
         auto_register: Auto-register commands in kernel
         enable_monitoring: Enable autonomous loop monitoring

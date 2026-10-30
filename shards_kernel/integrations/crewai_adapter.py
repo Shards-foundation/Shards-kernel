@@ -1,5 +1,5 @@
 """
-CrewAI Integration Adapter for KERNELS
+CrewAI Integration Adapter for Shards-Kernel
 
 Provides permit-based governance for CrewAI multi-agent systems.
 
@@ -8,17 +8,17 @@ CrewAI is a multi-agent orchestration framework that allows agents to:
 - Use tools to interact with external systems
 - Collaborate via context sharing
 
-KERNELS Governance Layer:
+Shards-Kernel Governance Layer:
 - All tool executions require cryptographic permits
 - Agent delegation requires authorization
 - Multi-agent privilege escalation detection
 - Complete audit trail of agent interactions
 
 Usage:
-    from kernels.integrations import CrewAIAdapter
+    from shards_kernel.integrations import CrewAIAdapter
     from crewai import Agent, Task, Crew
 
-    # Create KERNELS adapter
+    # Create Shards-Kernel adapter
     adapter = CrewAIAdapter(kernel, actor="crew-orchestrator")
 
     # Wrap CrewAI tools
@@ -35,7 +35,7 @@ Usage:
         ...
     )
 
-Author: KERNELS Team
+Author: Shards-Kernel Team
 License: MIT
 """
 
@@ -64,19 +64,19 @@ except ImportError:
         return None
 
 
-# KERNELS imports
-from kernels.common.types import (
+# Shards-Kernel imports
+from shards_kernel.common.types import (
     KernelRequest,
     ToolCall,
     Decision,
 )
-from kernels.permits import PermitToken
-from kernels.variants.base import BaseKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.variants.base import BaseKernel
 
 
 @dataclass
 class CrewAIToolResult:
-    """Result from CrewAI tool execution with KERNELS governance."""
+    """Result from CrewAI tool execution with Shards-Kernel governance."""
 
     was_allowed: bool
     decision: Decision
@@ -88,7 +88,7 @@ class CrewAIToolResult:
 
 class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
     """
-    CrewAI BaseTool wrapper with KERNELS governance.
+    CrewAI BaseTool wrapper with Shards-Kernel governance.
 
     This class implements CrewAI's BaseTool interface while enforcing
     permit-based governance for all tool executions.
@@ -98,7 +98,7 @@ class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
         description: Tool description (CrewAI requirement)
         args_schema: Pydantic schema for arguments (CrewAI requirement)
         func: Underlying function to execute
-        kernel: KERNELS kernel instance
+        kernel: Shards-Kernel kernel instance
         actor: Actor identity (agent name)
     """
 
@@ -123,12 +123,12 @@ class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
             name: Tool name
             description: Tool description for agent understanding
             func: Underlying tool function
-            kernel: KERNELS kernel instance
+            kernel: Shards-Kernel kernel instance
             actor: Actor identity (agent name)
             args_schema: Pydantic schema for tool arguments
             require_permit: Whether this tool requires permits (default: True)
         """
-        # Store KERNELS-specific attributes first
+        # Store Shards-Kernel-specific attributes first
         self.func = func
         self.kernel = kernel
         self.actor = actor
@@ -187,7 +187,7 @@ class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
 
     def _run(self, permit_token: Optional[PermitToken] = None, **kwargs) -> str:
         """
-        Execute tool with KERNELS governance (CrewAI sync interface).
+        Execute tool with Shards-Kernel governance (CrewAI sync interface).
 
         This method implements CrewAI's BaseTool._run() interface while
         enforcing permit-based governance.
@@ -200,7 +200,7 @@ class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
             str: Tool execution result (CrewAI requirement)
 
         Raises:
-            Exception: If execution is denied by KERNELS
+            Exception: If execution is denied by Shards-Kernel
         """
         self._call_count += 1
 
@@ -225,12 +225,12 @@ class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
             return result
         else:
             # Tool execution was denied
-            error_msg = f"Tool {self.name} denied by KERNELS: {receipt.error}"
+            error_msg = f"Tool {self.name} denied by Shards-Kernel: {receipt.error}"
             raise PermissionError(error_msg)
 
     async def _arun(self, permit_token: Optional[PermitToken] = None, **kwargs) -> str:
         """
-        Execute tool asynchronously with KERNELS governance (CrewAI async interface).
+        Execute tool asynchronously with Shards-Kernel governance (CrewAI async interface).
 
         For now, delegates to synchronous _run().
         Future: Implement true async kernel submission.
@@ -249,7 +249,7 @@ class GovernedCrewAITool(BaseTool if CREWAI_AVAILABLE else object):
 
 class CrewAIAdapter:
     """
-    KERNELS adapter for CrewAI multi-agent orchestration.
+    Shards-Kernel adapter for CrewAI multi-agent orchestration.
 
     This adapter provides permit-based governance for CrewAI agents and tools,
     enabling secure multi-agent collaboration with complete audit trails.
@@ -281,7 +281,7 @@ class CrewAIAdapter:
         Initialize CrewAI adapter.
 
         Args:
-            kernel: KERNELS kernel instance
+            kernel: Shards-Kernel kernel instance
             actor: Default actor identity for agents
             auto_register: Auto-register tools in kernel dispatcher
         """
@@ -356,7 +356,7 @@ class CrewAIAdapter:
             Evidence bundle containing all tool executions,
             decisions, and permit verifications.
         """
-        from kernels.common.codec import audit_entry_to_dict
+        from shards_kernel.common.codec import audit_entry_to_dict
 
         evidence = self.kernel.export_evidence()
         entries = [audit_entry_to_dict(entry) for entry in evidence.ledger_entries]
@@ -439,7 +439,7 @@ def create_crewai_adapter(
     Factory function to create CrewAI adapter.
 
     Args:
-        kernel: KERNELS kernel instance
+        kernel: Shards-Kernel kernel instance
         actor: Default actor identity
         auto_register: Auto-register tools in kernel
 

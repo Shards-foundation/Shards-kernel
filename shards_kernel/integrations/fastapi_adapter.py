@@ -1,5 +1,5 @@
 """
-KERNELS FastAPI Integration
+Shards-Kernel FastAPI Integration
 
 Provides FastAPI app factory for kernel servers.
 """
@@ -17,7 +17,7 @@ try:
 except ImportError:
     HAS_FASTAPI = False
 
-from kernels.integrations.wire import (
+from shards_kernel.integrations.wire import (
     boot_strict_kernel,
     evidence_to_mapping,
     policy_to_mapping,
@@ -25,8 +25,8 @@ from kernels.integrations.wire import (
     request_from_mapping,
     status_mapping,
 )
-from kernels.variants.base import BaseKernel
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 
 if HAS_FASTAPI:
@@ -83,7 +83,7 @@ def create_fastapi_app(
     kernel: Optional[BaseKernel] = None,
     kernel_id: str = "fastapi-kernel",
     policy: Optional[JurisdictionPolicy] = None,
-    title: str = "KERNELS API",
+    title: str = "Shards-Kernel API",
     version: str = "0.1.0",
     cors_origins: List[str] = ["*"],
 ) -> "FastAPI":
@@ -114,7 +114,7 @@ def create_fastapi_app(
     app = FastAPI(
         title=title,
         version=version,
-        description="KERNELS - Deterministic Control Plane for AI Systems",
+        description="Shards-Kernel - Deterministic Control Plane for AI Systems",
     )
 
     # Add CORS middleware
@@ -136,7 +136,7 @@ def create_fastapi_app(
     async def info():
         """Get API info."""
         return {
-            "name": "KERNELS",
+            "name": "Shards-Kernel",
             "version": version,
             "kernel_id": kernel.config.kernel_id,
         }

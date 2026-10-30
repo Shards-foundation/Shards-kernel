@@ -1,7 +1,7 @@
 """
-KERNELS Generic Integration Adapter
+Shards-Kernel Generic Integration Adapter
 
-Universal adapter for integrating KERNELS with any tool-calling framework.
+Universal adapter for integrating Shards-Kernel with any tool-calling framework.
 
 This adapter provides a flexible pattern for wrapping tools from:
 - OpenClaw/Moltbook
@@ -28,11 +28,11 @@ import functools
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Callable
 
-from kernels.common.types import KernelRequest, ToolCall, Decision
-from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.permits import PermitToken
-from kernels.common.errors import PermitError
+from shards_kernel.common.types import KernelRequest, ToolCall, Decision
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.common.errors import PermitError
 
 
 @dataclass
@@ -54,7 +54,7 @@ class GenericAdapter:
     Universal adapter for any tool-calling framework.
 
     This adapter provides a flexible interface for wrapping tools from
-    any framework with KERNELS governance.
+    any framework with Shards-Kernel governance.
 
     Examples:
 
@@ -270,7 +270,7 @@ class GenericAdapter:
         Returns:
             Evidence bundle as dict
         """
-        from kernels.common.codec import audit_entry_to_dict
+        from shards_kernel.common.codec import audit_entry_to_dict
 
         evidence = self.kernel.export_evidence()
 
@@ -306,16 +306,16 @@ def create_generic_adapter(
     Returns:
         Configured generic adapter
     """
-    from kernels.common.types import KernelConfig, VirtualClock
+    from shards_kernel.common.types import KernelConfig, VirtualClock
 
     if variant == "strict":
         kernel = StrictKernel()
     elif variant == "permissive":
-        from kernels.variants.permissive_kernel import PermissiveKernel
+        from shards_kernel.variants.permissive_kernel import PermissiveKernel
 
         kernel = PermissiveKernel()
     elif variant == "evidence-first":
-        from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
+        from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
 
         kernel = EvidenceFirstKernel()
     else:
@@ -341,7 +341,7 @@ class MoltbookAdapter(GenericAdapter):
     Adapter for Moltbook/OpenClaw frameworks.
 
     Moltbook is a tool-calling framework. This adapter shows how to
-    integrate KERNELS governance.
+    integrate Shards-Kernel governance.
 
     Usage:
         adapter = MoltbookAdapter(kernel)
@@ -397,7 +397,7 @@ def create_moltbook_adapter(
     Returns:
         Configured Moltbook adapter
     """
-    from kernels.common.types import KernelConfig, VirtualClock
+    from shards_kernel.common.types import KernelConfig, VirtualClock
 
     kernel = StrictKernel()
     config = KernelConfig(

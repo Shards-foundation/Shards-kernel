@@ -1,5 +1,5 @@
 """
-KERNELS Flask Integration
+Shards-Kernel Flask Integration
 
 Provides Flask app factory for kernel servers.
 """
@@ -15,7 +15,7 @@ try:
 except ImportError:
     HAS_FLASK = False
 
-from kernels.integrations.wire import (
+from shards_kernel.integrations.wire import (
     boot_strict_kernel,
     evidence_to_mapping,
     policy_to_mapping,
@@ -23,8 +23,8 @@ from kernels.integrations.wire import (
     request_from_mapping,
     status_mapping,
 )
-from kernels.variants.base import BaseKernel
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 
 def create_flask_app(
@@ -61,7 +61,7 @@ def create_flask_app(
         """Get API info."""
         return jsonify(
             {
-                "name": "KERNELS",
+                "name": "Shards-Kernel",
                 "version": "0.1.0",
                 "kernel_id": app.config["kernel"].config.kernel_id,
             }
