@@ -1,24 +1,24 @@
-"""KERNELS — Deterministic Control Planes for AI Systems.
+"""Shards-Kernel — Deterministic Control Planes for AI Systems.
 
-Public API surface is defined in kernels.api. Only items exported there
+Public API surface is defined in shards_kernel.api. Only items exported there
 are part of the supported, stable interface. Everything else is internal
 and subject to change without notice.
 
 Usage:
-    from kernels import StrictKernel, KernelRequest, Decision
+    from shards_kernel import StrictKernel, KernelRequest, Decision
     # or explicitly:
-    from kernels.api import StrictKernel, KernelRequest, Decision
+    from shards_kernel.api import StrictKernel, KernelRequest, Decision
 """
 
 # Re-export the public API surface
-from kernels.api import *  # noqa: F401, F403
-from kernels.api import __all__ as _api_all
+from shards_kernel.api import *  # noqa: F401, F403
+from shards_kernel.api import __all__ as _api_all
 
 # Version
-from kernels._version import __version__
+from shards_kernel._version import __version__
 
 # Errors (also part of public surface, but kept separate for clarity)
-from kernels.common.errors import (
+from shards_kernel.common.errors import (
     KernelError,
     BootError,
     StateError,
@@ -29,7 +29,7 @@ from kernels.common.errors import (
 )
 
 # Evidence bundle type
-from kernels.common.types import EvidenceBundle
+from shards_kernel.common.types import EvidenceBundle
 
 __all__ = [
     "__version__",

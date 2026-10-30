@@ -1,5 +1,5 @@
 """
-KERNELS Async Dispatcher
+Shards-Kernel Async Dispatcher
 
 Provides async tool execution capabilities.
 """
@@ -10,7 +10,7 @@ import asyncio
 from typing import Any, Callable, Dict, Optional
 from dataclasses import dataclass
 
-from kernels.common.types import ToolCall
+from shards_kernel.common.types import ToolCall
 
 
 @dataclass

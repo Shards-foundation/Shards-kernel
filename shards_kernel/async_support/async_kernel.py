@@ -1,4 +1,4 @@
-"""Async wrappers around the synchronous kernels.
+"""Async wrappers around the synchronous shards_kernel.
 
 The async classes do not implement a second state machine. Every submit,
 halt, and ledger load runs on the synchronous kernel, so permit binding,
@@ -10,21 +10,21 @@ from __future__ import annotations
 import asyncio
 from typing import Optional, Type
 
-from kernels.common.errors import StateError
-from kernels.common.types import (
+from shards_kernel.common.errors import StateError
+from shards_kernel.common.types import (
     KernelConfig,
     KernelReceipt,
     KernelRequest,
     KernelState,
     VirtualClock,
 )
-from kernels.jurisdiction.policy import JurisdictionPolicy
-from kernels.permits import PermitToken
-from kernels.variants.base import BaseKernel
-from kernels.variants.dual_channel_kernel import DualChannelKernel
-from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
-from kernels.variants.permissive_kernel import PermissiveKernel
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.permits import PermitToken
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.variants.dual_channel_kernel import DualChannelKernel
+from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 class AsyncKernel:

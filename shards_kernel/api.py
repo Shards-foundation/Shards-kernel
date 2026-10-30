@@ -1,12 +1,12 @@
-"""Public, supported API surface for KERNELS.
+"""Public, supported API surface for Shards-Kernel.
 
 If it isn't imported here and re-exported via __all__, treat it as internal
 and subject to change. This file is the compatibility contract.
 
 Usage:
-    from kernels.api import Kernel, KernelRequest, KernelReceipt, Decision
+    from shards_kernel.api import Kernel, KernelRequest, KernelReceipt, Decision
     # or
-    from kernels import Kernel, KernelRequest, KernelReceipt, Decision
+    from shards_kernel import Kernel, KernelRequest, KernelReceipt, Decision
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 # -----------------------------------------------------------------------------
 # Core types (stable)
 # -----------------------------------------------------------------------------
-from kernels.common.types import (
+from shards_kernel.common.types import (
     Decision,
     KernelConfig,
     KernelRequest,
@@ -28,21 +28,21 @@ from kernels.common.types import (
 # -----------------------------------------------------------------------------
 # Interfaces / protocols (stable)
 # -----------------------------------------------------------------------------
-from kernels.variants.base import Kernel, BaseKernel
+from shards_kernel.variants.base import Kernel, BaseKernel
 
 # -----------------------------------------------------------------------------
 # Kernel variants (stable)
 # -----------------------------------------------------------------------------
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.variants.permissive_kernel import PermissiveKernel
-from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
-from kernels.variants.dual_channel_kernel import DualChannelKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
+from shards_kernel.variants.dual_channel_kernel import DualChannelKernel
 
 # -----------------------------------------------------------------------------
 # Tooling surface (stable)
 # -----------------------------------------------------------------------------
-from kernels.execution.tools import ToolRegistry
-from kernels.core.runtime import (
+from shards_kernel.execution.tools import ToolRegistry
+from shards_kernel.core.runtime import (
     Artifact,
     ArtifactRef,
     ExecutionIdentity,
@@ -60,8 +60,8 @@ from kernels.core.runtime import (
 # -----------------------------------------------------------------------------
 # Evidence surface (stable)
 # -----------------------------------------------------------------------------
-from kernels.audit.ledger import AuditLedger
-from kernels.audit.replay import (
+from shards_kernel.audit.ledger import AuditLedger
+from shards_kernel.audit.replay import (
     replay_and_verify,
     verify_evidence_bundle,
     ReplayResult,
@@ -70,12 +70,12 @@ from kernels.audit.replay import (
 # -----------------------------------------------------------------------------
 # Jurisdiction (stable)
 # -----------------------------------------------------------------------------
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 # -----------------------------------------------------------------------------
 # Permit System (v0.2.0+)
 # -----------------------------------------------------------------------------
-from kernels.permits import (
+from shards_kernel.permits import (
     NonceRegistry,
     PermitBuilder,
     PermitToken,

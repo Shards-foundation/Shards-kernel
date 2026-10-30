@@ -2,19 +2,19 @@
 
 import argparse
 import sys
-from kernels._version import __version__
+from shards_kernel._version import __version__
 
 
 def main() -> int:
     """Main CLI entrypoint."""
     parser = argparse.ArgumentParser(
-        prog="kernels",
+        prog="shards-kernel",
         description="Kernels: Deterministic Control Planes for AI Systems",
     )
     parser.add_argument(
         "--version",
         action="version",
-        version=f"kernels {__version__}",
+        version=f"shards-kernel {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -106,8 +106,8 @@ def _cmd_info(variant: str) -> int:
 def _cmd_validate(request_file: str) -> int:
     """Validate a request JSON file."""
     import json
-    from kernels.common.types import KernelRequest
-    from kernels.common.validate import validate_request
+    from shards_kernel.common.types import KernelRequest
+    from shards_kernel.common.validate import validate_request
 
     try:
         with open(request_file, "r") as f:
@@ -145,7 +145,7 @@ def _cmd_validate(request_file: str) -> int:
 def _cmd_replay(ledger_file: str) -> int:
     """Replay and verify an audit ledger."""
     import json
-    from kernels.audit.replay import replay_and_verify
+    from shards_kernel.audit.replay import replay_and_verify
 
     try:
         with open(ledger_file, "r") as f:
