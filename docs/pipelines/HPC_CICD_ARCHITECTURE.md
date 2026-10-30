@@ -1,4 +1,4 @@
-# HPC CI/CD Architecture for KERNELS
+# HPC CI/CD Architecture for Shards-Kernel
 
 This document defines a production-grade CI/CD topology for compute-kernel style
 repositories where determinism, security, hardware compatibility, and release
@@ -116,7 +116,7 @@ benchmark reports, SBOM + provenance attestations.
 
 ```text
 repo/
-├── kernels/
+├── shards_kernel/
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -129,7 +129,7 @@ repo/
 └── pyproject.toml
 ```
 
-## 4) KERNELS Workflow Mapping
+## 4) Shards-Kernel Workflow Mapping
 
 The following files in this repository implement core parts of the architecture. `.github/workflows/hpc-matrix.yml`, `.github/workflows/gpu-hardware.yml`, and `.github/workflows/benchmark.yml` are not in this repository.
 

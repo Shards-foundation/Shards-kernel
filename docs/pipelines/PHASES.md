@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document defines the development phases for KERNELS, from initial concept to production deployment.
+This document defines the development phases for Shards-Kernel, from initial concept to production deployment.
 
 ---
 
@@ -218,7 +218,7 @@ design/
 
 ```
 src/
-├── kernels/               # Source code
+├── shards_kernel/               # Source code
 ├── tests/                 # Test code
 ├── docs/                  # Documentation
 └── examples/              # Example code
@@ -413,7 +413,7 @@ How to rollback.
 
 ## 10. Current Phase Status
 
-### 10.1 KERNELS v0.1.x
+### 10.1 Shards-Kernel v0.1.x
 
 | Phase | Status | Progress |
 |-------|--------|----------|
@@ -423,7 +423,7 @@ How to rollback.
 | Test | ✅ Complete | 100% |
 | Release | ✅ Complete | 100% |
 
-### 10.2 KERNELS v0.2.x
+### 10.2 Shards-Kernel v0.2.x
 
 | Phase | Status | Progress |
 |-------|--------|----------|

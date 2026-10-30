@@ -1,4 +1,4 @@
-# KERNELS Rulebook
+# Shards-Kernel Rulebook
 
 **Version:** 0.1.0  
 **Classification:** Governance  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This rulebook defines the operational rules, policies, and constraints that govern KERNELS deployments. All operators must adhere to these rules.
+This rulebook defines the operational rules, policies, and constraints that govern Shards-Kernel deployments. All operators must adhere to these rules.
 
 ---
 

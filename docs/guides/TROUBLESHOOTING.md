@@ -1,4 +1,4 @@
-# KERNELS Troubleshooting Guide
+# Shards-Kernel Troubleshooting Guide
 
 **Version:** 0.1.0  
 **Classification:** Operations  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This guide helps diagnose and resolve common issues with KERNELS.
+This guide helps diagnose and resolve common issues with Shards-Kernel.
 
 ---
 
@@ -37,7 +37,7 @@ curl http://localhost:8080/status
 ### 2.3 Python Check
 
 ```python
-from kernels import StrictKernel
+from shards_kernel import StrictKernel
 
 kernel = StrictKernel(kernel_id="test")
 print(f"State: {kernel.state}")  # Should print: State: KernelState.IDLE
@@ -62,7 +62,7 @@ python --version  # Should be 3.11+
 pip install -e .
 
 # Verify installation
-python -c "import kernels; print(kernels.__version__)"
+python -c "import shards_kernel; print(shards_kernel.__version__)"
 ```
 
 #### Issue: Python version not supported
@@ -285,7 +285,7 @@ ps aux | grep kernels
 netstat -tlnp | grep 8080
 
 # Start server
-python -m kernels.sdk.server
+python -m shards_kernel.sdk.server
 ```
 
 #### Issue: Address already in use
@@ -307,7 +307,7 @@ kill -9 <PID>
 
 # Or use different port
 python -c "
-from kernels.sdk import KernelServer, StrictKernel
+from shards_kernel.sdk import KernelServer, StrictKernel
 server = KernelServer(StrictKernel('test'), port=8081)
 server.start()
 "
@@ -325,8 +325,8 @@ server.start()
 **Solution:**
 ```python
 # Ensure kernel is passed to server
-from kernels import StrictKernel
-from kernels.sdk import KernelServer
+from shards_kernel import StrictKernel
+from shards_kernel.sdk import KernelServer
 
 kernel = StrictKernel(kernel_id="server-kernel")
 server = KernelServer(kernel, port=8080)
@@ -409,7 +409,7 @@ print(f"Root hash: {evidence['root_hash']}")
 ### 4.3 Trace Request Processing
 
 ```python
-from kernels import StrictKernel, Request, ToolCall
+from shards_kernel import StrictKernel, Request, ToolCall
 
 # Create kernel with debug
 kernel = StrictKernel(kernel_id="debug-kernel")
@@ -434,7 +434,7 @@ print(f"Error: {receipt.error}")
 ### 4.4 Verify Audit Chain
 
 ```python
-from kernels.audit import replay_and_verify
+from shards_kernel.audit import replay_and_verify
 
 evidence = kernel.export_evidence()
 is_valid, errors = replay_and_verify(
@@ -527,7 +527,7 @@ curl http://localhost:8080/health
 
 When reporting issues, include:
 
-1. **KERNELS version:** `python -c "import kernels; print(kernels.__version__)"`
+1. **Shards-Kernel version:** `python -c "import shards_kernel; print(shards_kernel.__version__)"`
 2. **Python version:** `python --version`
 3. **OS:** `uname -a`
 4. **Error message:** Full traceback
@@ -550,8 +550,8 @@ When reporting issues, include:
 
 - [ ] Python 3.11+ installed
 - [ ] Package installed (`pip install -e .`)
-- [ ] Import works (`import kernels`)
-- [ ] Version correct (`kernels.__version__`)
+- [ ] Import works (`import shards_kernel`)
+- [ ] Version correct (`shards_kernel.__version__`)
 
 ### 8.2 Configuration
 
