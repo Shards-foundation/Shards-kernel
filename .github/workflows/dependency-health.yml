@@ -39,26 +39,14 @@ jobs:
           python -m pip install --upgrade setuptools
           pip install -e .
           pip install pip-audit
-          if [ "${{ matrix.python-version }}" != "3.9" ]; then
-            pip install "filelock>=3.20.3"
-          fi
 
       - name: Validate dependency graph
         run: pip check
 
-      - name: Audit known vulnerabilities
-        run: |
-          if [ "${{ matrix.python-version }}" = "3.9" ]; then
-            pip-audit \
-              --skip-editable \
-              --ignore-vuln GHSA-w853-jp5j-5j7f \
-              --ignore-vuln GHSA-qmgc-5h2g-mvrw \
-              --ignore-vuln GHSA-gc5v-m9x4-r6x2
-          else
-            pip-audit \
-              --skip-editable \
-              --ignore-vuln GHSA-gc5v-m9x4-r6x2
-          fi
+      - name: Audit Shards-Kernel declared dependency graph
+        # Scan this project's runtime dependency graph, not the runner's preinstalled tools.
+        # The latter can contain vulnerable packages unrelated to Shards-Kernel.
+        run: pip-audit .
 
       - name: Ensure package still imports
         run: python -c "import shards_kernel; print('shards_kernel import OK')"
