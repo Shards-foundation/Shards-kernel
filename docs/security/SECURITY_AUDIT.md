@@ -1,6 +1,6 @@
 # Security Audit Report
 
-**Project:** KERNELS  
+**Project:** Shards-Kernel  
 **Version:** 0.1.0  
 **Audit Date:** January 2025  
 **Auditor:** Automated Security Analysis  
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-This security audit evaluates KERNELS against common vulnerability patterns, cryptographic practices, and secure design principles. The audit covers code analysis, threat modeling, and hardening recommendations.
+This security audit evaluates Shards-Kernel against common vulnerability patterns, cryptographic practices, and secure design principles. The audit covers code analysis, threat modeling, and hardening recommendations.
 
 ### Overall Assessment
 
@@ -54,7 +54,7 @@ This security audit evaluates KERNELS against common vulnerability patterns, cry
 
 ### 2.1 Input Validation
 
-**Location:** `kernels/common/validate.py`
+**Location:** `shards_kernel/common/validate.py`
 
 | Check | Status | Notes |
 |-------|--------|-------|
@@ -67,7 +67,7 @@ This security audit evaluates KERNELS against common vulnerability patterns, cry
 
 ### 2.2 Cryptographic Implementation
 
-**Location:** `kernels/common/hashing.py`
+**Location:** `shards_kernel/common/hashing.py`
 
 | Check | Status | Notes |
 |-------|--------|-------|
@@ -98,7 +98,7 @@ def secure_compare(a: str, b: str) -> bool:
 
 ### 2.3 State Machine Security
 
-**Location:** `kernels/state/machine.py`
+**Location:** `shards_kernel/state/machine.py`
 
 | Check | Status | Notes |
 |-------|--------|-------|
@@ -123,7 +123,7 @@ class StateMachine:
 
 ### 2.4 Jurisdiction Policy
 
-**Location:** `kernels/jurisdiction/policy.py`
+**Location:** `shards_kernel/jurisdiction/policy.py`
 
 | Check | Status | Notes |
 |-------|--------|-------|
@@ -261,7 +261,7 @@ Results:
 | hashlib | stdlib | None |
 | dataclasses | stdlib | None |
 
-**Note:** KERNELS has zero external dependencies, minimizing supply chain risk.
+**Note:** Shards-Kernel has zero external dependencies, minimizing supply chain risk.
 
 ---
 
@@ -310,7 +310,7 @@ Results:
 
 ## 10. Conclusion
 
-KERNELS demonstrates strong security fundamentals with its fail-closed design, explicit jurisdiction, and hash-chained audit. The identified findings are moderate in severity and addressable through the recommended hardening actions.
+Shards-Kernel demonstrates strong security fundamentals with its fail-closed design, explicit jurisdiction, and hash-chained audit. The identified findings are moderate in severity and addressable through the recommended hardening actions.
 
 **Next Steps:**
 1. Address P0 hardening recommendations

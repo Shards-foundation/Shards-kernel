@@ -1,16 +1,16 @@
-# KERNELS: Deterministic Control Planes for AI Systems
+# Shards-Kernel: Deterministic Control Planes for AI Systems
 
 **A Whitepaper on Governed Agent Execution**
 
 **Version:** 1.0  
 **Date:** January 2025  
-**Authors:** KERNELS Project
+**Authors:** Shards-Kernel Project
 
 ---
 
 ## Abstract
 
-As AI agents gain autonomy and capability, the need for deterministic governance becomes critical. This paper introduces KERNELS, a control plane architecture that provides fail-closed arbitration, explicit jurisdiction, and immutable audit for AI agent systems. We present the theoretical foundations, architectural design, and practical implementation of a system that ensures every agent action passes through a verifiable decision boundary. Our approach addresses the fundamental challenge of maintaining human oversight while enabling agent autonomy at scale.
+As AI agents gain autonomy and capability, the need for deterministic governance becomes critical. This paper introduces Shards-Kernel, a control plane architecture that provides fail-closed arbitration, explicit jurisdiction, and immutable audit for AI agent systems. We present the theoretical foundations, architectural design, and practical implementation of a system that ensures every agent action passes through a verifiable decision boundary. Our approach addresses the fundamental challenge of maintaining human oversight while enabling agent autonomy at scale.
 
 ---
 
@@ -29,7 +29,7 @@ Current approaches suffer from fundamental limitations:
 | Human-in-the-loop | Doesn't scale, fatigue-prone |
 | Logging | Advisory, not enforcing |
 
-### 1.2 The KERNELS Thesis
+### 1.2 The Shards-Kernel Thesis
 
 We propose that AI agent governance requires a **deterministic control plane** that:
 
@@ -86,7 +86,7 @@ Existing approaches to AI governance include:
 | Guardrails | Filter inputs/outputs | Reactive, bypassable |
 | Sandboxing | Isolate execution | Coarse-grained |
 
-KERNELS differs by providing **runtime governance** at the action level, not training-time alignment or post-hoc filtering.
+Shards-Kernel differs by providing **runtime governance** at the action level, not training-time alignment or post-hoc filtering.
 
 ---
 
@@ -94,7 +94,7 @@ KERNELS differs by providing **runtime governance** at the action level, not tra
 
 ### 3.1 Design Principles
 
-KERNELS is built on ten foundational principles:
+Shards-Kernel is built on ten foundational principles:
 
 | Principle | Implementation |
 |-----------|----------------|
@@ -111,7 +111,7 @@ KERNELS is built on ten foundational principles:
 
 ### 3.2 Four Planes Model
 
-KERNELS operates across four distinct planes:
+Shards-Kernel operates across four distinct planes:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -323,7 +323,7 @@ All ten invariants are verified through:
 The API is designed for simplicity:
 
 ```python
-from kernels import KernelConfig, KernelRequest, StrictKernel, VirtualClock
+from shards_kernel import KernelConfig, KernelRequest, StrictKernel, VirtualClock
 
 kernel = StrictKernel()
 kernel.boot(KernelConfig(kernel_id="my-kernel", variant="strict", clock=VirtualClock(0)))
@@ -337,7 +337,7 @@ receipt = kernel.submit(request, permit_token=permit)
 
 ### 7.1 Limitations
 
-KERNELS addresses runtime governance but does not solve:
+Shards-Kernel addresses runtime governance but does not solve:
 - Training-time alignment
 - Prompt injection prevention
 - Capability limitation
@@ -364,11 +364,11 @@ Deterministic control planes enable:
 
 ## 8. Conclusion
 
-KERNELS demonstrates that deterministic governance of AI agents is both possible and practical. By interposing a control plane between intent and action, we create a verifiable decision boundary that preserves human oversight while enabling agent autonomy.
+Shards-Kernel demonstrates that deterministic governance of AI agents is both possible and practical. By interposing a control plane between intent and action, we create a verifiable decision boundary that preserves human oversight while enabling agent autonomy.
 
 The key insight is that governance must be **architectural**, not advisory. Logging is not governance. Filtering is not governance. Only a system that can prevent unauthorized actions provides true governance.
 
-We release KERNELS as open source to enable the community to build on this foundation. The future of AI agents depends on our ability to govern them reliably.
+We release Shards-Kernel as open source to enable the community to build on this foundation. The future of AI agents depends on our ability to govern them reliably.
 
 ---
 

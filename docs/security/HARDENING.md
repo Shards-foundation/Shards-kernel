@@ -1,4 +1,4 @@
-# KERNELS Hardening Guide
+# Shards-Kernel Hardening Guide
 
 **Version:** 0.1.0  
 **Classification:** Security  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This guide provides security hardening recommendations for KERNELS deployments. Follow these guidelines to maximize security posture in production environments.
+This guide provides security hardening recommendations for Shards-Kernel deployments. Follow these guidelines to maximize security posture in production environments.
 
 ---
 
@@ -64,7 +64,7 @@ This guide provides security hardening recommendations for KERNELS deployments. 
 
 ```python
 # Production configuration
-from kernels import JurisdictionPolicy, KernelConfig, StrictKernel, VirtualClock
+from shards_kernel import JurisdictionPolicy, KernelConfig, StrictKernel, VirtualClock
 
 kernel = StrictKernel()
 kernel.boot(KernelConfig(
@@ -147,8 +147,8 @@ def submit_request(kernel, request, actor_token):
 
 ```python
 # Periodically verify ledger integrity
-from kernels.audit import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
+from shards_kernel.audit import replay_and_verify
+from shards_kernel.common.codec import audit_entry_to_dict
 
 def verify_ledger_integrity(kernel):
     bundle = kernel.export_evidence()
@@ -171,7 +171,7 @@ import json
 from datetime import datetime
 
 def archive_evidence(kernel, archive_path):
-    from kernels.common.codec import audit_entry_to_dict
+    from shards_kernel.common.codec import audit_entry_to_dict
 
     bundle = kernel.export_evidence()
     payload = {
@@ -367,7 +367,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
     handlers=[
-        logging.FileHandler('/var/log/kernels/kernel.log'),
+        logging.FileHandler('/var/log/shards_kernel/kernel.log'),
         logging.StreamHandler(),
     ]
 )
@@ -401,7 +401,7 @@ COPY --chown=kernels:kernels requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Read-only filesystem where possible
-COPY --chown=kernels:kernels kernels/ /app/kernels/
+COPY --chown=kernels:kernels shards_kernel/ /app/shards_kernel/
 WORKDIR /app
 
 # No shell access
@@ -506,7 +506,7 @@ def recover_kernel(archive_path: str):
         raise SecurityError(f"Cannot recover: {errors}")
     
     # 3. Boot a new kernel. Halt is irrevocable, so recovery is a new process.
-    from kernels import KernelConfig, VirtualClock
+    from shards_kernel import KernelConfig, VirtualClock
 
     kernel = StrictKernel()
     kernel.boot(KernelConfig(

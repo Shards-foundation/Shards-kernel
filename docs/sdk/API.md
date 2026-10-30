@@ -1,10 +1,10 @@
-# KERNELS API Reference
+# Shards-Kernel API Reference
 
 **Version:** 0.1.0  
 **Classification:** Reference  
 **Last Updated:** October 2026
 
-Import the supported surface from `kernels` (re-exported from `kernels.api`). A tool call is denied unless `submit` is given a permit whose `params` are the parameters that run. `request.params` and `tool_call.params` must be the same contents.
+Import the supported surface from `shards_kernel` (re-exported from `shards_kernel.api`). A tool call is denied unless `submit` is given a permit whose `params` are the parameters that run. `request.params` and `tool_call.params` must be the same contents.
 
 ---
 
@@ -27,7 +27,7 @@ class KernelRequest:
 `Request` is an alias of `KernelRequest`. `evidence` is one string. Dual-channel constraints live inside `params["constraints"]`, and that same dictionary is the tool-call parameters when a tool runs.
 
 ```python
-from kernels import KernelRequest, ToolCall
+from shards_kernel import KernelRequest, ToolCall
 
 params = {"text": "hello"}
 request = KernelRequest(
@@ -108,7 +108,7 @@ class KernelConfig:
 Construct a variant, then `boot` it. `submit(request, permit_token=None)` returns a `KernelReceipt`. `halt(reason)` requires a reason and is irrevocable. `export_evidence()` returns an `EvidenceBundle`, not a dictionary. `get_state()` returns the current `KernelState`. `set_keyring` and `set_policy` install the HMAC keys and the jurisdiction policy.
 
 ```python
-from kernels import (
+from shards_kernel import (
     Decision,
     JurisdictionPolicy,
     KernelConfig,
@@ -158,7 +158,7 @@ assert receipt.tool_result == "hello"
 `PermissiveKernel` allows intent-only requests when the policy says so. `EvidenceFirstKernel` denies a request whose `evidence` string is missing or blank. `DualChannelKernel` denies a request whose `params` omit a `constraints` dictionary with `scope`, `non_goals`, and `success_criteria`. A tool call on every variant still needs a permit unless the non-strict insecure flag is set.
 
 ```python
-from kernels import DualChannelKernel, EvidenceFirstKernel, KernelConfig, KernelRequest, VirtualClock
+from shards_kernel import DualChannelKernel, EvidenceFirstKernel, KernelConfig, KernelRequest, VirtualClock
 
 evidence_kernel = EvidenceFirstKernel()
 evidence_kernel.boot(KernelConfig(
@@ -214,7 +214,7 @@ class JurisdictionPolicy:
 `JurisdictionPolicy.default()` allows `"*"` for actors and tools. `JurisdictionPolicy.strict()` allows nobody. There is no `require_tool_call` or `custom_rules` field.
 
 ```python
-from kernels import JurisdictionPolicy
+from shards_kernel import JurisdictionPolicy
 
 policy = JurisdictionPolicy(
     allowed_actors=frozenset({"agent-001", "agent-002"}),
@@ -224,7 +224,7 @@ policy = JurisdictionPolicy(
 kernel.set_policy(policy)
 ```
 
-`PolicyBuilder` in `kernels.sdk` produces the same object. `require_tool_call(False)` sets `allow_intent_only`. `with_custom_rule` raises when `build()` is called.
+`PolicyBuilder` in `shards_kernel.sdk` produces the same object. `require_tool_call(False)` sets `allow_intent_only`. `with_custom_rule` raises when `build()` is called.
 
 ---
 
@@ -234,7 +234,7 @@ kernel.set_policy(policy)
 
 ```python
 from implementations.storage import SQLiteAuditStorage
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 kernel = StrictKernel(audit_storage=SQLiteAuditStorage("audit.sqlite3"))
 ```
@@ -244,8 +244,8 @@ With SQLite storage configured, each entry is committed before the in-memory led
 A successful tool call appends two entries: `audit_phase="intent"` before the tool runs, then `audit_phase="outcome"`. `replay_and_verify(entries, expected_root_hash)` returns `(is_valid, errors)`.
 
 ```python
-from kernels.audit import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
+from shards_kernel.audit import replay_and_verify
+from shards_kernel.common.codec import audit_entry_to_dict
 
 bundle = kernel.export_evidence()
 entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
@@ -258,10 +258,10 @@ is_valid, errors = replay_and_verify(entries, bundle.root_hash)
 
 ## 6. Async
 
-`AsyncStrictKernel`, `AsyncPermissiveKernel`, `AsyncEvidenceFirstKernel`, and `AsyncDualChannelKernel` wrap the synchronous kernels. `await kernel.submit(request, permit_token=permit)` uses the same checks. `await kernel.halt(reason)` halts the underlying kernel. `AsyncDispatcher.dispatch` does not run a tool.
+`AsyncStrictKernel`, `AsyncPermissiveKernel`, `AsyncEvidenceFirstKernel`, and `AsyncDualChannelKernel` wrap the synchronous shards_kernel. `await kernel.submit(request, permit_token=permit)` uses the same checks. `await kernel.halt(reason)` halts the underlying kernel. `AsyncDispatcher.dispatch` does not run a tool.
 
 ```python
-from kernels.async_support.async_kernel import AsyncStrictKernel
+from shards_kernel.async_support.async_kernel import AsyncStrictKernel
 
 kernel = AsyncStrictKernel("async-001")
 kernel.set_keyring(keyring)
@@ -277,7 +277,7 @@ receipt = await kernel.submit(request, permit_token=permit)
 `KernelClient(base_url)` posts to a `KernelServer`. `submit(request, permit_token=permit)` sends the permit. `health`, `status`, and `evidence` read the remote kernel. Denial is a receipt, not an exception. A transport failure raises `KernelError`.
 
 ```python
-from kernels.sdk import KernelClient, KernelServer
+from shards_kernel.sdk import KernelClient, KernelServer
 
 server = KernelServer(kernel, host="127.0.0.1", port=8080)
 client = KernelClient("http://127.0.0.1:8080")
@@ -287,7 +287,7 @@ receipt = client.submit(request, permit_token=permit)
 `RequestBuilder` copies tool parameters onto `request.params`. Evidence identifiers are joined into one string.
 
 ```python
-from kernels.sdk import RequestBuilder
+from shards_kernel.sdk import RequestBuilder
 
 request = (
     RequestBuilder()
@@ -301,8 +301,8 @@ request = (
 HTTP adapters accept the same body: `request_id`, `actor`, `intent`, `tool_call`, `params`, and `permit`.
 
 ```python
-from kernels.integrations import create_fastapi_app, create_flask_app
-from kernels.integrations.mcp_adapter import MCPAdapter
+from shards_kernel.integrations import create_fastapi_app, create_flask_app
+from shards_kernel.integrations.mcp_adapter import MCPAdapter
 
 fastapi_app = create_fastapi_app(kernel)
 flask_app = create_flask_app(kernel)
@@ -327,7 +327,7 @@ KernelError
 ```
 
 ```python
-from kernels import KernelError, StateError
+from shards_kernel import KernelError, StateError
 
 try:
     receipt = kernel.submit(request, permit_token=permit)
@@ -342,7 +342,7 @@ except KernelError as exc:
 ## 9. Version
 
 ```python
-from kernels import __version__
+from shards_kernel import __version__
 print(__version__)  # "0.1.0"
 ```
 

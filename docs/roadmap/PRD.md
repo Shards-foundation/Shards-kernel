@@ -1,6 +1,6 @@
 # Product Requirements Document (PRD)
 
-**Product:** KERNELS — Deterministic Control Planes for AI Systems  
+**Product:** Shards-Kernel — Deterministic Control Planes for AI Systems  
 **Version:** 0.1.0  
 **Status:** Development  
 **Last Updated:** January 2025
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary
 
-KERNELS is a deterministic control plane that governs AI agent execution through explicit jurisdiction, fail-closed arbitration, and append-only hash-chained audit. It solves the operational problem of ungoverned agent systems that fail in predictable, dangerous ways.
+Shards-Kernel is a deterministic control plane that governs AI agent execution through explicit jurisdiction, fail-closed arbitration, and append-only hash-chained audit. It solves the operational problem of ungoverned agent systems that fail in predictable, dangerous ways.
 
 ### 1.1 Problem Statement
 
@@ -25,7 +25,7 @@ Ungoverned AI agent systems exhibit five critical failure modes:
 
 ### 1.2 Solution
 
-KERNELS provides a deterministic state machine that sits between operators (humans with authority) and agents (AI systems that execute). Every action requires explicit approval, every decision is audited, and ambiguity results in denial.
+Shards-Kernel provides a deterministic state machine that sits between operators (humans with authority) and agents (AI systems that execute). Every action requires explicit approval, every decision is audited, and ambiguity results in denial.
 
 ---
 
@@ -72,7 +72,7 @@ KERNELS provides a deterministic state machine that sits between operators (huma
 
 ### 3.2 Developer (Secondary)
 
-**Role:** Engineer integrating KERNELS into AI systems
+**Role:** Engineer integrating Shards-Kernel into AI systems
 
 **Needs:**
 - Clear API surface

@@ -1,4 +1,4 @@
-# KERNELS Project Blueprint
+# Shards-Kernel Project Blueprint
 
 **Version:** 0.1.0  
 **Classification:** Technical Architecture  
@@ -8,7 +8,7 @@
 
 ## 1. System Overview
 
-KERNELS is a deterministic control plane that interposes between AI agents and tool execution. It provides governance through explicit jurisdiction, fail-closed arbitration, and immutable audit.
+Shards-Kernel is a deterministic control plane that interposes between AI agents and tool execution. It provides governance through explicit jurisdiction, fail-closed arbitration, and immutable audit.
 
 ### 1.1 Core Thesis
 

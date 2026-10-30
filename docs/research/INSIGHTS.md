@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document captures research insights, design decisions, and lessons learned during the development of KERNELS.
+This document captures research insights, design decisions, and lessons learned during the development of Shards-Kernel.
 
 ---
 
@@ -20,7 +20,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** True governance requires architectural enforcement—the system must be physically incapable of executing unauthorized actions.
 
-**Implication:** KERNELS interposes between intent and execution, making governance a structural property rather than a behavioral one.
+**Implication:** Shards-Kernel interposes between intent and execution, making governance a structural property rather than a behavioral one.
 
 **Evidence:**
 - Systems with advisory governance still experience unauthorized actions
@@ -35,7 +35,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** The only safe default is denial. Explicit permission must be required for every action.
 
-**Implication:** KERNELS denies by default. Every ALLOW is explicit and audited.
+**Implication:** Shards-Kernel denies by default. Every ALLOW is explicit and audited.
 
 **Evidence:**
 - Security breaches often exploit implicit permissions
@@ -50,7 +50,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** Deterministic decision-making enables external verification, replay, and audit.
 
-**Implication:** KERNELS uses pure functions with no side effects in the decision path.
+**Implication:** Shards-Kernel uses pure functions with no side effects in the decision path.
 
 **Evidence:**
 - Same inputs always produce same outputs
@@ -65,7 +65,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** Each component should have exactly one job. This limits blast radius and simplifies analysis.
 
-**Implication:** KERNELS separates governance (kernel), execution (workers), observation (sensors), and management (cockpit).
+**Implication:** Shards-Kernel separates governance (kernel), execution (workers), observation (sensors), and management (cockpit).
 
 **Evidence:**
 - Single-responsibility components are easier to audit
@@ -80,7 +80,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** Cryptographic hash chains make tampering detectable.
 
-**Implication:** KERNELS uses SHA-256 hash chains for the audit ledger.
+**Implication:** Shards-Kernel uses SHA-256 hash chains for the audit ledger.
 
 **Evidence:**
 - Any modification breaks the chain
@@ -95,7 +95,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** The ability to halt must be unconditional and immediate.
 
-**Implication:** KERNELS allows halt from any non-terminal state.
+**Implication:** Shards-Kernel allows halt from any non-terminal state.
 
 **Evidence:**
 - Runaway processes need kill switches
@@ -110,7 +110,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** Evidence must be exportable in a format that external parties can verify.
 
-**Implication:** KERNELS exports evidence bundles with all information needed for independent verification.
+**Implication:** Shards-Kernel exports evidence bundles with all information needed for independent verification.
 
 **Evidence:**
 - Regulators require verifiable records
@@ -125,7 +125,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Insight:** Kernel variants can provide flexibility while preserving core invariants.
 
-**Implication:** KERNELS provides four variants (Strict, Permissive, EvidenceFirst, DualChannel) that all satisfy the core invariants.
+**Implication:** Shards-Kernel provides four variants (Strict, Permissive, EvidenceFirst, DualChannel) that all satisfy the core invariants.
 
 **Evidence:**
 - Development needs differ from production
@@ -140,7 +140,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Context:** Dependencies introduce supply chain risk and complexity.
 
-**Decision:** KERNELS uses only Python standard library.
+**Decision:** Shards-Kernel uses only Python standard library.
 
 **Rationale:**
 - Reduces attack surface
@@ -159,7 +159,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Context:** Async processing is complex and harder to reason about.
 
-**Decision:** KERNELS processes requests synchronously.
+**Decision:** Shards-Kernel processes requests synchronously.
 
 **Rationale:**
 - Simpler mental model
@@ -178,7 +178,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Context:** Persistent storage adds complexity and failure modes.
 
-**Decision:** KERNELS uses in-memory ledger with export capability.
+**Decision:** Shards-Kernel uses in-memory ledger with export capability.
 
 **Rationale:**
 - Simplifies implementation
@@ -197,7 +197,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Context:** Pydantic provides validation but adds dependency.
 
-**Decision:** KERNELS uses Python dataclasses with manual validation.
+**Decision:** Shards-Kernel uses Python dataclasses with manual validation.
 
 **Rationale:**
 - Zero dependencies
@@ -216,7 +216,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Context:** Need cryptographic hash for chain integrity.
 
-**Decision:** KERNELS uses SHA-256.
+**Decision:** Shards-Kernel uses SHA-256.
 
 **Rationale:**
 - Industry standard
@@ -239,7 +239,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Lesson:** Define invariants first, then implement to preserve them.
 
-**Application:** KERNELS defines ten invariants that all code must preserve.
+**Application:** Shards-Kernel defines ten invariants that all code must preserve.
 
 ---
 
@@ -249,7 +249,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Lesson:** Write explicit tests for each invariant.
 
-**Application:** KERNELS has dedicated invariant tests.
+**Application:** Shards-Kernel has dedicated invariant tests.
 
 ---
 
@@ -259,7 +259,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Lesson:** Treat documentation as first-class deliverable.
 
-**Application:** KERNELS has extensive spec, docs, and examples.
+**Application:** Shards-Kernel has extensive spec, docs, and examples.
 
 ---
 
@@ -269,7 +269,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Lesson:** Variants should inherit from a common base.
 
-**Application:** KERNELS variants extend BaseKernel.
+**Application:** Shards-Kernel variants extend BaseKernel.
 
 ---
 
@@ -279,13 +279,13 @@ This document captures research insights, design decisions, and lessons learned 
 
 **Lesson:** Examples should be executable and tested.
 
-**Application:** KERNELS examples are run in CI.
+**Application:** Shards-Kernel examples are run in CI.
 
 ---
 
 ## 5. Open Questions
 
-### 5.1 Question: Distributed Kernels
+### 5.1 Question: Distributed Shards-Kernel
 
 **Question:** How should multiple kernels coordinate?
 
@@ -326,7 +326,7 @@ This document captures research insights, design decisions, and lessons learned 
 
 ### 5.4 Question: Real-Time Constraints
 
-**Question:** Can KERNELS meet real-time deadlines?
+**Question:** Can Shards-Kernel meet real-time deadlines?
 
 **Considerations:**
 - Python GC is unpredictable
@@ -339,27 +339,27 @@ This document captures research insights, design decisions, and lessons learned 
 
 ## 6. Comparative Analysis
 
-### 6.1 KERNELS vs. Traditional RBAC
+### 6.1 Shards-Kernel vs. Traditional RBAC
 
-| Aspect | KERNELS | Traditional RBAC |
+| Aspect | Shards-Kernel | Traditional RBAC |
 |--------|---------|------------------|
 | Granularity | Per-action | Per-resource |
 | Audit | Hash-chained | Log files |
 | Default | Deny | Often allow |
 | Verification | External | Internal |
 
-### 6.2 KERNELS vs. Capability Systems
+### 6.2 Shards-Kernel vs. Capability Systems
 
-| Aspect | KERNELS | Capability Systems |
+| Aspect | Shards-Kernel | Capability Systems |
 |--------|---------|-------------------|
 | Focus | Governance | Access control |
 | Audit | Built-in | Optional |
 | Revocation | Immediate | Complex |
 | Scope | AI agents | General |
 
-### 6.3 KERNELS vs. Blockchain
+### 6.3 Shards-Kernel vs. Blockchain
 
-| Aspect | KERNELS | Blockchain |
+| Aspect | Shards-Kernel | Blockchain |
 |--------|---------|------------|
 | Consensus | Single node | Distributed |
 | Latency | <1ms | Seconds to minutes |
