@@ -7,8 +7,8 @@ the hash chain computation and checking for violations.
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from kernels.common.hashing import compute_chain_hash, genesis_hash
-from kernels.common.codec import serialize_for_audit
+from shards_kernel.common.hashing import compute_chain_hash, genesis_hash
+from shards_kernel.common.codec import serialize_for_audit
 
 
 @dataclass

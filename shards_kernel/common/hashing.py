@@ -7,7 +7,7 @@ produce consistent outputs for identical inputs across all platforms.
 import hashlib
 from typing import Any
 
-from kernels.common.codec import serialize_deterministic
+from shards_kernel.common.codec import serialize_deterministic
 
 
 def compute_hash(data: bytes, algorithm: str = "sha256") -> str:

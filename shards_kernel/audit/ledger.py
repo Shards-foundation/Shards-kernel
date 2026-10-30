@@ -10,20 +10,20 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     AuditEntry,
     Decision,
     EvidenceBundle,
     KernelState,
 )
-from kernels.common.errors import AuditError
-from kernels.common.hashing import (
+from shards_kernel.common.errors import AuditError
+from shards_kernel.common.hashing import (
     compute_chain_hash,
     compute_hash_dict,
     genesis_hash,
 )
-from kernels.audit.replay import replay_and_verify
-from kernels.common.codec import serialize_for_audit, audit_entry_to_dict
+from shards_kernel.audit.replay import replay_and_verify
+from shards_kernel.common.codec import serialize_for_audit, audit_entry_to_dict
 
 
 class AuditLedger:

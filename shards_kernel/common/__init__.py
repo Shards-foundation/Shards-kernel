@@ -1,6 +1,6 @@
 """Common types, errors, and utilities for Kernels."""
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     Decision,
     EvidenceBundle,
     KernelConfig,
@@ -12,7 +12,7 @@ from kernels.common.types import (
     AuditEntry,
     VirtualClock,
 )
-from kernels.common.errors import (
+from shards_kernel.common.errors import (
     KernelError,
     BootError,
     StateError,

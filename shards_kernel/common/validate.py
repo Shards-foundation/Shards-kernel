@@ -5,8 +5,8 @@ Provides request validation and ambiguity detection functions.
 
 from typing import Any, Union
 
-from kernels.common.types import KernelRequest, ToolCall
-from kernels.common.codec import serialize_deterministic
+from shards_kernel.common.types import KernelRequest, ToolCall
+from shards_kernel.common.codec import serialize_deterministic
 
 
 def validate_request(request: KernelRequest) -> list[str]:

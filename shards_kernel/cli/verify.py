@@ -2,7 +2,7 @@
 """Check internal consistency of an exported evidence bundle.
 
 Reads ``ledger_entries`` and delegates the hash replay to
-``kernels.audit.replay.verify_evidence_bundle``. Replay recomputes each
+``shards_kernel.audit.replay.verify_evidence_bundle``. Replay recomputes each
 entry hash from the entry content and compares ``prev_hash`` links and
 ``root_hash``.
 
@@ -14,9 +14,9 @@ bundle is internally consistent (integrity only). The bundle is not signed.
 This command rejects those bundles before it delegates.
 
 Usage:
-    python -m kernels.cli.verify evidence.json
-    python -m kernels.cli.verify --detailed evidence.json
-    python -m kernels.cli.verify --json evidence.json
+    python -m shards_kernel.cli.verify evidence.json
+    python -m shards_kernel.cli.verify --detailed evidence.json
+    python -m shards_kernel.cli.verify --json evidence.json
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from kernels.audit.replay import verify_evidence_bundle
+from shards_kernel.audit.replay import verify_evidence_bundle
 
 # Export format has no schema field. An explicit schema name is not this format.
 _SCHEMA_FIELDS = ("schema", "schema_version")
@@ -153,7 +153,7 @@ def format_report(result: ConsistencyResult, *, detailed: bool) -> str:
     """Render a text report. Success text states internal consistency only."""
     status = _STATUS_CONSISTENT if result.internally_consistent else _STATUS_INCONSISTENT
     lines = [
-        "KERNELS evidence bundle",
+        "Shards-Kernel evidence bundle",
         f"status: {status}",
         f"entries: {result.entry_count}",
     ]
@@ -205,7 +205,7 @@ def _emit(result: ConsistencyResult, *, detailed: bool, as_json: bool) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     """CLI entry point. Returns 0 only when the bundle is internally consistent."""
     parser = argparse.ArgumentParser(
-        prog="kernels.cli.verify",
+        prog="shards_kernel.cli.verify",
         description=(
             "Check whether an exported evidence bundle is internally consistent "
             "(integrity only). root_hash is read from the bundle."

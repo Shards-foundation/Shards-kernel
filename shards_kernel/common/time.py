@@ -4,7 +4,7 @@ Provides deterministic time handling through VirtualClock and utilities
 for timestamp validation.
 """
 
-from kernels.common.types import VirtualClock
+from shards_kernel.common.types import VirtualClock
 
 
 def create_clock(initial_ms: int = 0) -> VirtualClock:
