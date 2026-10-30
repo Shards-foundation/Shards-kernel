@@ -1,5 +1,5 @@
 """
-KERNELS Hugging Face Integration
+Shards-Kernel Hugging Face Integration
 
 Adapter for Hugging Face Transformers Agents with permit-based governance.
 """
@@ -10,11 +10,11 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable
 
-from kernels.common.types import KernelRequest, ToolCall, Decision
-from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.permits import PermitToken
-from kernels.common.errors import PermitError
+from shards_kernel.common.types import KernelRequest, ToolCall, Decision
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.common.errors import PermitError
 
 
 @dataclass
@@ -34,7 +34,7 @@ class GovernedHFTool:
     Hugging Face-compatible governed tool.
 
     Wraps any callable as a governed tool compatible with Hugging Face
-    Transformers agents. All executions route through KERNELS governance.
+    Transformers agents. All executions route through Shards-Kernel governance.
 
     Compatible with:
     - transformers.agents.Tool
@@ -165,7 +165,7 @@ class GovernedHFTool:
 
 class HuggingFaceAdapter:
     """
-    Adapter for integrating KERNELS governance with Hugging Face agents.
+    Adapter for integrating Shards-Kernel governance with Hugging Face agents.
 
     Provides utilities for wrapping Hugging Face tools and agents with
     permit-based governance and audit trails.
@@ -319,7 +319,7 @@ class HuggingFaceAdapter:
         Returns:
             Evidence bundle as dict
         """
-        from kernels.common.codec import audit_entry_to_dict
+        from shards_kernel.common.codec import audit_entry_to_dict
 
         evidence = self.kernel.export_evidence()
 
@@ -422,16 +422,16 @@ def create_huggingface_adapter(
     Returns:
         Configured Hugging Face adapter
     """
-    from kernels.common.types import KernelConfig, VirtualClock
+    from shards_kernel.common.types import KernelConfig, VirtualClock
 
     if variant == "strict":
         kernel = StrictKernel()
     elif variant == "permissive":
-        from kernels.variants.permissive_kernel import PermissiveKernel
+        from shards_kernel.variants.permissive_kernel import PermissiveKernel
 
         kernel = PermissiveKernel()
     elif variant == "evidence-first":
-        from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
+        from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
 
         kernel = EvidenceFirstKernel()
     else:

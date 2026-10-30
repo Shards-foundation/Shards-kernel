@@ -1,5 +1,5 @@
 """
-LangGraph Integration Adapter for KERNELS
+LangGraph Integration Adapter for Shards-Kernel
 
 Provides permit-based governance for LangGraph stateful agent workflows.
 
@@ -10,7 +10,7 @@ multi-step agent workflows with:
 - Cycles and loops in workflow graphs
 - Long-running persistent workflows
 
-KERNELS Governance Layer:
+Shards-Kernel Governance Layer:
 - State transition validation
 - Node-level authorization
 - Workflow invariants enforcement
@@ -18,10 +18,10 @@ KERNELS Governance Layer:
 - Complete audit trail of state mutations
 
 Usage:
-    from kernels.integrations import LangGraphAdapter
+    from shards_kernel.integrations import LangGraphAdapter
     from langgraph.graph import StateGraph
 
-    # Create KERNELS adapter
+    # Create Shards-Kernel adapter
     adapter = LangGraphAdapter(kernel, actor="workflow-agent")
 
     # Wrap workflow nodes
@@ -32,7 +32,7 @@ Usage:
     workflow.add_node("process", governed_node)
     workflow.compile()
 
-Author: KERNELS Team
+Author: Shards-Kernel Team
 License: MIT
 """
 
@@ -51,18 +51,18 @@ except ImportError:
     StateGraph = None
     BaseModel = object
 
-# KERNELS imports
-from kernels.common.types import (
+# Shards-Kernel imports
+from shards_kernel.common.types import (
     KernelRequest,
     ToolCall,
     Decision,
 )
-from kernels.permits import PermitToken
-from kernels.variants.base import BaseKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.variants.base import BaseKernel
 
 # Try to import LangChain adapter (we extend it)
 try:
-    from kernels.integrations.langchain_adapter import LangChainAdapter
+    from shards_kernel.integrations.langchain_adapter import LangChainAdapter
 
     LANGCHAIN_AVAILABLE = True
 except ImportError:
@@ -98,7 +98,7 @@ class WorkflowInvariant:
 
 class LangGraphAdapter:
     """
-    KERNELS adapter for LangGraph stateful workflows.
+    Shards-Kernel adapter for LangGraph stateful workflows.
 
     This adapter provides permit-based governance for LangGraph workflows,
     including state transition validation, node-level authorization, and
@@ -142,7 +142,7 @@ class LangGraphAdapter:
         Initialize LangGraph adapter.
 
         Args:
-            kernel: KERNELS kernel instance
+            kernel: Shards-Kernel kernel instance
             actor: Default actor identity for workflow
             auto_register: Auto-register nodes in kernel dispatcher
             enforce_invariants: Enforce workflow invariants (halt on violation)
@@ -242,7 +242,7 @@ class LangGraphAdapter:
         require_permit: bool = False,
     ) -> Callable[[StateType], StateType]:
         """
-        Wrap LangGraph node with KERNELS governance.
+        Wrap LangGraph node with Shards-Kernel governance.
 
         Args:
             name: Node name
@@ -281,7 +281,7 @@ class LangGraphAdapter:
             prev_node = self._current_node
             self._current_node = name
 
-            # Convert state to dict for KERNELS
+            # Convert state to dict for Shards-Kernel
             if isinstance(state, dict):
                 state_dict = state
             elif hasattr(state, "__dict__"):
@@ -345,7 +345,7 @@ class LangGraphAdapter:
                 return updated_state
             else:
                 # Node execution was denied
-                error_msg = f"Node {name} denied by KERNELS: {receipt.error}"
+                error_msg = f"Node {name} denied by Shards-Kernel: {receipt.error}"
 
                 # Record failed transition
                 transition = StateTransition(
@@ -389,7 +389,7 @@ class LangGraphAdapter:
             - Invariant violations
             - Permit verifications
         """
-        from kernels.common.codec import audit_entry_to_dict
+        from shards_kernel.common.codec import audit_entry_to_dict
 
         bundle = self.kernel.export_evidence()
         entries = [audit_entry_to_dict(entry) for entry in bundle.ledger_entries]
@@ -443,7 +443,7 @@ def create_langgraph_adapter(
     Factory function to create LangGraph adapter.
 
     Args:
-        kernel: KERNELS kernel instance
+        kernel: Shards-Kernel kernel instance
         actor: Default actor identity
         auto_register: Auto-register nodes in kernel
         enforce_invariants: Enforce workflow invariants

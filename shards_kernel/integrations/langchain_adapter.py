@@ -1,5 +1,5 @@
 """
-KERNELS LangChain Integration
+Shards-Kernel LangChain Integration
 
 Adapter for LangChain tool integration with permit-based governance.
 """
@@ -10,11 +10,11 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable, Union
 
-from kernels.common.types import KernelRequest, ToolCall, Decision
-from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.permits import PermitToken
-from kernels.common.errors import PermitError
+from shards_kernel.common.types import KernelRequest, ToolCall, Decision
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.common.errors import PermitError
 
 
 @dataclass
@@ -31,7 +31,7 @@ class LangChainToolResult:
 
 class GovernedTool:
     """
-    LangChain-compatible tool wrapper with KERNELS governance.
+    LangChain-compatible tool wrapper with Shards-Kernel governance.
 
     Wraps any callable as a governed tool that routes through a kernel.
     All executions require permit tokens when kernel has keyring configured.
@@ -199,7 +199,7 @@ class GovernedTool:
 
 class LangChainAdapter:
     """
-    Adapter for integrating KERNELS governance with LangChain.
+    Adapter for integrating Shards-Kernel governance with LangChain.
 
     Provides utilities for wrapping LangChain tools, agents, and chains
     with permit-based governance and audit trails.
@@ -318,7 +318,7 @@ class LangChainAdapter:
         Returns:
             Evidence bundle as dict
         """
-        from kernels.common.codec import audit_entry_to_dict
+        from shards_kernel.common.codec import audit_entry_to_dict
 
         evidence = self.kernel.export_evidence()
 
@@ -352,16 +352,16 @@ def create_langchain_adapter(
     Returns:
         Configured LangChain adapter
     """
-    from kernels.common.types import KernelConfig, VirtualClock
+    from shards_kernel.common.types import KernelConfig, VirtualClock
 
     if variant == "strict":
         kernel = StrictKernel()
     elif variant == "permissive":
-        from kernels.variants.permissive_kernel import PermissiveKernel
+        from shards_kernel.variants.permissive_kernel import PermissiveKernel
 
         kernel = PermissiveKernel()
     elif variant == "evidence-first":
-        from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
+        from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
 
         kernel = EvidenceFirstKernel()
     else:

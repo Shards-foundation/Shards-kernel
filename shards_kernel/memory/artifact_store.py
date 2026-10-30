@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from kernels.common.hashing import compute_hash_dict
+from shards_kernel.common.hashing import compute_hash_dict
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ Requests that fall outside these boundaries are denied.
 from dataclasses import dataclass, field
 from typing import FrozenSet
 
-from kernels.common.types import KernelState
+from shards_kernel.common.types import KernelState
 
 
 @dataclass(frozen=True)

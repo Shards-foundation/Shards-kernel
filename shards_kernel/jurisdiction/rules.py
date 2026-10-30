@@ -6,9 +6,9 @@ Rules return error messages if violated, or an empty list if passed.
 
 from dataclasses import dataclass
 
-from kernels.common.types import KernelRequest, ToolCall
-from kernels.common.codec import serialize_deterministic
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.common.types import KernelRequest, ToolCall
+from shards_kernel.common.codec import serialize_deterministic
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 
 @dataclass

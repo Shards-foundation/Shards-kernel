@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from kernels.common.codec import audit_entry_to_dict
-from kernels.common.types import (
+from shards_kernel.common.codec import audit_entry_to_dict
+from shards_kernel.common.types import (
     EvidenceBundle,
     KernelConfig,
     KernelReceipt,
@@ -19,9 +19,9 @@ from kernels.common.types import (
     ToolCall,
     VirtualClock,
 )
-from kernels.permits import PermitToken
-from kernels.variants.base import BaseKernel
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.permits import PermitToken
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 _PERMIT_FIELDS = (
     "permit_id",

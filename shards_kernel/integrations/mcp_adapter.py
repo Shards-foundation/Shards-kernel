@@ -1,5 +1,5 @@
 """
-KERNELS MCP Integration
+Shards-Kernel MCP Integration
 
 Adapter for Model Context Protocol (MCP) integration.
 """
@@ -10,11 +10,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable
 
-from kernels.common.types import KernelRequest, ToolCall, Decision
-from kernels.integrations.wire import boot_strict_kernel, evidence_to_mapping
-from kernels.permits import PermitToken
-from kernels.variants.base import BaseKernel
-from kernels.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.common.types import KernelRequest, ToolCall, Decision
+from shards_kernel.integrations.wire import boot_strict_kernel, evidence_to_mapping
+from shards_kernel.permits import PermitToken
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 
 
 @dataclass
@@ -48,7 +48,7 @@ class MCPAdapter:
     """
     Adapter for MCP (Model Context Protocol) integration.
 
-    Wraps a KERNELS kernel to provide MCP-compatible interface.
+    Wraps a Shards-Kernel kernel to provide MCP-compatible interface.
     All tool calls are routed through the kernel for governance.
 
     Example:
@@ -198,7 +198,7 @@ class MCPServer:
     Simple MCP server implementation.
 
     Provides stdio-based MCP server that routes
-    all tool calls through a KERNELS kernel.
+    all tool calls through a Shards-Kernel kernel.
 
     Example:
         kernel = StrictKernel(kernel_id="mcp-server")
@@ -253,7 +253,7 @@ class MCPServer:
             permit_payload = params.get("permit")
             permit = None
             if permit_payload:
-                from kernels.integrations.wire import permit_from_mapping
+                from shards_kernel.integrations.wire import permit_from_mapping
 
                 permit = permit_from_mapping(permit_payload)
             result = self.adapter.handle_tool_call(call, permit_token=permit)
