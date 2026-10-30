@@ -1,6 +1,6 @@
 # Threat Model
 
-This document describes the security assumptions, threats, and mitigations for the Kernels system.
+This document describes the security assumptions, threats, and mitigations for the Shards-Kernel system.
 
 ## Trust Boundaries
 
