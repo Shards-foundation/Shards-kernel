@@ -1,7 +1,7 @@
 """Additional edge-case tests for shared validation utilities."""
 
-from kernels.common.types import KernelRequest
-from kernels.common.validate import validate_request
+from shards_kernel.common.types import KernelRequest
+from shards_kernel.common.validate import validate_request
 
 
 def test_empty_request_fields_are_rejected():

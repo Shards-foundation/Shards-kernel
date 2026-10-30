@@ -11,7 +11,7 @@ These tests verify that:
 import unittest
 from dataclasses import replace
 
-from kernels.common.types import (
+from shards_kernel.common.types import (
     Decision,
     KernelConfig,
     KernelRequest,
@@ -19,10 +19,10 @@ from kernels.common.types import (
     ToolCall,
     VirtualClock,
 )
-from kernels.permits import PermitBuilder
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.variants.permissive_kernel import PermissiveKernel
-from kernels.variants.evidence_first_kernel import EvidenceFirstKernel
+from shards_kernel.permits import PermitBuilder
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.evidence_first_kernel import EvidenceFirstKernel
 
 
 class TestPermitIntegrationHappyPath(unittest.TestCase):

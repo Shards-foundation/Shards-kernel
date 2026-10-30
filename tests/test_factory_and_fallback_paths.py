@@ -9,17 +9,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernels.integrations.autogpt_adapter import create_autogpt_adapter
-from kernels.integrations.generic_adapter import (
+from shards_kernel.integrations.autogpt_adapter import create_autogpt_adapter
+from shards_kernel.integrations.generic_adapter import (
     MoltbookAdapter,
     create_generic_adapter,
     create_moltbook_adapter,
 )
-from kernels.integrations.huggingface_adapter import create_huggingface_adapter
-from kernels.integrations.langchain_adapter import create_langchain_adapter
-from kernels.integrations.mcp_adapter import MCPServer, create_mcp_adapter
-from kernels.integrations.wire import boot_strict_kernel
-from kernels.sdk.server import KernelRequestHandler, KernelServer, run_server
+from shards_kernel.integrations.huggingface_adapter import create_huggingface_adapter
+from shards_kernel.integrations.langchain_adapter import create_langchain_adapter
+from shards_kernel.integrations.mcp_adapter import MCPServer, create_mcp_adapter
+from shards_kernel.integrations.wire import boot_strict_kernel
+from shards_kernel.sdk.server import KernelRequestHandler, KernelServer, run_server
 
 
 @pytest.mark.parametrize("variant", ["strict", "permissive", "evidence-first"])

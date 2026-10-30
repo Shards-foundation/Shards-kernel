@@ -2,7 +2,7 @@
 
 import unittest
 
-from kernels.common.hashing import (
+from shards_kernel.common.hashing import (
     compute_hash,
     compute_hash_str,
     compute_hash_dict,

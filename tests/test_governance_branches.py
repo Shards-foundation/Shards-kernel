@@ -6,11 +6,11 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from kernels.audit.ledger import AuditLedger
-from kernels.audit.replay import replay_and_verify, verify_evidence_bundle
-from kernels.common.errors import AuditError, BootError, StateError, ToolError
-from kernels.common.hashing import genesis_hash
-from kernels.common.types import (
+from shards_kernel.audit.ledger import AuditLedger
+from shards_kernel.audit.replay import replay_and_verify, verify_evidence_bundle
+from shards_kernel.common.errors import AuditError, BootError, StateError, ToolError
+from shards_kernel.common.hashing import genesis_hash
+from shards_kernel.common.types import (
     Decision,
     KernelConfig,
     KernelRequest,
@@ -18,27 +18,27 @@ from kernels.common.types import (
     ToolCall,
     VirtualClock,
 )
-from kernels.common.validate import (
+from shards_kernel.common.validate import (
     check_ambiguity,
     check_param_size,
     validate_request,
     validate_tool_call,
 )
-from kernels.execution.dispatcher import Dispatcher, resolve_bound_params
-from kernels.execution.tools import ToolRegistry, create_default_registry
-from kernels.jurisdiction.policy import JurisdictionPolicy
-from kernels.jurisdiction.rules import (
+from shards_kernel.execution.dispatcher import Dispatcher, resolve_bound_params
+from shards_kernel.execution.tools import ToolRegistry, create_default_registry
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.jurisdiction.rules import (
     check_intent_length,
     check_tool_allowed,
     check_tool_call_structure,
 )
-from kernels.jurisdiction.rules import (
+from shards_kernel.jurisdiction.rules import (
     check_param_size as check_request_param_size,
 )
-from kernels.permits import PermitBuilder
-from kernels.variants.base import BaseKernel
-from kernels.variants.permissive_kernel import PermissiveKernel
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.permits import PermitBuilder
+from shards_kernel.variants.base import BaseKernel
+from shards_kernel.variants.permissive_kernel import PermissiveKernel
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 class _NoCopy:
@@ -544,8 +544,8 @@ class TestBaseKernelDefensiveBranches(unittest.TestCase):
     def test_bypassed_validation_still_rejects_a_bad_tool_call(self) -> None:
         kernel = StrictKernel()
         kernel.boot(KernelConfig(kernel_id="k", variant="strict", clock=VirtualClock(1)))
-        with patch("kernels.variants.base.validate_request", return_value=[]), patch(
-            "kernels.variants.base.check_ambiguity", return_value=[]
+        with patch("shards_kernel.variants.base.validate_request", return_value=[]), patch(
+            "shards_kernel.variants.base.check_ambiguity", return_value=[]
         ):
             receipt = kernel._submit_bound(
                 _request(tool_call=123, params={}),  # type: ignore[arg-type]

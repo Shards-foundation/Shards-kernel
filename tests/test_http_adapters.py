@@ -5,7 +5,7 @@ import pytest
 
 def test_flask_adapter_exposes_read_endpoints_and_halt():
     pytest.importorskip("flask")
-    from kernels.integrations.flask_adapter import create_flask_app
+    from shards_kernel.integrations.flask_adapter import create_flask_app
 
     app = create_flask_app(kernel_id="test-flask")
     client = app.test_client()
@@ -25,7 +25,7 @@ def test_flask_adapter_exposes_read_endpoints_and_halt():
 
 def test_flask_adapter_submit_route_denies_unpermitted_request():
     pytest.importorskip("flask")
-    from kernels.integrations.flask_adapter import create_flask_app
+    from shards_kernel.integrations.flask_adapter import create_flask_app
 
     client = create_flask_app(kernel_id="test-flask-submit").test_client()
     response = client.post(
@@ -46,7 +46,7 @@ def test_fastapi_adapter_exposes_read_endpoints_and_halt():
     pytest.importorskip("fastapi")
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
-    from kernels.integrations.fastapi_adapter import create_fastapi_app
+    from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
 
     app = create_fastapi_app(kernel_id="test-fastapi")
     with TestClient(app) as client:
@@ -67,7 +67,7 @@ def test_fastapi_adapter_submit_route_denies_unpermitted_request():
     pytest.importorskip("fastapi")
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
-    from kernels.integrations.fastapi_adapter import create_fastapi_app
+    from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
 
     app = create_fastapi_app(kernel_id="test-fastapi-submit")
     with TestClient(app) as client:

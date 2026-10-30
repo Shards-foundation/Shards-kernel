@@ -7,8 +7,8 @@ import unittest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from kernels.common.errors import StateError
-from kernels.common.types import (
+from shards_kernel.common.errors import StateError
+from shards_kernel.common.types import (
     Decision,
     KernelConfig,
     KernelRequest,
@@ -16,10 +16,10 @@ from kernels.common.types import (
     ToolCall,
     VirtualClock,
 )
-from kernels.permits import NonceRegistry, PermitBuilder, verify_permit
-from kernels.state.machine import StateMachine
-from kernels.state.transitions import can_transition
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.permits import NonceRegistry, PermitBuilder, verify_permit
+from shards_kernel.state.machine import StateMachine
+from shards_kernel.state.transitions import can_transition
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 _KNOWN_CONSTRAINTS = frozenset(
     {

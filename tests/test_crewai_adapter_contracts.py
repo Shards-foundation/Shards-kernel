@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from kernels.integrations.crewai_adapter import CrewAIAdapter, GovernedCrewAITool
-from kernels.integrations.wire import boot_strict_kernel
+from shards_kernel.integrations.crewai_adapter import CrewAIAdapter, GovernedCrewAITool
+from shards_kernel.integrations.wire import boot_strict_kernel
 
 
 def test_crewai_adapter_tool_registry_and_delegation_matrix():
@@ -32,7 +32,7 @@ def test_crewai_sync_and_async_tool_paths_fail_closed_without_permit():
     tool = CrewAIAdapter(kernel, auto_register=False).wrap_tool(
         "lookup", lambda key: key
     )
-    with pytest.raises(PermissionError, match="denied by KERNELS"):
+    with pytest.raises(PermissionError, match="denied by Shards-Kernel"):
         tool._run(key="secret")
-    with pytest.raises(PermissionError, match="denied by KERNELS"):
+    with pytest.raises(PermissionError, match="denied by Shards-Kernel"):
         asyncio.run(tool._arun(key="secret"))

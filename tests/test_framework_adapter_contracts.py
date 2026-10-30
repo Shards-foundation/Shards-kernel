@@ -2,14 +2,14 @@
 
 import pytest
 
-from kernels.common.errors import PermitError
-from kernels.integrations.autogpt_adapter import AutoGPTAdapter, AutonomousLoopMonitor
-from kernels.integrations.generic_adapter import GenericAdapter
-from kernels.integrations.huggingface_adapter import HuggingFaceAdapter, PermitInjector
-from kernels.integrations.langchain_adapter import LangChainAdapter
-from kernels.integrations.langgraph_adapter import LangGraphAdapter
-from kernels.integrations.mcp_adapter import MCPAdapter, MCPToolCall
-from kernels.integrations.wire import boot_strict_kernel
+from shards_kernel.common.errors import PermitError
+from shards_kernel.integrations.autogpt_adapter import AutoGPTAdapter, AutonomousLoopMonitor
+from shards_kernel.integrations.generic_adapter import GenericAdapter
+from shards_kernel.integrations.huggingface_adapter import HuggingFaceAdapter, PermitInjector
+from shards_kernel.integrations.langchain_adapter import LangChainAdapter
+from shards_kernel.integrations.langgraph_adapter import LangGraphAdapter
+from shards_kernel.integrations.mcp_adapter import MCPAdapter, MCPToolCall
+from shards_kernel.integrations.wire import boot_strict_kernel
 
 
 def test_generic_adapter_registry_wrappers_and_evidence():
