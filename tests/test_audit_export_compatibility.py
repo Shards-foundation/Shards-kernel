@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from kernels.common.codec import audit_entry_to_dict
-from kernels.common.types import Decision, KernelState
+from shards_kernel.common.codec import audit_entry_to_dict
+from shards_kernel.common.types import Decision, KernelState
 
 
 def test_audit_export_normalizes_enum_values_and_preserves_permit_metadata():

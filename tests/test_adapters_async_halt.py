@@ -6,8 +6,8 @@ import json
 import unittest
 import urllib.request
 
-from kernels.common.errors import StateError
-from kernels.common.types import (
+from shards_kernel.common.errors import StateError
+from shards_kernel.common.types import (
     Decision,
     KernelConfig,
     KernelRequest,
@@ -15,18 +15,18 @@ from kernels.common.types import (
     ToolCall,
     VirtualClock,
 )
-from kernels.integrations.mcp_adapter import MCPAdapter, MCPToolCall
-from kernels.integrations.wire import permit_to_mapping
-from kernels.permits import PermitBuilder
-from kernels.sdk.client import KernelClient
-from kernels.sdk.server import KernelServer
-from kernels.state.machine import StateMachine
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.mcp_adapter import MCPAdapter, MCPToolCall
+from shards_kernel.integrations.wire import permit_to_mapping
+from shards_kernel.permits import PermitBuilder
+from shards_kernel.sdk.client import KernelClient
+from shards_kernel.sdk.server import KernelServer
+from shards_kernel.state.machine import StateMachine
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 try:
     from fastapi.testclient import TestClient
 
-    from kernels.integrations.fastapi_adapter import create_fastapi_app
+    from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
 
     HAS_FASTAPI = True
 except ImportError:
@@ -35,7 +35,7 @@ except ImportError:
 try:
     import flask  # noqa: F401
 
-    from kernels.integrations.flask_adapter import create_flask_app
+    from shards_kernel.integrations.flask_adapter import create_flask_app
 
     HAS_FLASK = True
 except ImportError:
@@ -276,7 +276,7 @@ class TestAsyncKernelGovernance(unittest.TestCase):
     def test_async_wrapper_keeps_the_sync_guarantees(self) -> None:
         import asyncio
 
-        from kernels.async_support.async_kernel import AsyncStrictKernel
+        from shards_kernel.async_support.async_kernel import AsyncStrictKernel
 
         async def scenario() -> None:
             kernel = AsyncStrictKernel("async-k")
@@ -319,7 +319,7 @@ class TestAsyncKernelGovernance(unittest.TestCase):
             self.assertIn("REPLAY_DETECTED", replay.error or "")
             self.assertEqual(called, ["hi"])
 
-            import kernels.variants.base as base
+            import shards_kernel.variants.base as base
 
             original = base.validate_request
 
@@ -348,7 +348,7 @@ class TestAsyncDispatcherDoesNotRunTools(unittest.TestCase):
     def test_dispatch_does_not_call_the_handler(self) -> None:
         import asyncio
 
-        from kernels.async_support.async_dispatcher import (
+        from shards_kernel.async_support.async_dispatcher import (
             AsyncDispatcher,
             AsyncToolRegistry,
         )
@@ -370,7 +370,7 @@ class TestAsyncDispatcherDoesNotRunTools(unittest.TestCase):
 
 class TestClientRejectsBrokenServer(unittest.TestCase):
     def test_http_error_is_a_kernel_error(self) -> None:
-        from kernels.common.errors import KernelError
+        from shards_kernel.common.errors import KernelError
 
         client = KernelClient("http://127.0.0.1:1")
         with self.assertRaises(KernelError):

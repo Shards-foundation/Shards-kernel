@@ -15,13 +15,13 @@ from pathlib import Path
 # Governance-critical modules. Raise this floor; do not lower it to go green.
 FLOOR = 90.0
 MODULES = (
-    "kernels/execution/dispatcher.py",
-    "kernels/common/validate.py",
-    "kernels/jurisdiction/rules.py",
-    "kernels/audit/ledger.py",
-    "kernels/audit/replay.py",
-    "kernels/permits.py",
-    "kernels/variants/base.py",
+    "shards_kernel/execution/dispatcher.py",
+    "shards_kernel/common/validate.py",
+    "shards_kernel/jurisdiction/rules.py",
+    "shards_kernel/audit/ledger.py",
+    "shards_kernel/audit/replay.py",
+    "shards_kernel/permits.py",
+    "shards_kernel/variants/base.py",
 )
 
 

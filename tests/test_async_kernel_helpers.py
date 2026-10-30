@@ -3,14 +3,14 @@
 import asyncio
 import pytest
 
-from kernels.async_support.async_kernel import (
+from shards_kernel.async_support.async_kernel import (
     AsyncStrictKernel,
     submit_batch,
     submit_with_retry,
     submit_with_timeout,
 )
-from kernels.common.errors import StateError
-from kernels.common.types import (
+from shards_kernel.common.errors import StateError
+from shards_kernel.common.types import (
     Decision,
     KernelRequest,
     KernelState,
