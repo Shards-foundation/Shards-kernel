@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Example 02: export and independently verify a kernel evidence bundle."""
 
-from kernels.audit.replay import replay_and_verify
-from kernels.common.codec import audit_entry_to_dict
-from kernels.common.types import KernelConfig, KernelRequest, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.audit.replay import replay_and_verify
+from shards_kernel.common.codec import audit_entry_to_dict
+from shards_kernel.common.types import KernelConfig, KernelRequest, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 def main() -> None:

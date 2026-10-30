@@ -1,7 +1,7 @@
 """
-Example: LangChain Agent with KERNELS Governance
+Example: LangChain Agent with Shards-Kernel Governance
 
-This example demonstrates how to integrate KERNELS governance into a LangChain
+This example demonstrates how to integrate Shards-Kernel governance into a LangChain
 agent workflow. It shows:
 
 1. Wrapping dangerous tools with permit requirements
@@ -15,18 +15,18 @@ The scenario: A customer support agent that can:
 - Send emails (dangerous, requires permit)
 - Access database (dangerous, requires permit)
 
-Without KERNELS: The agent could send emails without authorization.
-With KERNELS: Every dangerous action requires a cryptographically signed permit.
+Without Shards-Kernel: The agent could send emails without authorization.
+With Shards-Kernel: Every dangerous action requires a cryptographically signed permit.
 """
 
 from typing import Dict, Any
 import json
 
-# KERNELS imports
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.integrations.langchain_adapter import LangChainAdapter
-from kernels.permits import PermitBuilder
+# Shards-Kernel imports
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.langchain_adapter import LangChainAdapter
+from shards_kernel.permits import PermitBuilder
 from _permit import issue_permit
 
 # Simulate LangChain (these would normally be from langchain imports)
@@ -122,7 +122,7 @@ def database_query(query: str) -> Dict[str, Any]:
 
 def main():
     print("=" * 80)
-    print("KERNELS + LangChain Integration Example")
+    print("Shards-Kernel + LangChain Integration Example")
     print("=" * 80)
     print()
     print("Scenario: Customer support agent with 4 tools")
@@ -138,7 +138,7 @@ def main():
     # Step 1: Set up kernel with governance
     # ========================================================================
 
-    print("Step 1: Initialize KERNELS governance")
+    print("Step 1: Initialize Shards-Kernel governance")
     print("-" * 80)
 
     kernel = StrictKernel()
@@ -260,7 +260,7 @@ def main():
         print(f"  Decision: {email_result.decision}")
         print()
         print("This is the '47 emails' prevention in action!")
-        print("Without KERNELS, the email would have been sent.")
+        print("Without Shards-Kernel, the email would have been sent.")
         print()
     else:
         print("✗ ERROR: Should have been denied!")
@@ -380,16 +380,16 @@ def main():
     # ========================================================================
 
     print("=" * 80)
-    print("SUMMARY: What KERNELS Prevented")
+    print("SUMMARY: What Shards-Kernel Prevented")
     print("=" * 80)
     print()
-    print("WITHOUT KERNELS:")
+    print("WITHOUT Shards-Kernel:")
     print("  ✗ Agent could send emails without authorization")
     print("  ✗ Agent could query database without oversight")
     print("  ✗ No audit trail of tool usage")
     print("  ✗ No replay protection")
     print()
-    print("WITH KERNELS:")
+    print("WITH Shards-Kernel:")
     print("  ✓ Dangerous tools require cryptographically signed permits")
     print("  ✓ Replay protection prevents permit reuse")
     print("  ✓ Complete immutable audit trail (hash-chained)")

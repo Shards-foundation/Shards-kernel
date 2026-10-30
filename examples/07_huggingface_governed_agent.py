@@ -1,7 +1,7 @@
 """
-Example: Hugging Face Agent with KERNELS Governance
+Example: Hugging Face Agent with Shards-Kernel Governance
 
-This example demonstrates how to integrate KERNELS governance into Hugging Face
+This example demonstrates how to integrate Shards-Kernel governance into Hugging Face
 Transformers agents.
 
 Note: This is a standalone example that works without installing transformers.
@@ -15,19 +15,19 @@ The scenario: Research agent that can:
 - Execute code (dangerous - requires permit)
 - Access files (dangerous - requires permit)
 
-Without KERNELS: Agent could execute arbitrary code without authorization.
-With KERNELS: Code execution requires cryptographically signed permit.
+Without Shards-Kernel: Agent could execute arbitrary code without authorization.
+With Shards-Kernel: Code execution requires cryptographically signed permit.
 """
 
 import json
 
-# KERNELS imports
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.integrations.huggingface_adapter import (
+# Shards-Kernel imports
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.huggingface_adapter import (
     HuggingFaceAdapter,
 )
-from kernels.permits import PermitBuilder
+from shards_kernel.permits import PermitBuilder
 
 
 # ============================================================================
@@ -78,7 +78,7 @@ def access_filesystem(path: str, operation: str) -> str:
 
 def main():
     print("=" * 80)
-    print("KERNELS + Hugging Face Integration Example")
+    print("Shards-Kernel + Hugging Face Integration Example")
     print("=" * 80)
     print()
     print("Scenario: Research agent with 4 tools")
@@ -94,7 +94,7 @@ def main():
     # Step 1: Set up kernel with governance
     # ========================================================================
 
-    print("Step 1: Initialize KERNELS governance")
+    print("Step 1: Initialize Shards-Kernel governance")
     print("-" * 80)
 
     kernel = StrictKernel()
@@ -295,7 +295,7 @@ def main():
     # ========================================================================
 
     print("=" * 80)
-    print("SUMMARY: Hugging Face + KERNELS Integration")
+    print("SUMMARY: Hugging Face + Shards-Kernel Integration")
     print("=" * 80)
     print()
     print("✓ Tools wrapped with Hugging Face-compatible interface")
@@ -306,7 +306,7 @@ def main():
     print()
     print("Integration usage:")
     print("  from transformers import Agent")
-    print("  from kernels.integrations import HuggingFaceAdapter")
+    print("  from shards_kernel.integrations import HuggingFaceAdapter")
     print()
     print("  adapter = HuggingFaceAdapter(kernel)")
     print("  tools = [adapter.wrap_tool(...), ...]")

@@ -11,8 +11,8 @@ import tempfile
 from pathlib import Path
 
 from implementations.storage import SQLiteAuditStorage
-from kernels.common.types import KernelConfig, KernelRequest, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
+from shards_kernel.common.types import KernelConfig, KernelRequest, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
 
 
 def config(clock_ms: int) -> KernelConfig:
@@ -26,7 +26,7 @@ def config(clock_ms: int) -> KernelConfig:
 
 def main() -> None:
     """Persist an audit ledger, restart, and verify recovery."""
-    with tempfile.TemporaryDirectory(prefix="kernels-demo-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="shards_kernel-demo-") as temp_dir:
         database = Path(temp_dir) / "audit.sqlite3"
         storage = SQLiteAuditStorage(str(database))
 
