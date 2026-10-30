@@ -1,7 +1,7 @@
 """
-Example: LangGraph Stateful Workflow with KERNELS Governance
+Example: LangGraph Stateful Workflow with Shards-Kernel Governance
 
-This example demonstrates KERNELS governance for LangGraph stateful workflows,
+This example demonstrates Shards-Kernel governance for LangGraph stateful workflows,
 including state transition validation and workflow invariants enforcement.
 
 LangGraph Context:
@@ -20,7 +20,7 @@ The Problem:
     - No audit trail of state mutations
 
 The Solution:
-    KERNELS provides:
+    Shards-Kernel provides:
     - Node-level execution governance
     - State transition validation
     - Workflow invariants enforcement
@@ -49,10 +49,10 @@ from typing import Dict, Any
 import json
 import os
 
-# KERNELS imports
-from kernels.common.types import KernelConfig, VirtualClock
-from kernels.variants.strict_kernel import StrictKernel
-from kernels.integrations.langgraph_adapter import LangGraphAdapter
+# Shards-Kernel imports
+from shards_kernel.common.types import KernelConfig, VirtualClock
+from shards_kernel.variants.strict_kernel import StrictKernel
+from shards_kernel.integrations.langgraph_adapter import LangGraphAdapter
 from _permit import issue_permit
 
 
@@ -156,7 +156,7 @@ def ship_order(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def main():
     print("=" * 80)
-    print("KERNELS + LangGraph Stateful Workflow Governance")
+    print("Shards-Kernel + LangGraph Stateful Workflow Governance")
     print("=" * 80)
     print()
     print("Scenario: E-commerce order processing workflow")
@@ -177,10 +177,10 @@ def main():
     print()
 
     # ========================================================================
-    # Step 1: Set up KERNELS kernel
+    # Step 1: Set up Shards-Kernel kernel
     # ========================================================================
 
-    print("Step 1: Initialize KERNELS governance")
+    print("Step 1: Initialize Shards-Kernel governance")
     print("-" * 80)
 
     kernel = StrictKernel()
@@ -370,7 +370,7 @@ def main():
         workflow_state = governed_payment(workflow_state)
         print("✗ ERROR: Should have been denied!")
     except PermissionError as e:
-        print("✓ CORRECTLY DENIED by KERNELS")
+        print("✓ CORRECTLY DENIED by Shards-Kernel")
         print(f"  Error: {e}")
         print()
         print("Payment processing requires cryptographic permit!")
@@ -508,19 +508,19 @@ def main():
     # ========================================================================
 
     print("=" * 80)
-    print("SUMMARY: LangGraph Stateful Workflow Governance with KERNELS")
+    print("SUMMARY: LangGraph Stateful Workflow Governance with Shards-Kernel")
     print("=" * 80)
     print()
-    print("What KERNELS prevents in stateful workflows:")
+    print("What Shards-Kernel prevents in stateful workflows:")
     print()
-    print("WITHOUT KERNELS:")
+    print("WITHOUT Shards-Kernel:")
     print("  ✗ Workflows can execute invalid state transitions")
     print("  ✗ Business logic constraints can be violated")
     print("  ✗ No authorization for critical workflow steps")
     print("  ✗ State mutations are not audited")
     print("  ✗ Workflows continue past errors")
     print()
-    print("WITH KERNELS:")
+    print("WITH Shards-Kernel:")
     print("  ✓ Node-level execution governance")
     print("  ✓ Workflow invariants enforced throughout execution")
     print("  ✓ State transitions validated and audited")
@@ -541,7 +541,7 @@ def main():
     print("  - Timeline of workflow progression")
     print()
     print("Integration usage:")
-    print("  from kernels.integrations import LangGraphAdapter")
+    print("  from shards_kernel.integrations import LangGraphAdapter")
     print()
     print("  adapter = LangGraphAdapter(kernel, enforce_invariants=True)")
     print()

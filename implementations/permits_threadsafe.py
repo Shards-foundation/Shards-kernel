@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from threading import RLock
 
-from kernels.permits import NonceRecord
+from shards_kernel.permits import NonceRecord
 
 
 class ThreadSafeNonceRegistry:
