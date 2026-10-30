@@ -1,13 +1,13 @@
 """SDK builders produce objects the kernel accepts."""
 
-from kernels import (
+from shards_kernel import (
     Decision,
     KernelConfig,
     PermitBuilder,
     StrictKernel,
     VirtualClock,
 )
-from kernels.sdk.builder import PolicyBuilder, RequestBuilder
+from shards_kernel.sdk.builder import PolicyBuilder, RequestBuilder
 
 
 KEYRING = {"k": b"test-secret-key-32-bytes-long123"}
