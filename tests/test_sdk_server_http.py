@@ -32,7 +32,7 @@ def request_json(url, method="GET", payload=None, token=TEST_KEY):
     if token is not None:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:  # nosec B310: fixed loopback test server URL
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8"))
@@ -114,7 +114,7 @@ def test_http_server_cannot_start_without_strong_key(monkeypatch):
     with pytest.raises(ValueError, match="API key"):
         KernelServer(kernel, port=0, api_key="short")
     with pytest.raises(ValueError, match="Remote HTTP binding"):
-        KernelServer(kernel, host="0.0.0.0", port=0, api_key=TEST_KEY)
+        KernelServer(kernel, host="0.0.0.0", port=0, api_key=TEST_KEY)  # nosec B104: test asserts this bind is refused
 
 
 def test_http_server_no_wildcard_cors(live_server):
