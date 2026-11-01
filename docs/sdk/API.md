@@ -279,8 +279,10 @@ receipt = await kernel.submit(request, permit_token=permit)
 ```python
 from shards_kernel.sdk import KernelClient, KernelServer
 
-server = KernelServer(kernel, host="127.0.0.1", port=8080)
-client = KernelClient("http://127.0.0.1:8080")
+import os
+key = os.environ["SHARDS_KERNEL_API_KEY"]
+server = KernelServer(kernel, host="127.0.0.1", port=8080, api_key=key)
+client = KernelClient("http://127.0.0.1:8080", api_key=key)
 receipt = client.submit(request, permit_token=permit)
 ```
 
@@ -304,8 +306,10 @@ HTTP adapters accept the same body: `request_id`, `actor`, `intent`, `tool_call`
 from shards_kernel.integrations import create_fastapi_app, create_flask_app
 from shards_kernel.integrations.mcp_adapter import MCPAdapter
 
-fastapi_app = create_fastapi_app(kernel)
-flask_app = create_flask_app(kernel)
+import os
+key = os.environ["SHARDS_KERNEL_API_KEY"]
+fastapi_app = create_fastapi_app(kernel, api_key=key)
+flask_app = create_flask_app(kernel, api_key=key)
 adapter = MCPAdapter(kernel, actor="mcp-agent")
 ```
 
