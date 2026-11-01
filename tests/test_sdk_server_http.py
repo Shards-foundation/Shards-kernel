@@ -120,5 +120,5 @@ def test_http_server_cannot_start_without_strong_key(monkeypatch):
 def test_http_server_no_wildcard_cors(live_server):
     _server, url = live_server
     req = urllib.request.Request(url + "/health", headers={"Origin": "https://attacker.example"})
-    with urllib.request.urlopen(req, timeout=3) as response:
+    with urllib.request.urlopen(req, timeout=3) as response:  # nosec B310: fixed loopback test URL
         assert response.headers.get("Access-Control-Allow-Origin") is None
