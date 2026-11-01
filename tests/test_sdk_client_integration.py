@@ -12,13 +12,15 @@ from shards_kernel.sdk.client import (
 )
 from shards_kernel.sdk.server import KernelServer
 
+TEST_KEY = "shards-test-http-key-32-characters-long-0001"
+
 
 def test_sync_client_round_trip_against_local_server():
-    server = KernelServer(boot_strict_kernel("sync-client-test"), port=0)
+    server = KernelServer(boot_strict_kernel("sync-client-test"), port=0, api_key=TEST_KEY)
     server.start(blocking=False)
     url = f"http://127.0.0.1:{server._server.server_address[1]}"
     try:
-        client = KernelClient(url, api_key="test-key", timeout=2)
+        client = KernelClient(url, api_key=TEST_KEY, timeout=2)
         assert client.health()["status"] == "healthy"
         assert client.status()["kernel_id"] == "sync-client-test"
         assert "ledger_entries" in client.evidence()
@@ -33,19 +35,19 @@ def test_sync_client_round_trip_against_local_server():
         ])
         assert len(batch) == 1
         assert batch[0].request_id == "sync-2"
-        assert create_client(url).status()["kernel_id"] == "sync-client-test"
+        assert create_client(url, api_key=TEST_KEY).status()["kernel_id"] == "sync-client-test"
         assert client.halt()["status"] == "halted"
     finally:
         server.stop()
 
 
 def test_async_client_round_trip_against_local_server():
-    server = KernelServer(boot_strict_kernel("async-client-test"), port=0)
+    server = KernelServer(boot_strict_kernel("async-client-test"), port=0, api_key=TEST_KEY)
     server.start(blocking=False)
     url = f"http://127.0.0.1:{server._server.server_address[1]}"
 
     async def scenario():
-        client = AsyncKernelClient(url, timeout=2)
+        client = AsyncKernelClient(url, api_key=TEST_KEY, timeout=2)
         assert (await client.health())["status"] == "healthy"
         assert (await client.status())["kernel_id"] == "async-client-test"
         assert "ledger_entries" in await client.evidence()
