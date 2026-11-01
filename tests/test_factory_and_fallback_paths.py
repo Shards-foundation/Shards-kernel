@@ -141,7 +141,7 @@ def test_sdk_server_no_kernel_routes_and_options():
                 urllib.request.urlopen(
                     urllib.request.Request(base + path, headers={
                         "Authorization": f"Bearer {NoKernelHandler.api_key}"
-                    }), timeout=2
+                    }), timeout=2  # nosec B310: fixed loopback test server URL
                 )
             assert error.value.code == 503
         for path, payload in (("/submit", {"request_id": "x"}), ("/halt", {})):
@@ -159,7 +159,7 @@ def test_sdk_server_no_kernel_routes_and_options():
             assert getattr(error.value, "code", None) == 503
         options = urllib.request.Request(base + "/anything", method="OPTIONS")
         with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(options, timeout=2)
+            urllib.request.urlopen(options, timeout=2)  # nosec B310: fixed loopback test server URL
         assert error.value.code == 405
     finally:
         httpd.shutdown()
