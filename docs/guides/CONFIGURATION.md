@@ -450,11 +450,12 @@ registry.register(
 Configure API key authentication.
 
 ```python
+import os
 from shards_kernel.sdk import KernelServer
 
 server = KernelServer(
     kernel,
-    api_key="your-secret-key",
+    api_key=os.environ["SHARDS_KERNEL_API_KEY"],
 )
 ```
 
@@ -491,6 +492,7 @@ from shards_kernel.integrations import create_fastapi_app
 app = create_fastapi_app(
     kernel,
     cors_origins=["https://example.com"],
+    api_key=os.environ["SHARDS_KERNEL_API_KEY"],
 )
 ```
 
