@@ -138,10 +138,10 @@ def test_sdk_server_no_kernel_routes_and_options():
     try:
         for path in ("/health", "/status", "/evidence", "/policy"):
             with pytest.raises(urllib.error.HTTPError) as error:
-                urllib.request.urlopen(
+                urllib.request.urlopen(  # nosec B310: fixed loopback test server URL
                     urllib.request.Request(base + path, headers={
                         "Authorization": f"Bearer {NoKernelHandler.api_key}"
-                    }), timeout=2  # nosec B310: fixed loopback test server URL
+                    }), timeout=2
                 )
             assert error.value.code == 503
         for path, payload in (("/submit", {"request_id": "x"}), ("/halt", {})):
