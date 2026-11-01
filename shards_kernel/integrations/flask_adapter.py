@@ -15,6 +15,8 @@ try:
 except ImportError:
     HAS_FLASK = False
 
+from shards_kernel._version import __version__
+from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
     boot_strict_kernel,
     evidence_to_mapping,
@@ -31,6 +33,7 @@ def create_flask_app(
     kernel: Optional[BaseKernel] = None,
     kernel_id: str = "flask-kernel",
     policy: Optional[JurisdictionPolicy] = None,
+    api_key: Optional[str] = None,
 ) -> "Flask":
     """
     Create a Flask app for the kernel.
@@ -45,6 +48,7 @@ def create_flask_app(
     """
     if not HAS_FLASK:
         raise ImportError("Flask not installed. Run: pip install flask")
+    secret = resolve_api_key(api_key)
 
     # Create kernel if not provided
     if kernel is None:
@@ -55,6 +59,19 @@ def create_flask_app(
     # Create app
     app = Flask(__name__)
     app.config["kernel"] = kernel
+    app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
+
+    @app.before_request
+    def authenticate():
+        if request.path not in {"/", "/health"}:
+            if not bearer_authorized(request.headers.get("Authorization"), secret):
+                return jsonify({"error": "Unauthorized"}), 401
+        return None
+
+    @app.after_request
+    def no_store(response):
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.route("/", methods=["GET"])
     def info():
@@ -62,7 +79,7 @@ def create_flask_app(
         return jsonify(
             {
                 "name": "Shards-Kernel",
-                "version": "0.1.0",
+                "version": __version__,
                 "kernel_id": app.config["kernel"].config.kernel_id,
             }
         )
@@ -127,6 +144,8 @@ def run_flask_server(
     port: int = 8080,
     policy: Optional[JurisdictionPolicy] = None,
     debug: bool = False,
+    api_key: Optional[str] = None,
+    allow_remote_bind: bool = False,
 ) -> None:
     """
     Run Flask server.
@@ -138,7 +157,9 @@ def run_flask_server(
         policy: Jurisdiction policy
         debug: Deprecated. Debug mode is disabled for security hardening.
     """
-    app = create_flask_app(kernel_id=kernel_id, policy=policy)
+    if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
+        raise ValueError("Remote binding requires explicit allow_remote_bind=True and a secure TLS ingress")
+    app = create_flask_app(kernel_id=kernel_id, policy=policy, api_key=api_key)
     if debug:
         raise ValueError(
             "Debug mode is disabled for security; run behind a proper debugger."
