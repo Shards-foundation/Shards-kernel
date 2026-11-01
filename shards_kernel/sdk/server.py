@@ -11,6 +11,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional, Type
 import threading
 
+from shards_kernel._version import __version__
+from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
     boot_strict_kernel,
     evidence_to_mapping,
@@ -28,31 +30,44 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
 
     # Class-level kernel reference (set by server)
     kernel: Optional[BaseKernel] = None
+    api_key: Optional[str] = None
+    max_body_bytes: int = 1024 * 1024
+
+    def _authorized(self) -> bool:
+        if self.api_key and bearer_authorized(self.headers.get("Authorization"), self.api_key):
+            return True
+        self._send_json(401, {"error": "Unauthorized"})
+        return False
 
     def _send_json(self, status: int, data: Dict[str, Any]) -> None:
         """Send JSON response."""
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
     def _read_json(self) -> Dict[str, Any]:
         """Read JSON from request body."""
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid Content-Length") from exc
+        if content_length < 0:
+            raise ValueError("Invalid Content-Length")
+        if content_length > self.max_body_bytes:
+            raise OverflowError("Request body too large")
         body = self.rfile.read(content_length)
         return json.loads(body.decode("utf-8")) if body else {}
 
     def do_OPTIONS(self) -> None:
-        """Handle CORS preflight."""
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        self.end_headers()
+        """No cross-origin browser access by default."""
+        self._send_json(405, {"error": "CORS preflight not enabled"})
 
     def do_GET(self) -> None:
         """Handle GET requests."""
+        if self.path in {"/status", "/evidence", "/policy"} and not self._authorized():
+            return
         if self.path == "/health":
             self._handle_health()
         elif self.path == "/status":
@@ -68,6 +83,8 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle POST requests."""
+        if self.path in {"/submit", "/halt"} and not self._authorized():
+            return
         if self.path == "/submit":
             self._handle_submit()
         elif self.path == "/halt":
@@ -81,7 +98,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             200,
             {
                 "name": "Shards-Kernel",
-                "version": "0.1.0",
+                "version": __version__,
                 "kernel_id": self.kernel.config.kernel_id if self.kernel else None,
             },
         )
@@ -139,8 +156,12 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
 
         except KeyError as e:
             self._send_json(400, {"error": f"Missing field: {e}"})
-        except Exception as e:
-            self._send_json(500, {"error": str(e)})
+        except (ValueError, TypeError, UnicodeDecodeError):
+            self._send_json(400, {"error": "Malformed JSON request"})
+        except OverflowError:
+            self._send_json(413, {"error": "Request body too large"})
+        except Exception:
+            self._send_json(500, {"error": "Internal server error"})
 
     def _handle_halt(self) -> None:
         """Handle halt request."""
@@ -179,7 +200,13 @@ class KernelServer:
         kernel: BaseKernel,
         host: str = "127.0.0.1",
         port: int = 8080,
+        *,
+        api_key: Optional[str] = None,
+        allow_remote_bind: bool = False,
     ):
+        if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
+            raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
+        self.api_key = resolve_api_key(api_key)
         self.kernel = kernel
         self.host = host
         self.port = port
@@ -194,6 +221,7 @@ class KernelServer:
             pass
 
         Handler.kernel = kernel
+        Handler.api_key = self.api_key
         return Handler
 
     def start(self, blocking: bool = True) -> None:
@@ -236,6 +264,8 @@ def run_server(
     host: str = "127.0.0.1",
     port: int = 8080,
     policy: Optional[JurisdictionPolicy] = None,
+    api_key: Optional[str] = None,
+    allow_remote_bind: bool = False,
 ) -> None:
     """
     Convenience function to run a kernel server.
@@ -249,7 +279,9 @@ def run_server(
     kernel = boot_strict_kernel(kernel_id)
     if policy is not None:
         kernel.set_policy(policy)
-    server = KernelServer(kernel, host, port)
+    server = KernelServer(
+        kernel, host, port, api_key=api_key, allow_remote_bind=allow_remote_bind
+    )
 
     try:
         server.start(blocking=True)
