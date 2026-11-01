@@ -487,6 +487,7 @@ context.load_cert_chain("cert.pem", "key.pem")
 Configure Cross-Origin Resource Sharing.
 
 ```python
+import os
 from shards_kernel.integrations import create_fastapi_app
 
 app = create_fastapi_app(
