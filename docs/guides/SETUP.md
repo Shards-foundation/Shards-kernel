@@ -279,6 +279,14 @@ pip install pytest pytest-cov black isort mypy ruff
 
 ## 6. Production Setup
 
+**Required before starting any HTTP adapter:** provide
+`SHARDS_KERNEL_API_KEY` from a secrets manager (minimum 32 characters;
+generate with `python -c 'import secrets; print(secrets.token_urlsafe(48))'`).
+The default listener is loopback-only and the reference server is **not**
+a production public ingress. See
+[HTTP API authentication](../operations/HTTP_API_AUTH.md).
+
+
 ### 6.1 System Service
 
 Create `/etc/systemd/system/shards_kernel.service`:
@@ -294,7 +302,7 @@ User=kernels
 Group=kernels
 WorkingDirectory=/opt/kernels
 Environment=KERNELS_LOG_LEVEL=INFO
-ExecStart=/opt/shards_kernel/venv/bin/python -m shards_kernel.server
+ExecStart=/opt/shards_kernel/venv/bin/python -m shards_kernel.sdk.server
 Restart=always
 RestartSec=5
 
