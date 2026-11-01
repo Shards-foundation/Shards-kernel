@@ -129,6 +129,7 @@ def test_mcp_factory_and_server_keyboard_interrupt(monkeypatch, capsys):
 def test_sdk_server_no_kernel_routes_and_options():
     class NoKernelHandler(KernelRequestHandler):
         kernel = None
+        api_key = "shards-test-http-key-32-characters-long-0001"
 
     httpd = HTTPServer(("127.0.0.1", 0), NoKernelHandler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -137,22 +138,29 @@ def test_sdk_server_no_kernel_routes_and_options():
     try:
         for path in ("/health", "/status", "/evidence", "/policy"):
             with pytest.raises(urllib.error.HTTPError) as error:
-                urllib.request.urlopen(base + path, timeout=2)
+                urllib.request.urlopen(
+                    urllib.request.Request(base + path, headers={
+                        "Authorization": f"Bearer {NoKernelHandler.api_key}"
+                    }), timeout=2
+                )
             assert error.value.code == 503
         for path, payload in (("/submit", {"request_id": "x"}), ("/halt", {})):
             request = urllib.request.Request(
                 base + path,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {NoKernelHandler.api_key}",
+                },
                 method="POST",
             )
             with pytest.raises(Exception) as error:
                 urllib.request.urlopen(request, timeout=2)
             assert getattr(error.value, "code", None) == 503
         options = urllib.request.Request(base + "/anything", method="OPTIONS")
-        with urllib.request.urlopen(options, timeout=2) as response:
-            assert response.status == 200
-            assert response.headers["Access-Control-Allow-Methods"] == "GET, POST, OPTIONS"
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(options, timeout=2)
+        assert error.value.code == 405
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -167,6 +175,9 @@ def test_run_server_stops_after_keyboard_interrupt(monkeypatch, capsys):
 
     monkeypatch.setattr(KernelServer, "start", interrupt)
     monkeypatch.setattr(KernelServer, "stop", lambda self: stopped.append(True))
-    run_server(kernel_id="interrupt-test", port=0)
+    run_server(
+        kernel_id="interrupt-test", port=0,
+        api_key="shards-test-http-key-32-characters-long-0001",
+    )
     assert stopped == [True]
     assert "Shutting down" in capsys.readouterr().out
