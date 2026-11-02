@@ -258,3 +258,24 @@ def test_runtime_rejects_removed_schema_without_recreating_it(tmp_path):
         conn.execute("DROP TABLE ingress_policy_checkpoint")
     with pytest.raises(ValueError, match="unavailable"):
         MTLSIngressServer(config)
+
+
+def test_fresh_private_db_refuses_ingress_until_explicit_bootstrap(tmp_path):
+    """Creating an empty file must never itself grant signed ingress authority."""
+    env, raw, _, signed_config, db = _versioned(tmp_path)
+    db.unlink()
+    db.touch(mode=0o600)
+    with pytest.raises(ValueError, match="unavailable"):
+        MTLSIngressServer(signed_config)
+    # Deliberate one-time operator action establishes the initial high-water
+    # mark; subsequent normal restarts may verify, not initialise, the DB.
+    identity = bootstrap_ingress_checkpoint(
+        db, ingress_id=signed_config.ingress_id,
+        revision=signed_config.revision, digest=signed_config.policy_digest,
+    )
+    assert identity == MTLSIngressServer(signed_config)._checkpoint_identity
+    with pytest.raises(ValueError, match="already initialised"):
+        bootstrap_ingress_checkpoint(
+            db, ingress_id=signed_config.ingress_id,
+            revision=signed_config.revision, digest=signed_config.policy_digest,
+        )
