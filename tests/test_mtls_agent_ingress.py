@@ -910,7 +910,7 @@ def test_aggregate_http_header_deadline_releases_tls_slot(
 def test_header_stream_enforces_cumulative_byte_budget(tmp_path, monkeypatch):
     """Separately valid lines cannot exceed the combined header-byte budget."""
     monkeypatch.setattr(ingress_module, "_MAX_HEADER_BYTES", 8)
-    stream = io.BytesIO(b"A: 1\\r\\nB: 2\\r\\n")
+    stream = io.BytesIO(b"A: 1\r\nB: 2\r\n")
 
     class TimeoutSocket:
         def settimeout(self, _seconds):
@@ -919,7 +919,7 @@ def test_header_stream_enforces_cumulative_byte_budget(tmp_path, monkeypatch):
     reader = ingress_module._DeadlineHeaderStream(
         stream, TimeoutSocket(), time.monotonic() + 2,
     )
-    assert reader.readline() == b"A: 1\\r\\n"
+    assert reader.readline() == b"A: 1\r\n"
     with pytest.raises(TimeoutError, match="header byte budget"):
         reader.readline()
 
@@ -944,8 +944,8 @@ def test_live_tls_header_byte_budget_recovers_slot(tmp_path, monkeypatch):
         peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
         peer.settimeout(2)
         oversized = (
-            b"POST /submit HTTP/1.1\\r\\nHost: local\\r\\n"
-            + b"X-Oversized: " + b"x" * 1100 + b"\\r\\n\\r\\n"
+            b"POST /submit HTTP/1.1\r\nHost: local\r\n"
+            + b"X-Oversized: " + b"x" * 1100 + b"\r\n\r\n"
         )
         try:
             peer.sendall(oversized)
@@ -1007,11 +1007,11 @@ def test_preaccepted_tls_connection_cannot_forward_after_stop(
                 _permit(setup["issuer"], "agent-alpha", "echo", {"text": "never"}),
             )).encode("utf-8")
             request = (
-                b"POST /submit HTTP/1.1\\r\\n"
-                b"Host: localhost\\r\\n"
-                b"Authorization: Bearer " + setup["alpha"].encode() + b"\\r\\n"
-                b"Content-Type: application/json\\r\\n"
-                b"Content-Length: " + str(len(body)).encode() + b"\\r\\n\\r\\n"
+                b"POST /submit HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Authorization: Bearer " + setup["alpha"].encode() + b"\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n"
                 + body
             )
             peer.sendall(request)
