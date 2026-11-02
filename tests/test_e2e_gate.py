@@ -6,11 +6,12 @@ only asserting implementation details of StrictE2EGate.
 
 from __future__ import annotations
 
+import io
+import multiprocessing
 import os
 import re
-import subprocess
 import sys
-import textwrap
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,6 +50,26 @@ def test_e2e_rejects_unsupported_runtime_before_running_pytest(monkeypatch, caps
     assert "requires Linux and Python 3.11+" in capsys.readouterr().err
 
 
+def _run_real_process_gate_probe(scenario: str, workdir: str, sender) -> None:
+    """Spawned child executes the reviewed gate; no code or shell injection.
+
+    The scenario is an absolute synthetic pytest node ID from our own
+    temporary test file, not a command, shell fragment, or interpolated
+    Python source. IPC carries back the actual gate exit and output.
+    """
+    try:
+        os.chdir(workdir)
+        gate.SCENARIOS = (scenario,)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = gate.main()
+        sender.send((exit_code, stdout.getvalue(), stderr.getvalue()))
+    except Exception as exc:
+        sender.send((2, "", "Probe raised " + type(exc).__name__))
+    finally:
+        sender.close()
+
+
 @pytest.mark.parametrize(
     ("mode", "source", "should_pass"),
     [
@@ -69,33 +90,37 @@ def test_e2e_gate_pytest_process_fails_closed(tmp_path, mode, source, should_pas
     scenario = tmp_path / "test_scenario.py"
     if source is not None:
         scenario.write_text(source, encoding="utf-8")
-    # Only synthetic test file paths are injected into this subprocess. The
-    # production runner's reviewed SCENARIOS list is never altered on disk.
-    script = textwrap.dedent(
-        f"""\
-        from scripts.ci import run_e2e_gate as gate
-        gate.SCENARIOS = ({str(scenario) + '::test_case'!r},)
-        raise SystemExit(gate.main())
-        """
+    # Spawn a separate Python interpreter using a structured IPC channel.
+    # No dynamic Python -c code and no command line or shell interpolation.
+    ctx = multiprocessing.get_context("spawn")
+    receiver, sender = ctx.Pipe(duplex=False)
+    worker = ctx.Process(
+        target=_run_real_process_gate_probe,
+        args=(str(scenario) + "::test_case", str(tmp_path), sender),
     )
-    environ = os.environ.copy()
-    environ["PYTHONPATH"] = str(ROOT) + os.pathsep + environ.get("PYTHONPATH", "")
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=str(tmp_path),
-        env=environ,
-        capture_output=True,
-        text=True,
-        timeout=25,
-        check=False,
-    )
+    try:
+        worker.start()
+        sender.close()
+        if not receiver.poll(25):
+            worker.terminate()
+            pytest.fail("E2E probe did not finish within 25 seconds")
+        exit_code, stdout, stderr = receiver.recv()
+        worker.join(timeout=5)
+        assert worker.exitcode == 0, "Spawned E2E probe exited unexpectedly"
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+        if worker.pid is not None:
+            worker.join(timeout=5)
+        receiver.close()
+        sender.close()
     if should_pass:
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "1 passed" in result.stdout
+        assert exit_code == 0, stdout + stderr
+        assert "1 passed" in stdout
     else:
-        assert result.returncode != 0, (mode, result.stdout, result.stderr)
+        assert exit_code != 0, (mode, stdout, stderr)
         if mode in {"skipped", "xfail", "xpass"}:
-            assert "E2E RELEASE GATE FAILED" in result.stderr
+            assert "E2E RELEASE GATE FAILED" in stderr
 
 
 def test_e2e_hook_rejects_deselection_and_counts_only_real_passes(capsys):
