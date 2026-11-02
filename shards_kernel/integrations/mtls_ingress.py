@@ -277,7 +277,7 @@ class _DeadlineHeaderStream:
             if not char:
                 break
             data.extend(char)
-            if char == b"\\n":
+            if char == b"\n":
                 break
         return bytes(data)
 
