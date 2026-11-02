@@ -119,7 +119,7 @@ class _AdapterCases:
 class TestFlaskAdapter(unittest.TestCase, _AdapterCases):
     def setUp(self) -> None:
         self.kernel = _kernel()
-        self.client = create_flask_app(self.kernel, api_key=HTTP_TEST_KEY).test_client()
+        self.client = create_flask_app(self.kernel, api_key=HTTP_TEST_KEY, allow_test_clock=True).test_client()
 
     def post(self, payload: dict) -> dict:
         response = self.client.post("/submit", json=payload, headers=HTTP_AUTH)
@@ -131,7 +131,7 @@ class TestFlaskAdapter(unittest.TestCase, _AdapterCases):
 class TestFastAPIAdapter(unittest.TestCase, _AdapterCases):
     def setUp(self) -> None:
         self.kernel = _kernel()
-        self.client = TestClient(create_fastapi_app(self.kernel, api_key=HTTP_TEST_KEY))
+        self.client = TestClient(create_fastapi_app(self.kernel, api_key=HTTP_TEST_KEY, allow_test_clock=True))
 
     def post(self, payload: dict) -> dict:
         response = self.client.post("/submit", json=payload, headers=HTTP_AUTH)
@@ -142,7 +142,7 @@ class TestFastAPIAdapter(unittest.TestCase, _AdapterCases):
 class TestSdkServer(unittest.TestCase, _AdapterCases):
     def setUp(self) -> None:
         self.kernel = _kernel()
-        self.server = KernelServer(self.kernel, host="127.0.0.1", port=0, api_key=HTTP_TEST_KEY)
+        self.server = KernelServer(self.kernel, host="127.0.0.1", port=0, api_key=HTTP_TEST_KEY, allow_test_clock=True)
         # Bind an ephemeral port, then start.
         from http.server import HTTPServer
 
