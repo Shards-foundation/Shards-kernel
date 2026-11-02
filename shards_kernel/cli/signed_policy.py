@@ -16,7 +16,6 @@ from typing import Any
 from shards_kernel.cli.service import (
     OperatorServiceConfig,
     _fields,
-    _identifier,
     _reject_constant,
     _unique_pairs,
     parse_operator_config,
@@ -44,6 +43,10 @@ def canonical_policy_payload(envelope: dict[str, Any]) -> bytes:
     return _DOMAIN + json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
+
+
+def _reject_float(_value: str) -> None:
+    raise ValueError("Floating point values are not allowed in signed policy")
 
 
 def _parse_envelope(envelope: Any) -> tuple[dict[str, Any], OperatorServiceConfig]:
@@ -126,9 +129,7 @@ def load_signed_policy(
             contents.decode("utf-8"),
             object_pairs_hook=_unique_pairs,
             parse_constant=_reject_constant,
-            parse_float=lambda _value: (_ for _ in ()).throw(
-                ValueError("Floating point values are not allowed in signed policy")
-            ),
+            parse_float=_reject_float,
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Invalid signed policy encoding") from exc
