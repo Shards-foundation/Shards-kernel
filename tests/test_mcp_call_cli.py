@@ -110,7 +110,7 @@ class _FakeClient:
 def test_official_mcp_client_cannot_treat_denial_as_success(
     monkeypatch, decision, is_error, expected_exit
 ):
-    receipt = json.dumps({"request_id": "req", "decision": decision, "result": "hello"})
+    receipt = json.dumps({"request_id": "mcp-relay-" + "a" * 32, "decision": decision, "result": "hello"})
     fake = _FakeClient(SimpleNamespace(
         content=[SimpleNamespace(type="text", text=receipt)],
         is_error=is_error,
@@ -148,6 +148,41 @@ def test_unexpected_tool_catalogue_refuses_call(monkeypatch):
             args={"text": "hi"}, permit={"signed": True},
         ))
     assert fake.received is None
+
+
+@pytest.mark.skipif(os.name != "posix" or not hasattr(os, "mkfifo"), reason="POSIX only")
+def test_private_named_pipe_fails_without_waiting_for_writer(tmp_path):
+    pipe = tmp_path / "permit.fifo"
+    os.mkfifo(pipe, 0o600)
+    with pytest.raises(ValueError, match="permissions"):
+        mcp_call._read_private_permit(pipe)
+
+
+@pytest.mark.parametrize(
+    ("tool", "receipt"),
+    [
+        ("echo", {"decision": "ALLOW", "result": "ok"}),
+        ("echo", {"request_id": "bad", "decision": "ALLOW", "result": "ok"}),
+        ("echo", {"request_id": "mcp-relay-" + "a" * 32, "decision": "ALLOW"}),
+        ("echo", {"request_id": "mcp-relay-" + "a" * 32, "decision": "ALLOW", "result": 5}),
+        ("add", {"request_id": "mcp-relay-" + "a" * 32, "decision": "ALLOW", "result": True}),
+        ("add", {"request_id": "mcp-relay-" + "a" * 32, "decision": "ALLOW", "result": "5"}),
+    ],
+)
+def test_incomplete_or_wrong_type_allow_receipts_are_refused(monkeypatch, tool, receipt):
+    fake = _FakeClient(SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=json.dumps(receipt))],
+        is_error=False,
+    ))
+    monkeypatch.setitem(sys.modules, "mcp", SimpleNamespace(
+        Client=lambda _: fake, StdioServerParameters=lambda **kwargs: kwargs,
+    ))
+    with pytest.raises(ValueError, match="receipt"):
+        asyncio.run(mcp_call._invoke(
+            port=8765, token="agent-one." + "x" * 48,
+            tool=tool, args={"text": "ok"} if tool == "echo" else {"a": 2, "b": 3},
+            permit={"signed": True},
+        ))
 
 
 @pytest.mark.parametrize("contents", [
