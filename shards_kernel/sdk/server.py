@@ -6,6 +6,7 @@ HTTP server for exposing kernel functionality.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional, Type
@@ -297,6 +298,10 @@ class KernelServer:
             if len({identity.token_sha256 for identity in agent_identities}) != len(agent_identities):
                 raise ValueError("Duplicate agent credentials")
         self.api_key = resolve_api_key(api_key)
+        if agent_identities:
+            admin_digest = hashlib.sha256(self.api_key.encode("utf-8")).hexdigest()
+            if any(identity.token_sha256 == admin_digest for identity in agent_identities):
+                raise ValueError("Operator and agent credentials must not be shared")
         if policy_expires_at_ms is not None and (
             type(policy_expires_at_ms) is not int or policy_expires_at_ms < 0
         ):
