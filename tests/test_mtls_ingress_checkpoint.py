@@ -262,7 +262,7 @@ def test_runtime_rejects_removed_schema_without_recreating_it(tmp_path):
 
 def test_fresh_private_db_refuses_ingress_until_explicit_bootstrap(tmp_path):
     """Creating an empty file must never itself grant signed ingress authority."""
-    env, raw, _, signed_config, db = _versioned(tmp_path)
+    _, _, _, signed_config, db = _versioned(tmp_path)
     db.unlink()
     db.touch(mode=0o600)
     with pytest.raises(ValueError, match="unavailable"):
