@@ -7,6 +7,7 @@ they are NOT a legal opinion, a data-flow audit or a GDPR certification.
 import os
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -39,6 +40,15 @@ def illegal_legal_pr_paths(changed_paths):
     if not changes.intersection(LEGAL_DOCUMENTS):
         return []
     return sorted(changes.difference(ALLOWED_WITH_LEGAL_CHANGES))
+
+
+def changed_files_since_merge_base(base, head, root=ROOT):
+    """List only PR-introduced changes, excluding unrelated base-branch commits."""
+    changed = subprocess.check_output(
+        ["git", "diff", "--name-only", "-z", f"{base}...{head}"],
+        cwd=root,
+    )
+    return [os.fsdecode(p) for p in changed.split(b"\0") if p]
 
 
 class LegalDocumentationContractTests(unittest.TestCase):
@@ -142,6 +152,40 @@ class LegalDocumentationContractTests(unittest.TestCase):
                     [forbidden],
                 )
 
+    def test_diff_excludes_unrelated_changes_on_diverged_base_branch(self):
+        """A base-only runtime commit must not be blamed on a legal-only PR."""
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=repo).decode().strip()
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Legal CI Test")
+            git("config", "user.email", "legal-ci@example.invalid")
+            (repo / "PRIVACY_POLICY.md").write_text("draft\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "Initial")
+            git("checkout", "-qb", "legal-policy")
+            (repo / "PRIVACY_POLICY.md").write_text("draft revised\n", encoding="utf-8")
+            git("commit", "-qam", "Update legal policy")
+            legal_head = git("rev-parse", "HEAD")
+            git("checkout", "-q", "main")
+            (repo / "runtime.py").write_text("def run():\n    return True\n", encoding="utf-8")
+            git("add", "runtime.py")
+            git("commit", "-qm", "Unrelated base branch runtime change")
+            current_base = git("rev-parse", "HEAD")
+            self.assertEqual(
+                changed_files_since_merge_base(current_base, legal_head, root=repo),
+                ["PRIVACY_POLICY.md"],
+            )
+            self.assertEqual(
+                illegal_legal_pr_paths(
+                    changed_files_since_merge_base(current_base, legal_head, root=repo)
+                ),
+                [],
+            )
+
     def test_pull_request_diff_does_not_mix_legal_and_runtime_changes(self):
         """When CI provides PR SHAs, verify the real git diff, not a hand-written list."""
         base = os.environ.get("LEGAL_PR_BASE_SHA", "")
@@ -152,11 +196,7 @@ class LegalDocumentationContractTests(unittest.TestCase):
             return
         self.assertRegex(base, r"\A[0-9a-f]{40}\Z")
         self.assertRegex(head, r"\A[0-9a-f]{40}\Z")
-        changed = subprocess.check_output(
-            ["git", "diff", "--name-only", "-z", base, head],
-            cwd=ROOT,
-        )
-        paths = [os.fsdecode(p) for p in changed.split(b"\0") if p]
+        paths = changed_files_since_merge_base(base, head)
         self.assertTrue(paths, "PR diff is empty or cannot be established")
         rejected = illegal_legal_pr_paths(paths)
         self.assertEqual(
