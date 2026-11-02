@@ -564,3 +564,68 @@ def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
         verify_ingress_policy(
             signed, pinned_public_key_hex=setup["pinned"], now_ms=now
         )
+
+
+def test_low_level_ingress_validators_reject_unsafe_transport_and_metadata(tmp_path):
+    """Direct negative paths also run on Python 3.9 without the optional MCP SDK."""
+    import ipaddress
+
+    from shards_kernel.integrations.mtls_ingress import (
+        _actor, _listen_ip, _path, _port,
+    )
+
+    with pytest.raises(ValueError, match="Wildcard"):
+        _listen_ip(str(ipaddress.IPv4Address(0)))
+    for host in (None, "", "localhost", "::1", "239.0.0.1"):
+        with pytest.raises(ValueError):
+            _listen_ip(host)
+    assert _listen_ip("127.0.0.1") == "127.0.0.1"
+    for actor in (None, "*", "two words", "agent.dot", "", "x" * 129):
+        with pytest.raises(ValueError):
+            _actor(actor)
+    assert _actor("agent-alpha") == "agent-alpha"
+    for port in (0, 65536, True, False, "9443", None):
+        with pytest.raises(ValueError):
+            _port(port)
+    assert _port(9443) == 9443
+    for candidate in (None, "", "relative", str(tmp_path / "absent.pem")):
+        with pytest.raises(ValueError):
+            _path(candidate)
+
+
+def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkeypatch):
+    """Operator must explicitly allow a signed, specific remote bind."""
+    setup = _setup(tmp_path)
+    now = int(time.time() * 1000)
+    raw = copy.deepcopy(setup["policy"]["config"])
+    raw["listen_host"] = "192.0.2.99"  # Documentation-only, never actually bound.
+    signed = sign_mtls_ingress_policy(
+        raw, setup["ingress_key"],
+        issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
+    )
+    config = verify_ingress_policy(
+        signed, pinned_public_key_hex=setup["pinned"], now_ms=now,
+    )
+    with pytest.raises(ValueError, match="explicit"):
+        MTLSIngressServer(config)
+    ingress = MTLSIngressServer(config, allow_remote_listen=True)
+    assert ingress.config.listen_host == "192.0.2.99"
+
+    import shards_kernel.integrations.mtls_ingress as module
+    monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
+    path = tmp_path / "signed-policy.json"
+    path.write_text(json.dumps(setup["policy"]))
+    calls = []
+
+    class Interrupted:
+        def __init__(self, _config, *, allow_remote_listen=False):
+            assert not allow_remote_listen
+        def start(self, *, blocking=True):
+            calls.append("start")
+            raise KeyboardInterrupt()
+        def stop(self):
+            calls.append("stop")
+
+    monkeypatch.setattr(module, "MTLSIngressServer", Interrupted)
+    assert run_mtls_ingress(str(path)) == 0
+    assert calls == ["start", "stop"]
