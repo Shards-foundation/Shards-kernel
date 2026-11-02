@@ -55,6 +55,11 @@ def main() -> int:
     )
     doctor_parser.add_argument("--json", action="store_true", help="Machine-readable report")
 
+    demo_parser = subparsers.add_parser(
+        "demo", help="Run an offline, permit-governed execution and audit-replay demonstration"
+    )
+    demo_parser.add_argument("--json", action="store_true", help="Machine-readable results")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -71,6 +76,10 @@ def main() -> int:
         from shards_kernel.cli.doctor import run_doctor
 
         return run_doctor(profile=args.profile, json_output=args.json)
+    elif args.command == "demo":
+        from shards_kernel.cli.demo import run_demo
+
+        return run_demo(json_output=args.json)
 
     return 0
 
