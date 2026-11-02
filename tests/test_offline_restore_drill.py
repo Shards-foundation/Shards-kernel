@@ -31,7 +31,14 @@ def _audit(tmp_path, *, kernel_id="restore-example", phases=("intent", "outcome"
             tool_name="echo",
             params={"text": "redacted in report"},
             audit_phase=phase,
+            permit_digest="test-permit",
+            permit_verification="INTENT" if phase == "intent" else "OUTCOME",
+            permit_nonce="test-nonce",
+            permit_issuer="test-issuer",
+            permit_subject="agent-alpha",
+            permit_max_executions=1,
         )
+    database.chmod(0o600)
     return database, ledger.root_hash
 
 
@@ -127,15 +134,18 @@ def test_rejects_wrong_kernel_id_and_missing_or_symlink_sources(tmp_path):
 def test_rejects_truncated_and_unrecognised_database(tmp_path):
     database = tmp_path / "invalid.sqlite3"
     database.write_bytes(b"this is not a SQLite database")
+    database.chmod(0o600)
     _must_reject(database, "SNAPSHOT_OR_REPLAY_REJECTED")
     database.unlink()
     database.touch()
+    database.chmod(0o600)
     _must_reject(database, "SNAPSHOT_OR_REPLAY_REJECTED")
 
 
 def test_rejects_empty_audit_ledger(tmp_path):
     database = tmp_path / "audit.sqlite3"
     SQLiteAuditStorage(str(database)).bind_kernel("restore-example", "strict")
+    database.chmod(0o600)
     _must_reject(database, "MINIMUM_AUDIT_ENTRIES_NOT_MET")
 
 
@@ -220,3 +230,101 @@ def test_persistent_clock_rejects_symlinked_database_replacement(tmp_path):
     database.symlink_to(relocated)
     with pytest.raises(ClockRollbackError):
         clock.now_ms()
+
+
+def test_denied_retry_cannot_clear_old_execution_intent(tmp_path):
+    """An admission rejection never proves a previous side effect completed."""
+    db, _ = _audit(tmp_path, phases=("intent",))
+    ledger = AuditLedger("restore-example", "strict", storage=SQLiteAuditStorage(str(db)))
+    ledger.append(
+        request_id="approved-request",
+        actor="agent-alpha",
+        intent="retry after unknown external effect",
+        decision=Decision.DENY,
+        state_from=KernelState.IDLE,
+        state_to=KernelState.COMPLETED,
+        ts_ms=1_002,
+        audit_phase="outcome",
+        error="MISSING_PERMIT",
+        permit_verification="DENY",
+    )
+    _must_reject(db, "UNRECONCILED_EXECUTION_INTENTS")
+
+
+def test_wrong_permit_success_does_not_reconcile_original_intent(tmp_path):
+    """Even successful different attempts with reused request_id remain distinct."""
+    db, _ = _audit(tmp_path, phases=("intent",))
+    ledger = AuditLedger("restore-example", "strict", storage=SQLiteAuditStorage(str(db)))
+    ledger.append(
+        request_id="approved-request",
+        actor="agent-alpha",
+        intent="different execution attempt",
+        decision=Decision.ALLOW,
+        state_from=KernelState.IDLE,
+        state_to=KernelState.COMPLETED,
+        ts_ms=1_002,
+        tool_name="echo",
+        params={"text": "redacted in report"},
+        audit_phase="outcome",
+        permit_digest="different-permit",
+        permit_verification="OUTCOME",
+        permit_nonce="test-nonce",
+        permit_issuer="test-issuer",
+        permit_subject="agent-alpha",
+    )
+    _must_reject(db, "UNRECONCILED_EXECUTION_INTENTS")
+
+
+def test_symlink_swap_between_validation_and_open_is_rejected(tmp_path, monkeypatch):
+    """Do not follow an attacker-provided symlink even within an allowed path."""
+    import scripts.ops.verify_sqlite_restore as module
+
+    database, _ = _audit(tmp_path)
+    unrelated = tmp_path / "unrelated.sqlite3"
+    unrelated.write_bytes(b"do not read this target")
+    unrelated.chmod(0o600)
+    original = tmp_path / "original.sqlite3"
+    real_open = module._open_private_source
+
+    def swap_before_open(path, expected):
+        path.rename(original)
+        path.symlink_to(unrelated)
+        return real_open(path, expected)
+
+    monkeypatch.setattr(module, "_open_private_source", swap_before_open)
+    _must_reject(database, "SOURCE_UNAVAILABLE_OR_REPLACED")
+    assert unrelated.read_bytes() == b"do not read this target"
+
+
+def test_restore_artifacts_are_cleaned_on_success_and_rejection(tmp_path, monkeypatch):
+    import scripts.ops.verify_sqlite_restore as module
+
+    database, root = _audit(tmp_path)
+    actual_tempdir = module.tempfile.TemporaryDirectory
+    observed = []
+
+    def tracked_tempdir(*args, **kwargs):
+        temp = actual_tempdir(*args, **kwargs)
+        observed.append(Path(temp.name))
+        return temp
+
+    monkeypatch.setattr(module.tempfile, "TemporaryDirectory", tracked_tempdir)
+    assert verify_restore(
+        source=database, kernel_id="restore-example", expected_root=root
+    ).entry_count == 2
+    _must_reject(database, "EXTERNAL_ROOT_MISMATCH", expected_root="0" * 64)
+    assert len(observed) == 2
+    assert all(not folder.exists() for folder in observed)
+
+
+def test_private_source_directory_and_mode_are_required(tmp_path):
+    database, _ = _audit(tmp_path)
+    database.chmod(0o644)
+    _must_reject(database, "UNSAFE_OR_CHANGED_SOURCE")
+    database.chmod(0o600)
+    source_dir = tmp_path / "public-dir"
+    source_dir.mkdir(mode=0o755)
+    other = source_dir / "audit.sqlite3"
+    other.write_bytes(database.read_bytes())
+    other.chmod(0o600)
+    _must_reject(other, "PRIVATE_SOURCE_DIRECTORY_REQUIRED")
