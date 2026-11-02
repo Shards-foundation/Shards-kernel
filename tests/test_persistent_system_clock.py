@@ -1,7 +1,6 @@
 """Single-host persistent UTC time checkpoint across kernel process restarts."""
 
 import sqlite3
-from pathlib import Path
 
 import pytest
 
