@@ -81,9 +81,9 @@ python -m pip install -e ".[crypto]"
 shards-kernel mtls-ingress --config /absolute/path/signed-ingress.json
 ```
 
-An external bind, such as signed `listen_host="0.0.0.0"`, is
+An external bind, such as a specifically assigned signed\n`listen_host="192.0.2.44"` (documentation-only address), is
 **refused by default** and additionally requires the explicit operator
-flag `--allow-remote-listen`. The backend operator always stays on
+flag `--allow-remote-listen`. Wildcard binds are not supported. In a\nreal deployment use an actual interface address assigned to that host.\nThe backend operator always stays on
 `127.0.0.1`; never enable `allow_remote_bind` for the kernel itself.
 
 The operator signs and reviews exactly which two agent identities own
