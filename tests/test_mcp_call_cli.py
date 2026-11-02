@@ -36,7 +36,7 @@ def test_read_signed_permit_from_private_file(tmp_path):
         ('{"x":1,"x":2}', "Duplicate"),
         ("broken", "Expecting"),
         ('{"x": 1e100000}', None),
-        ("x" * (64 * 1024 + 1), "too large"),
+        ("x" * (64 * 1024 + 1), "size invalid"),
     ],
 )
 def test_invalid_permit_document_fails_closed(tmp_path, content, reason):
