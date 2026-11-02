@@ -72,6 +72,24 @@ def main() -> int:
         help="Explicit UNSIGNED local development opt-in; never use for deployed services",
     )
 
+    issuer_parser = subparsers.add_parser(
+        "issuer", help="OFFLINE operator-only signing; private key via pre-opened FD"
+    )
+    issuer_actions = issuer_parser.add_subparsers(dest="issuer_command", required=True)
+    approve = issuer_actions.add_parser("approve", help="Sign a reviewed exact permit draft")
+    approve.add_argument("--draft", required=True)
+    approve.add_argument("--out", required=True)
+    approve.add_argument("--reviewer", required=True)
+    approve.add_argument("--key-fd", required=True, type=int)
+    sign = issuer_actions.add_parser("sign", help="Issue only with a distinct approved signature")
+    sign.add_argument("--draft", required=True)
+    sign.add_argument("--approval", required=True)
+    sign.add_argument("--out", required=True)
+    sign.add_argument("--approver-public-key-hex", required=True)
+    sign.add_argument("--expected-issuer", required=True)
+    sign.add_argument("--expected-key-id", required=True)
+    sign.add_argument("--key-fd", required=True, type=int)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -96,6 +114,10 @@ def main() -> int:
         from shards_kernel.cli.service import run_service
 
         return run_service(args.config, allow_unsigned_local=args.allow_unsigned_local)
+    elif args.command == "issuer":
+        from shards_kernel.cli.issuer_command import run_issuer_command
+
+        return run_issuer_command(args)
 
     return 0
 
