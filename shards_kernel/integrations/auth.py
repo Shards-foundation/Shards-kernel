@@ -66,7 +66,7 @@ def agent_token_kdf(token: str, pepper: bytes) -> str:
     # scrypt is itself a memory-hard KDF: use a domain-separated,
     # actor-specific secret salt without a preliminary fast password hash.
     salt = (
-        b"SHARDS-AGENT-TOKEN-SCRYPT-V2\\x00"
+        b"SHARDS-AGENT-TOKEN-SCRYPT-V2\x00"
         + len(pepper).to_bytes(2, "big")
         + pepper
         + actor.encode("ascii")
