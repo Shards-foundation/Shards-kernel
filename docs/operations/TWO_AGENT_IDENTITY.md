@@ -15,11 +15,17 @@ The raw value is transferred to **one** designated agent. It must **never**
 be entered in a prompt, committed to git, logged by an LLM or embedded in
 the signed operator config.
 
-The operator records only the SHA-256 digest of each secret in the **signed**
-operator policy. Because a public digest is insufficient against guessing
-attacks, enforce high-entropy random credentials; reject human-chosen
-passwords or truncated tokens. The operator/halt credential is separate
-and remains injected into the service through `SHARDS_KERNEL_API_KEY`.
+The operator records only **HMAC-SHA256 digests** of those tokens in the
+signed policy, using a **separate operator-held, high-entropy MAC key**
+`SHARDS_KERNEL_AGENT_AUTH_PEPPER`. That pepper is not stored in the policy.
+The operator computes each lookup digest in a protected provisioning session
+using `shards_kernel.integrations.auth.agent_token_mac(token, pepper.encode())`.
+The operator injects the same pepper into the service independently of
+the signed policy. A stolen config is not sufficient to test offline
+guesses without the pepper, although token entropy must still be high.
+
+The operator/halt bearer credential is independent and supplied via
+`SHARDS_KERNEL_API_KEY`. Its token must never be shared with an agent.
 
 ### Example v2 operator configuration (public material only)
 
@@ -31,12 +37,12 @@ and remains injected into the service through `SHARDS_KERNEL_API_KEY`.
   "agents": [
     {
       "actor": "agent-alpha",
-      "token_sha256": "REPLACE_WITH_SHA256_OF_UNIQUE_HIGH_ENTROPY_ALPHA_TOKEN",
+      "token_hmac_sha256": "REPLACE_WITH_HMAC_SHA256_OF_UNIQUE_HIGH_ENTROPY_ALPHA_TOKEN",
       "allowed_tools": ["echo"]
     },
     {
       "actor": "agent-beta",
-      "token_sha256": "REPLACE_WITH_SHA256_OF_UNIQUE_HIGH_ENTROPY_BETA_TOKEN",
+      "token_hmac_sha256": "REPLACE_WITH_HMAC_SHA256_OF_UNIQUE_HIGH_ENTROPY_BETA_TOKEN",
       "allowed_tools": ["add"]
     }
   ],
@@ -52,6 +58,10 @@ and remains injected into the service through `SHARDS_KERNEL_API_KEY`.
   "port": 8765
 }
 ```
+
+The service requires the independently supplied high-entropy
+`SHARDS_KERNEL_AGENT_AUTH_PEPPER` to start in v2 mode. Changing this key
+requires signed policy re-enrollment of all agent token digests.
 
 The operator signs this configuration using the existing separate Ed25519
 operator-policy signer (`shards.operator-policy.v1` envelope). V2 is the
@@ -69,8 +79,8 @@ policy, and that bypass remains **development only**.
 ## Authorization sequence
 
 1. An agent sends `Authorization: Bearer <its-own-credential>` to
-   `POST /submit`. The server compares the SHA-256 of the presented
-   credential to all signed-config digests using constant-time comparisons.
+   `POST /submit`. The server compares the HMAC-SHA256 of the presented
+   credential (under the operator-held pepper) to all signed-config digests using constant-time comparisons.
 2. The server resolves a **single pinned actor** from the credential.
    The request's JSON `actor` must match exactly, or the service returns
    HTTP **403** before kernel execution.
@@ -93,7 +103,7 @@ reveals only minimal process status.
 
 - v1 config with a single `actor` and operator bearer still works in
   local development. V2 `agents` and v1 `actor` **cannot be mixed**.
-- V2 accepts between 2 and 16 unique actors and unique bearer digests.
+- V2 accepts between 2 and 16 unique actors and unique keyed bearer digests.
   Each agent gets a nonempty subset of the safe `echo` / `add`
   operator-wide tool list. No wallet, shell, remote code or dynamic tools.
 - This is an **operator-provisioned token registry**, not cryptographic
