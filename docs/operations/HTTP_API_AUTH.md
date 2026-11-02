@@ -69,10 +69,13 @@ again. Legitimate backwards NTP adjustments can therefore require operator
 intervention and restart. It is not a replacement for hardened time sync,
 trusted timestamping or detection across process restarts.
 
-Callers injecting their own kernel into `KernelServer`,
-`create_flask_app` or `create_fastapi_app` are responsible for passing
-a production-safe clock. The legacy `boot_strict_kernel` remains for
-deterministic tests; it must not be used to validate real-time permit expiry.
+HTTP adapters reject a supplied kernel using `VirtualClock` by
+default, preventing accidental service startup with frozen permit time.
+Deterministic integration tests can explicitly set
+`allow_test_clock=True`, which **must never be used in deployment**.
+Callers injecting other clock implementations remain responsible for
+verifying their real-time safety. The legacy `boot_strict_kernel` is
+for deterministic tests only; do not use it for permit expiry in services.
 
 ## External deployments
 
