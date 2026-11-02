@@ -1,0 +1,169 @@
+name: Publish verified release to PyPI
+
+# Matches the pending PyPI trusted publisher:
+# Shards-foundation / Shards-kernel / publish.yml / environment pypi.
+# The already published GitHub release v0.1.0 can be published using
+# Actions > Publish verified release to PyPI > Run workflow (main, tag v0.1.0).
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing, published GitHub release tag (for example v0.1.0)"
+        required: true
+        default: "v0.1.0"
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.event.release.tag_name || inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    name: Verify published GitHub release distributions
+    if: >-
+      github.repository == 'Shards-foundation/Shards-kernel' &&
+      (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'release' && github.event.release.prerelease == false)
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository with tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release identity and provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Only final semantic-version tags (vX.Y.Z) may be published" >&2
+            exit 1
+          }
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || {
+            echo "Release tag does not exist in the repository" >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" origin/main || {
+            echo "Release tag is not reachable from main" >&2
+            exit 1
+          }
+          test "$(git show "refs/tags/$RELEASE_TAG:shards_kernel/_version.py" | sed -n 's/^__version__ = "\(.*\)"/\1/p')" = "${RELEASE_TAG#v}" || {
+            echo "Git tag does not match package source version" >&2
+            exit 1
+          }
+
+      - name: Download only the existing release artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir dist \
+            --pattern 'shards_kernel-*.whl' \
+            --pattern 'shards_kernel-*.tar.gz' \
+            --pattern 'SHA256SUMS'
+          test -f dist/SHA256SUMS
+          (cd dist && sha256sum --check --strict SHA256SUMS)
+
+      - name: Verify exact artifact set and embedded package metadata
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          python - <<'PY'
+          import email
+          import os
+          from pathlib import Path
+          import re
+          import tarfile
+          import zipfile
+
+          version = os.environ["RELEASE_TAG"][1:]
+          directory = Path("dist")
+          wheel_name = f"shards_kernel-{version}-py3-none-any.whl"
+          sdist_name = f"shards_kernel-{version}.tar.gz"
+          expected = {wheel_name, sdist_name, "SHA256SUMS"}
+          actual = {path.name for path in directory.iterdir()}
+          if actual != expected:
+              raise SystemExit(f"Unexpected release artifacts: {actual ^ expected}")
+          checksums = (directory / "SHA256SUMS").read_text().splitlines()
+          referenced = []
+          for line in checksums:
+              match = re.fullmatch(r"([a-fA-F0-9]{64})  ([A-Za-z0-9._-]+)", line)
+              if not match:
+                  raise SystemExit("Malformed release checksum record")
+              referenced.append(match.group(2))
+          if len(referenced) != 2 or set(referenced) != {wheel_name, sdist_name}:
+              raise SystemExit("Release checksums do not cover exactly the intended artifacts")
+          with zipfile.ZipFile(directory / wheel_name) as wheel:
+              metadata_files = [name for name in wheel.namelist()
+                                if name.endswith(".dist-info/METADATA")]
+              if len(metadata_files) != 1:
+                  raise SystemExit("Wheel metadata is missing or ambiguous")
+              wheel_metadata = email.message_from_bytes(wheel.read(metadata_files[0]))
+          with tarfile.open(directory / sdist_name, "r:gz") as source:
+              entries = [entry for entry in source.getmembers()
+                         if entry.name.endswith("/PKG-INFO") and entry.isfile()
+                         and entry.name.count("/") == 1]
+              if len(entries) != 1:
+                  raise SystemExit("Source distribution metadata is missing or ambiguous")
+              source_metadata = email.message_from_bytes(source.extractfile(entries[0]).read())
+          for label, metadata in (("wheel", wheel_metadata), ("sdist", source_metadata)):
+              if metadata.get("Name", "").lower().replace("_", "-") != "shards-kernel":
+                  raise SystemExit(f"Unexpected {label} package name")
+              if metadata.get("Version") != version:
+                  raise SystemExit(f"Unexpected {label} package version")
+          print(f"Verified shards-kernel=={version}, wheel and sdist")
+          PY
+
+      - name: Validate release metadata
+        run: |
+          python -m pip install --disable-pip-version-check "twine>=6,<7"
+          python -m twine check dist/*.whl dist/*.tar.gz
+
+      - name: Upload checked distributions for the isolated publish job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-pypi-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI with OIDC
+    needs: verify-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/project/shards-kernel/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-pypi-distributions
+          path: dist/
+
+      - name: Publish to PyPI (trusted publishing, no API token)
+        uses: pypa/gh-action-pypi-publish@release/v1
