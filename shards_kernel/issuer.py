@@ -74,3 +74,40 @@ def sign_operator_policy(
     }
     envelope["signature_hex"] = private_key.sign(canonical_policy_payload(envelope)).hex()
     return envelope
+
+
+def sign_mtls_ingress_policy(
+    config: dict[str, Any],
+    private_key: Any,
+    *,
+    issued_at_ms: int,
+    expires_at_ms: int,
+) -> dict[str, Any]:
+    """Offline operator signature over exact mTLS ingress identity/bind policy.
+
+    The signing private key must stay in a protected operator environment;
+    never give it to a running ingress, MCP relay, agent or kernel.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from shards_kernel.integrations.mtls_ingress import canonical_ingress_policy
+
+    if not isinstance(private_key, Ed25519PrivateKey):
+        raise TypeError("Offline ingress policy requires an Ed25519 signing key")
+    if not isinstance(config, dict):
+        raise ValueError("Ingress configuration must be a JSON object")
+    if (
+        type(issued_at_ms) is not int or type(expires_at_ms) is not int
+        or issued_at_ms < 0
+        or not 0 < expires_at_ms - issued_at_ms <= 24 * 60 * 60 * 1000
+    ):
+        raise ValueError("Ingress policy validity must not exceed 24 hours")
+    envelope = {
+        "schema": "shards.mtls-ingress.v1",
+        "issued_at_ms": issued_at_ms,
+        "expires_at_ms": expires_at_ms,
+        "config": config,
+    }
+    envelope["signature_hex"] = private_key.sign(
+        canonical_ingress_policy(envelope)
+    ).hex()
+    return envelope
