@@ -142,25 +142,25 @@ def _parse_agent_identities(
     identities: list[AgentIdentity] = []
     for row in raw:
         item = _fields(
-            row, {"actor", "token_hmac_sha256", "allowed_tools"}, "Agent identity"
+            row, {"actor", "token_scrypt", "allowed_tools"}, "Agent identity"
         )
         actor = _identifier(item["actor"], "agent actor")
-        digest = item["token_hmac_sha256"]
+        digest = item["token_scrypt"]
         if (
             not isinstance(digest, str)
             or len(digest) != 64
             or any(c not in "0123456789abcdef" for c in digest)
         ):
-            raise ValueError("agent token_hmac_sha256 must be exactly 64 lowercase hex characters")
+            raise ValueError("agent token_scrypt must be exactly 64 lowercase hex characters")
         if actor in actors or digest in digests:
-            raise ValueError("Agent actors and keyed credential digests must be unique")
+            raise ValueError("Agent actors and memory-hard credential verifiers must be unique")
         agent_tools = _validated_tools(item["allowed_tools"])
         if not set(agent_tools).issubset(configured_tools):
             raise ValueError("Agent tool scope cannot exceed configured tool allowlist")
         actors.add(actor)
         digests.add(digest)
         identities.append(
-            AgentIdentity(actor=actor, token_hmac_sha256=digest, allowed_tools=frozenset(agent_tools))
+            AgentIdentity(actor=actor, token_scrypt=digest, allowed_tools=frozenset(agent_tools))
         )
     return tuple(identities)
 
