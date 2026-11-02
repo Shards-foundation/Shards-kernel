@@ -45,6 +45,16 @@ def main() -> int:
         help="Path to JSON file containing audit ledger",
     )
 
+    # A safe preflight, NOT a production readiness certificate.
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Inspect runtime prerequisites and release blockers"
+    )
+    doctor_parser.add_argument(
+        "--profile", choices=["service", "library"], default="service",
+        help="service checks gate operational rollout; library checks only local install",
+    )
+    doctor_parser.add_argument("--json", action="store_true", help="Machine-readable report")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -57,6 +67,10 @@ def main() -> int:
         return _cmd_validate(args.request_file)
     elif args.command == "replay":
         return _cmd_replay(args.ledger_file)
+    elif args.command == "doctor":
+        from shards_kernel.cli.doctor import run_doctor
+
+        return run_doctor(profile=args.profile, json_output=args.json)
 
     return 0
 

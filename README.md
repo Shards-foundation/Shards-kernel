@@ -147,6 +147,27 @@ Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
 For existing users migrating from the old `kernels` Python import path, see [the package migration guide](docs/PACKAGE_MIGRATION.md).
 
+## Operator readiness checks
+
+The `shards-kernel doctor` CLI is a **preflight inspection**, not a
+production deployment certificate. By default it checks service prerequisites,
+reports every unverified runtime guarantee, and exits **2** when operational
+readiness is not demonstrated:
+
+```bash
+shards-kernel doctor
+shards-kernel doctor --json
+shards-kernel doctor --profile library --json
+```
+
+The `library` profile checks local package prerequisites and may pass with
+exit code **0**; it does **not** imply the control plane is safely deployed.
+The `service` profile intentionally reports `NOT_VERIFIED` for issuer trust,
+durable audit/replay recovery and remote agent identity until independent
+runtime validation exists. API credentials are never printed.
+
+See [operator preflight guide](docs/operations/OPERATOR_PREFLIGHT.md).
+
 ## HTTP server authentication
 
 The HTTP server and Flask/FastAPI adapters require a configured bearer key.
