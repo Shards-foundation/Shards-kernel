@@ -16,6 +16,7 @@ except ImportError:
     HAS_FLASK = False
 
 from shards_kernel._version import __version__
+from shards_kernel.common.types import VirtualClock
 from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
     boot_service_kernel,
@@ -34,6 +35,7 @@ def create_flask_app(
     kernel_id: str = "flask-kernel",
     policy: Optional[JurisdictionPolicy] = None,
     api_key: Optional[str] = None,
+    allow_test_clock: bool = False,
 ) -> "Flask":
     """
     Create a Flask app for the kernel.
@@ -55,6 +57,9 @@ def create_flask_app(
         kernel = boot_service_kernel(kernel_id)
         if policy is not None:
             kernel.set_policy(policy)
+
+    if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
+        raise ValueError("Frozen VirtualClock is not safe for service permit expiry")
 
     # Create app
     app = Flask(__name__)
