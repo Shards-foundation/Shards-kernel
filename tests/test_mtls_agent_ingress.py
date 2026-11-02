@@ -703,3 +703,23 @@ def test_exhausted_tls_worker_capacity_rejects_and_recovers(tmp_path, monkeypatc
         for connection in stalled:
             connection.close()
         ingress.stop()
+
+
+def test_policy_expiring_during_body_parse_denies_forward(tmp_path, monkeypatch):
+    """Authority must still be live at execution, not just at admission."""
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    try:
+        expiry = setup["config"].expires_at_ms
+        samples = iter((expiry - 1, expiry + 1))
+        monkeypatch.setattr(ingress._clock, "now_ms", lambda: next(samples))
+        status, response = _https(
+            setup["ingress_port"], setup["files"]["ca"], setup["files"]["alpha"],
+            bearer=setup["alpha"],
+            payload=_body("agent-alpha", "expiry-race", "echo", {"text": "x"}),
+        )
+        assert status == 503
+        assert response["error"] == "Signed ingress policy expired"
+    finally:
+        ingress.stop()
