@@ -651,6 +651,55 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
     assert calls == ["start", "stop"]
 
 
+def test_blocking_start_interrupt_revokes_and_drains_forwarding(tmp_path, monkeypatch):
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    server_instances = []
+    forward_started = threading.Event()
+    start_returned = threading.Event()
+    start_errors = []
+
+    def interrupt_serve_forever(server):
+        server_instances.append(server)
+        assert server.begin_forward()
+        forward_started.set()
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(
+        ingress_module._BoundedTLSServer, "serve_forever", interrupt_serve_forever,
+    )
+
+    def start_blocking_ingress():
+        try:
+            ingress.start(blocking=True)
+        except BaseException as exc:
+            start_errors.append(exc)
+        finally:
+            start_returned.set()
+
+    runner = threading.Thread(target=start_blocking_ingress, daemon=True)
+    runner.start()
+    try:
+        assert forward_started.wait(2), "expected a dispatch before startup interruption"
+        server = server_instances[0]
+        can_forward = server.begin_forward()
+        if can_forward:
+            server.end_forward()
+        assert not can_forward, "interrupted startup must revoke new forwarding"
+        runner.join(timeout=0.1)
+        assert runner.is_alive(), "interrupted startup must drain active dispatches"
+    finally:
+        if server_instances:
+            server_instances[0].end_forward()
+        runner.join(timeout=5)
+        ingress.stop()
+
+    assert not runner.is_alive()
+    assert start_returned.is_set()
+    assert len(start_errors) == 1
+    assert isinstance(start_errors[0], KeyboardInterrupt)
+
+
 def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path):
     """Malformed UTF-8 and JSON exercise the loader's fail-closed error path."""
     setup = _setup(tmp_path)

@@ -648,7 +648,9 @@ class MTLSIngressServer:
                 self._thread = thread
                 thread.start()
         except BaseException:
+            server.disable_forwarding()
             server.server_close()
+            server.await_forwards()
             self._server = None
             raise
 
