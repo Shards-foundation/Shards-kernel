@@ -27,15 +27,15 @@ Repository-scoped skills in `.github/skills/<skill-name>/SKILL.md` follow
 the standard Agent Skills frontmatter format. They are **instructions
 only**, not executable permissions, signed permits or MCP gateways. Agents
 and editors with compatible skill discovery can load them on demand; other
-clients may need to point to the files explicitly. The concise [AGENTS.md](../AGENTS.md)
+clients may need to point to the files explicitly. The concise [AGENTS.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/AGENTS.md)
 explains which to choose.
 
 | Skill | Use case |
 | --- | --- |
-| [get-started](../.github/skills/get-started/SKILL.md) | Zero-secret install, offline demo and `doctor` |
-| [governed-mcp-agent](../.github/skills/governed-mcp-agent/SKILL.md) | Existing official MCP v2 local stdio relay and signed-permit client |
-| [operator-provisioning](../.github/skills/operator-provisioning/SKILL.md) | Operator policy, separated issuer/approver and audit custody |
-| [release-verification](../.github/skills/release-verification/SKILL.md) | Exact-commit checks, independent review, branch protections and acceptance |
+| [get-started](https://github.com/Shards-foundation/Shards-kernel/blob/main/.github/skills/get-started/SKILL.md) | Zero-secret install, offline demo and `doctor` |
+| [governed-mcp-agent](https://github.com/Shards-foundation/Shards-kernel/blob/main/.github/skills/governed-mcp-agent/SKILL.md) | Existing official MCP v2 local stdio relay and signed-permit client |
+| [operator-provisioning](https://github.com/Shards-foundation/Shards-kernel/blob/main/.github/skills/operator-provisioning/SKILL.md) | Operator policy, separated issuer/approver and audit custody |
+| [release-verification](https://github.com/Shards-foundation/Shards-kernel/blob/main/.github/skills/release-verification/SKILL.md) | Exact-commit checks, independent review, branch protections and acceptance |
 
 These replace **neither** the existing trusted operator documentation
 **nor** the legacy GPU optimisation `skills/*.md` prompt notes. Their
