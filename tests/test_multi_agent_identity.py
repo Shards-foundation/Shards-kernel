@@ -214,6 +214,35 @@ def test_operator_and_agent_secret_collision_is_rejected(tmp_path):
         build_operator_server(parse_operator_config(raw), api_key=alice_token, agent_pepper=pepper)
 
 
+def test_missing_authentication_mac_key_refuses_multi_agent_startup(tmp_path, monkeypatch):
+    raw, _issuer, _alice, _bob, _pepper = _setup(tmp_path)
+    monkeypatch.delenv("SHARDS_KERNEL_AGENT_AUTH_PEPPER", raising=False)
+    with pytest.raises(ValueError, match="pepper"):
+        build_operator_server(
+            parse_operator_config(raw), api_key=secrets.token_urlsafe(40)
+        )
+
+
+def test_wrong_authentication_mac_key_cannot_authenticate_any_agent(tmp_path):
+    raw, _issuer, alice, bob, _correct_pepper = _setup(tmp_path)
+    server = build_operator_server(
+        replace(parse_operator_config(raw), port=0),
+        api_key=secrets.token_urlsafe(40),
+        agent_pepper=secrets.token_urlsafe(48),
+    )
+    server.start(blocking=False)
+    try:
+        base = "http://127.0.0.1:" + str(server._server.server_address[1])
+        for token in (alice, bob):
+            status, _ = _http(
+                base + "/submit", "POST", token=token,
+                data=_payload("agent-alice", "echo", {"text": "no"}, "wrong-pepper"),
+            )
+            assert status == 401
+    finally:
+        server.stop()
+
+
 def _operator_process(config_file):
     import sys
 
