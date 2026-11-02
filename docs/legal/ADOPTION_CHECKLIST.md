@@ -1,6 +1,6 @@
 # Legal documentation — pre-adoption review checklist
 
-**Applies to:** [TERMS_OF_SERVICE.md](../../TERMS_OF_SERVICE.md) and [PRIVACY_POLICY.md](../../PRIVACY_POLICY.md)  
+**Applies to:** [TERMS_OF_SERVICE.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/TERMS_OF_SERVICE.md) and [PRIVACY_POLICY.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/PRIVACY_POLICY.md)  
 **Status:** draft documents only; NOT confirmed as adopted or legally complete.  
 **Review date:** 2 November 2026
 
@@ -8,7 +8,7 @@ These documents describe the **Shards-Kernel v0.1.x open-source Python library**
 
 ## Required release-owner checks
 
-- [ ] Confirm the contracting entity's legally registered name, registered-office address, company number, and the actual owner of the project/IP. The MIT [LICENSE](../../LICENSE) currently names *Shards Inc Ltd*. Do **not** assume the GitHub organisation *Shards-foundation* is another legal entity, or confuse the entity with similarly named registered companies.
+- [ ] Confirm the contracting entity's legally registered name, registered-office address, company number, and the actual owner of the project/IP. The MIT [LICENSE](https://github.com/Shards-foundation/Shards-kernel/blob/main/LICENSE) currently names *Shards Inc Ltd*. Do **not** assume the GitHub organisation *Shards-foundation* is another legal entity, or confuse the entity with similarly named registered companies.
 - [ ] Confirm that **shards-inc@engineer.com** is authorised and monitored for legal/privacy requests. It is currently listed as a security contact; approval for another purpose is not yet verified.
 - [ ] Confirm who is controller for contributor/support data. Document real inboxes, GitHub communications, relevant cloud providers, access roles and the data-sharing / international-transfer map.
 - [ ] Approve and operationalise a defensible retention schedule (for support, vulnerabilities, complaints, public contributions and any local hosted records). Identify record owners and deletion/backup procedures; do not state invented existing time limits.
@@ -21,8 +21,8 @@ These documents describe the **Shards-Kernel v0.1.x open-source Python library**
 
 ## Evidence checked at drafting
 
-- [MIT licence](../../LICENSE) names Shards Inc Ltd.
-- [Security policy](../../SECURITY.md) supplies the existing security contact.
+- [MIT licence](https://github.com/Shards-foundation/Shards-kernel/blob/main/LICENSE) names Shards Inc Ltd.
+- [Security policy](https://github.com/Shards-foundation/Shards-kernel/blob/main/SECURITY.md) supplies the existing security contact.
 - [Agent quickstart](../AGENT_QUICKSTART.md) and [loopback operator guidance](../operations/LOOPBACK_OPERATOR_SERVICE.md) document local-only, not-yet-production-certified operation.
 - [Two-agent identity guidance](../operations/TWO_AGENT_IDENTITY.md) documents actor identities and local SQLite audit records.
 - [Public PyPI release](https://pypi.org/project/shards-kernel/0.1.0/) is available with wheel and source distribution.
