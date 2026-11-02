@@ -6,7 +6,6 @@ HTTP server for exposing kernel functionality.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional, Type
@@ -18,6 +17,7 @@ from shards_kernel.integrations.auth import (
     AgentIdentity,
     bearer_authorized,
     identify_agent,
+    resolve_agent_pepper,
     resolve_api_key,
 )
 from shards_kernel.integrations.wire import (
@@ -40,6 +40,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     api_key: Optional[str] = None
     trusted_actor: Optional[str] = None  # Legacy single-principal operator service
     agent_identities: tuple[AgentIdentity, ...] = ()
+    agent_auth_pepper: bytes = b""
     policy_expires_at_ms: Optional[int] = None
     max_body_bytes: int = 1024 * 1024
 
@@ -61,7 +62,8 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/submit" and self.agent_identities:
             # In multi-agent mode the operator token cannot impersonate agents.
             principal = identify_agent(
-                self.headers.get("Authorization"), self.agent_identities
+                self.headers.get("Authorization"), self.agent_identities,
+                self.agent_auth_pepper,
             )
             if principal is not None:
                 self._authenticated_agent = principal
@@ -251,6 +253,7 @@ def _validate_registered_principals(
     trusted_actor: Optional[str],
     agent_identities: tuple[AgentIdentity, ...],
     operator_secret: str,
+    agent_auth_pepper: bytes,
 ) -> None:
     """Reject privilege overlap, implicit actor identity and credential reuse."""
     if trusted_actor is not None and (
@@ -272,10 +275,11 @@ def _validate_registered_principals(
         raise ValueError("Agent identities exceed strict kernel policy")
     if len({identity.actor for identity in agent_identities}) != len(agent_identities):
         raise ValueError("Duplicate agent principals")
-    if len({identity.token_sha256 for identity in agent_identities}) != len(agent_identities):
+    if len({identity.token_hmac_sha256 for identity in agent_identities}) != len(agent_identities):
         raise ValueError("Duplicate agent credentials")
-    operator_digest = hashlib.sha256(operator_secret.encode("utf-8")).hexdigest()
-    if any(identity.token_sha256 == operator_digest for identity in agent_identities):
+    if identify_agent(
+        "Bearer " + operator_secret, agent_identities, agent_auth_pepper
+    ) is not None:
         raise ValueError("Operator and agent credentials must not be shared")
 
 
@@ -302,6 +306,7 @@ class KernelServer:
         allow_test_clock: bool = False,
         trusted_actor: Optional[str] = None,
         agent_identities: tuple[AgentIdentity, ...] = (),
+        agent_auth_pepper: str | None = None,
         policy_expires_at_ms: Optional[int] = None,
     ):
         if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
@@ -312,9 +317,13 @@ class KernelServer:
         if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
             raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
         self.api_key = resolve_api_key(api_key)
+        self.agent_auth_pepper = (
+            resolve_agent_pepper(agent_auth_pepper) if agent_identities else b""
+        )
         _validate_registered_principals(
             kernel, trusted_actor=trusted_actor,
             agent_identities=agent_identities, operator_secret=self.api_key,
+            agent_auth_pepper=self.agent_auth_pepper,
         )
         if policy_expires_at_ms is not None and (
             type(policy_expires_at_ms) is not int or policy_expires_at_ms < 0
@@ -340,6 +349,7 @@ class KernelServer:
         Handler.api_key = self.api_key
         Handler.trusted_actor = self.trusted_actor
         Handler.agent_identities = self.agent_identities
+        Handler.agent_auth_pepper = self.agent_auth_pepper
         Handler.policy_expires_at_ms = self.policy_expires_at_ms
         return Handler
 
