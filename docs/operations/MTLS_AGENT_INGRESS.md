@@ -91,8 +91,8 @@ A reference *unsigned* configuration object to sign is:
 Only the trusted **offline** operator signs the object, using
 `shards_kernel.issuer.sign_mtls_ingress_policy(config, signing_key,
 issued_at_ms=..., expires_at_ms=..., revision=1)`. It creates a domain-separated
-Ed25519 envelope `shards.mtls-ingress.v2` with an explicit monotonic revision. Expiry must be at most 24
-hours. This root key should be independent of permit signing and TLS keys.
+Ed25519 envelope `shards.mtls-ingress.v2` with an explicit monotonic revision.
+Expiry must be at most 24 hours. This root key should be independent of permit signing and TLS keys.
 
 The ingress service receives **only** the independently pinned
 `SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX` and the signed JSON file.
@@ -103,9 +103,12 @@ python -m pip install -e ".[crypto]"
 shards-kernel mtls-ingress --config /absolute/path/signed-ingress.json
 ```
 
-An external bind, such as a specifically assigned signed\n`listen_host="192.0.2.44"` (documentation-only address), is
+An external bind, such as a specifically assigned signed
+`listen_host="192.0.2.44"` (documentation-only address), is
 **refused by default** and additionally requires the explicit operator
-flag `--allow-remote-listen`. **Legacy v1 envelopes are rejected for remote binds even with this flag.** Wildcard binds are not supported. In a\nreal deployment use an actual interface address assigned to that host.\nThe backend operator always stays on
+flag `--allow-remote-listen`. **Legacy v1 envelopes are rejected for remote binds even with this flag.** Wildcard binds are not supported. In a
+real deployment use an actual interface address assigned to that host.
+The backend operator always stays on
 `127.0.0.1`; never enable `allow_remote_bind` for the kernel itself.
 
 The operator signs and reviews exactly which two agent identities own
@@ -150,14 +153,16 @@ but is **not pinned**. The test proves:
   checkpoint. This is **not externally anchored**: a privileged actor who
   restores an old policy and its old checkpoint database together can evade
   local rollback detection. A trusted external anti-rollback anchor and
-  safe recovery/rotation operations remain P0 work.
+  safe recovery/rotation operations remain P0 work. The runtime's checkpoint
+  validation uses explicit exceptions (not Python assertions), and the test
+  suite verifies it remains fail-closed under Python's optimised `-O` mode.
 - The reference ingress now admits at most 32 concurrent TLS connections,
   performs TLS handshakes in bounded worker threads (3-second handshake
   timeout), applies a 3-second socket-read timeout, and enforces separate
   8-second monotonic aggregate deadlines for HTTP request-line/header parsing
   **and** request-body receipt. Each blocked byte read is bounded by the
-  remaining deadline, so slow clients cannot reset the budget indefinitely. Excess connections are closed before
-  HTTP handling. These are **local resource bounds**, not a substitute for
+  remaining deadline, so slow clients cannot reset the budget indefinitely.
+  Excess connections are closed before HTTP handling. These are **local resource bounds**, not a substitute for
   network-edge connection controls, a DDoS service or independently measured
   throughput under attack.
 - No network segmentation proof, vulnerability assessment under hostile
