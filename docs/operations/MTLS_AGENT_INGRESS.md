@@ -126,6 +126,13 @@ but is **not pinned**. The test proves:
   not implemented; operator certificate pin removal/re-signing is manual.
 - There is no signed monotonic ingress-policy revision high-water mark;
   the short expiry and pinned root do not provide external anti-rollback.
+- The reference ingress now admits at most 32 concurrent TLS connections,
+  performs TLS handshakes in bounded worker threads (3-second handshake
+  timeout), applies a 3-second socket-read timeout, and enforces an 8-second
+  aggregate request-body deadline. Excess connections are closed before
+  HTTP handling. These are **local resource bounds**, not a substitute for
+  network-edge connection controls, a DDoS service or independently measured
+  throughput under attack.
 - No network segmentation proof, vulnerability assessment under hostile
   network load, production rate limits, DDoS controls, host hardening,
   real deployment, SLO measurement or remote two-OS-host verification.
