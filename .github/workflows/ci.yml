@@ -32,6 +32,10 @@ jobs:
           pip install -e ".[dev]"
           pip install build
 
+      - name: Install optional MCP SDK v2 on Python 3.11+
+        if: matrix.python-version == '3.11' || matrix.python-version == '3.12'
+        run: pip install -e ".[mcp]"
+
       - name: Ruff lint
         run: ruff check . --select E,F --ignore E501
 
