@@ -212,3 +212,20 @@ Release work remains in
 [issue #79](https://github.com/Shards-foundation/Shards-kernel/issues/79),
 [issue #64](https://github.com/Shards-foundation/Shards-kernel/issues/64) and
 [issue #63](https://github.com/Shards-foundation/Shards-kernel/issues/63).
+
+
+## Checkpoint SQLite connection lifecycle (security hardening)
+
+The signed v2 ingress opens a transaction when checking every authenticated
+request. SQLite's Python connection context manager **does not automatically
+close its file descriptor**; it only commits or rolls back. The checkpoint
+helper now wraps every transaction with explicit connection closure on
+successful verification, bootstrap, revision advancement and failures.
+Repeated authentication must not depend on cyclic garbage collection to
+release descriptor capacity. Regression coverage retains 125+ live
+connection references to prove that all SQLite handles were explicitly
+closed before another request.
+
+This mitigates local file-descriptor exhaustion, **not** hostile network
+load or upstream denial-of-service: admission limits, deadline enforcement,
+network firewalls and platform monitoring remain independent release gates.
