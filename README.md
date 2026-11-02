@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/Shards-kernel)
+[![PyPI](https://img.shields.io/pypi/v/shards-kernel.svg)](https://pypi.org/project/shards-kernel/)
 
 A **kernel** is a deterministic state machine that governs AI agent execution via **jurisdiction**, **fail-closed arbitration**, and an **append-only hash-chained audit ledger**.
 
@@ -125,11 +126,12 @@ Variants tune posture while preserving invariants:
 The PyPI distribution name is `shards-kernel`, the import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install shards-kernel  # after the approved PyPI release
+python -m pip install "shards-kernel==0.1.0"
 python -c "import shards_kernel"
+shards-kernel --help
 ```
 
-A verified PyPI release is pending. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face. Do **not** install `kernels` when intending to install Shards-Kernel. Until the approved release, install this repository from GitHub:
+**Version 0.1.0 is published on [PyPI](https://pypi.org/project/shards-kernel/0.1.0/)** via GitHub OIDC Trusted Publishing, with verified wheel and source distributions. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
