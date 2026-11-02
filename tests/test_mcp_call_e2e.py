@@ -31,7 +31,6 @@ def test_agent_cli_executes_real_signed_mcp_once_and_denies_replay(
 
     # The agent only holds its separately enrolled token. The trusted policy
     # issuer/permit signing keys remain in the separate test parent.
-    monkeypatch.setenv("SHARDS_KERNEL_AGENT_TOKEN", alpha)
     command = [
         "--port", str(config["port"]),
         "--tool", "echo",
@@ -39,6 +38,8 @@ def test_agent_cli_executes_real_signed_mcp_once_and_denies_replay(
         "--permit-file", str(permit_path),
     ]
     service = _start_service(policy, "http://127.0.0.1:" + str(config["port"]))
+    # Inject the agent credential only after the operator process has spawned.
+    monkeypatch.setenv("SHARDS_KERNEL_AGENT_TOKEN", alpha)
     try:
         assert main(command) == 0
         allowed = json.loads(capsys.readouterr().out)
