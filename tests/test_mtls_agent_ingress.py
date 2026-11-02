@@ -608,7 +608,24 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
     )
     with pytest.raises(ValueError, match="explicit"):
         MTLSIngressServer(config)
-    ingress = MTLSIngressServer(config, allow_remote_listen=True)
+    with pytest.raises(ValueError, match="versioned"):
+        MTLSIngressServer(config, allow_remote_listen=True)
+    # Remote access requires v2 signed revision + a private local checkpoint.
+    import sqlite3
+    checkpoint = tmp_path / "ingress-checkpoint.sqlite3"
+    with sqlite3.connect(checkpoint):
+        pass
+    checkpoint.chmod(0o600)
+    raw["ingress_id"] = "remote-test"
+    raw["checkpoint_db_file"] = str(checkpoint)
+    signed_v2 = sign_mtls_ingress_policy(
+        raw, setup["ingress_key"], issued_at_ms=now - 1_000,
+        expires_at_ms=now + 60_000, revision=1,
+    )
+    v2 = verify_ingress_policy(
+        signed_v2, pinned_public_key_hex=setup["pinned"], now_ms=now,
+    )
+    ingress = MTLSIngressServer(v2, allow_remote_listen=True)
     assert ingress.config.listen_host == "192.0.2.99"
 
     import shards_kernel.integrations.mtls_ingress as module
