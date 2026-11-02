@@ -177,6 +177,20 @@ It limits signed capabilities to single-execution, short-lived built-in
 [offline issuer guide](docs/operations/OFFLINE_ISSUER.md) for exact
 commands, approval steps, threats and limitations.
 
+## Certificate-pinned HTTPS ingress for remote agent transport
+
+The optional `shards-kernel mtls-ingress --config <signed-ingress.json>`
+provides a separate TLS 1.3 mutual-authentication boundary. It validates
+an offline Ed25519-signed ingress policy and two or more pinned client
+certificate fingerprints before forwarding **only** governed submissions
+to the existing loopback operator. Each request still requires its own
+enrolled agent bearer and separate signed execution permit. Administrative
+halt/evidence/status/policy routes are not forwarded.
+
+**This is a restricted HTTPS reference, NOT a native network MCP server,
+deployed gateway or production approval.** See the
+[mTLS agent ingress runbook](docs/operations/MTLS_AGENT_INGRESS.md).
+
 ## Official MCP SDK v2 multi-agent local relay
 
 `shards-kernel mcp-relay --port <local-operator-port>` exposes a single

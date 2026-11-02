@@ -1,0 +1,423 @@
+"""Pinned-certificate mTLS ingress for the existing loopback-only operator.
+
+Only POST /submit is forwarded. Client identity requires BOTH an mTLS client
+certificate pinned by an independently signed ingress policy and a distinct
+agent bearer verified by the signed operator. No administrator endpoints,
+arbitrary destinations, shell tools, agent signing keys or MCP protocol
+framing exist at this boundary. This is an HTTPS transport increment, NOT a
+native remote MCP endpoint and NOT a production deployment certificate.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import http.client
+import ipaddress
+import json
+import os
+import ssl
+import threading
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+from shards_kernel.cli.service import _reject_constant, _unique_pairs
+from shards_kernel.common.time import SystemClock
+
+_DOMAIN = b"SHARDS-MTLS-INGRESS-V1\x00"
+_MAX_CONFIG_BYTES = 96 * 1024
+_MAX_BODY_BYTES = 64 * 1024
+_MAX_RESPONSE_BYTES = 64 * 1024
+_MAX_POLICY_MS = 24 * 60 * 60 * 1000
+
+
+@dataclass(frozen=True)
+class SignedIngressConfig:
+    listen_host: str
+    listen_port: int
+    operator_port: int
+    tls_cert_file: Path
+    tls_key_file: Path
+    client_ca_file: Path
+    cert_actors: dict[str, str]
+    expires_at_ms: int
+
+
+def _fields(value: Any, expected: set[str]) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("Ingress policy contains unexpected or missing fields")
+    return value
+
+
+def _path(value: Any) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError("TLS files must be existing absolute regular files")
+    path = Path(value)
+    if not path.is_absolute() or not path.is_file() or path.is_symlink():
+        raise ValueError("TLS files must be existing absolute regular files")
+    return path
+
+
+def _port(value: Any) -> int:
+    if type(value) is not int or not 1 <= value <= 65535:
+        raise ValueError("Ingress ports must be valid integers")
+    return value
+
+
+def _actor(value: Any) -> str:
+    if (
+        not isinstance(value, str) or not 1 <= len(value) <= 128
+        or not value.isascii()
+        or not all(ch.isalnum() or ch in "-_" for ch in value)
+    ):
+        raise ValueError("Certificate identities must be restricted agent names")
+    return value
+
+
+def canonical_ingress_policy(envelope: dict[str, Any]) -> bytes:
+    """Domain-separated, deterministic bytes signed by an OFFLINE operator."""
+    fields = {
+        key: envelope[key]
+        for key in ("schema", "issued_at_ms", "expires_at_ms", "config")
+    }
+    return _DOMAIN + json.dumps(
+        fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _validate_envelope(record: Any, public_key_hex: str, now_ms: int) -> dict[str, Any]:
+    """Authenticate the envelope before reading any referenced TLS files."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    obj = _fields(record, {
+        "schema", "issued_at_ms", "expires_at_ms", "config", "signature_hex",
+    })
+    if obj["schema"] != "shards.mtls-ingress.v1":
+        raise ValueError("Unrecognised ingress protocol")
+    issued, expires = obj["issued_at_ms"], obj["expires_at_ms"]
+    if (
+        type(issued) is not int or type(expires) is not int
+        or issued < 0 or not 0 < expires - issued <= _MAX_POLICY_MS
+        or type(now_ms) is not int or not issued <= now_ms <= expires
+    ):
+        raise ValueError("Ingress policy expired, future-dated or too long")
+    if (
+        not isinstance(public_key_hex, str) or len(public_key_hex) != 64
+        or any(ch not in "0123456789abcdef" for ch in public_key_hex)
+    ):
+        raise ValueError("An independently pinned Ed25519 trust root is required")
+    signature = obj["signature_hex"]
+    if (
+        not isinstance(signature, str) or len(signature) != 128
+        or any(ch not in "0123456789abcdef" for ch in signature)
+    ):
+        raise ValueError("Malformed ingress policy signature")
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex)).verify(
+            bytes.fromhex(signature), canonical_ingress_policy(obj)
+        )
+    except (InvalidSignature, ValueError, TypeError) as exc:
+        raise ValueError("Ingress policy signature invalid") from exc
+    return obj
+
+
+def _pinned_cert_actors(value: Any) -> dict[str, str]:
+    if not isinstance(value, list) or not 2 <= len(value) <= 16:
+        raise ValueError("Ingress policy requires two to sixteen pinned agent certificates")
+    fingerprints: dict[str, str] = {}
+    actors: set[str] = set()
+    for entry in value:
+        agent = _fields(entry, {"actor", "client_cert_sha256"})
+        actor = _actor(agent["actor"])
+        digest = agent["client_cert_sha256"]
+        if (
+            not isinstance(digest, str) or len(digest) != 64
+            or any(ch not in "0123456789abcdef" for ch in digest)
+        ):
+            raise ValueError("Client certificate fingerprint must be 64 lowercase hex characters")
+        if actor in actors or digest in fingerprints:
+            raise ValueError("Duplicated client certificate identity")
+        fingerprints[digest] = actor
+        actors.add(actor)
+    return fingerprints
+
+
+def _listen_ip(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("Ingress listener must be an explicit IPv4 address")
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise ValueError("Ingress listener must be an explicit IPv4 address") from exc
+    if address.version != 4 or address.is_multicast or address.is_unspecified:
+        raise ValueError("Wildcard, multicast and IPv6 listeners are not supported")
+    return value
+
+
+def verify_ingress_policy(
+    envelope: Any, *, pinned_public_key_hex: str, now_ms: int
+) -> SignedIngressConfig:
+    """Verify signature and exact TLS identity policy before network binding."""
+    obj = _validate_envelope(envelope, pinned_public_key_hex, now_ms)
+    raw = _fields(obj["config"], {
+        "listen_host", "listen_port", "operator_port", "tls_cert_file",
+        "tls_key_file", "client_ca_file", "agents",
+    })
+    return SignedIngressConfig(
+        listen_host=_listen_ip(raw["listen_host"]),
+        listen_port=_port(raw["listen_port"]),
+        operator_port=_port(raw["operator_port"]),
+        tls_cert_file=_path(raw["tls_cert_file"]),
+        tls_key_file=_path(raw["tls_key_file"]),
+        client_ca_file=_path(raw["client_ca_file"]),
+        cert_actors=_pinned_cert_actors(raw["agents"]),
+        expires_at_ms=obj["expires_at_ms"],
+    )
+
+
+def load_ingress_policy(
+    path: str, *, pinned_public_key_hex: str, now_ms: int
+) -> SignedIngressConfig:
+    file = Path(path)
+    if not file.is_file() or file.is_symlink() or file.stat().st_size > _MAX_CONFIG_BYTES:
+        raise ValueError("Ingress policy file invalid or too large")
+    with file.open("rb") as stream:
+        data = stream.read(_MAX_CONFIG_BYTES + 1)
+    if len(data) > _MAX_CONFIG_BYTES:
+        raise ValueError("Ingress policy file too large")
+    try:
+        parsed = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_unique_pairs,
+            parse_constant=_reject_constant,
+            parse_float=_reject_float,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid ingress policy JSON") from exc
+    return verify_ingress_policy(
+        parsed, pinned_public_key_hex=pinned_public_key_hex, now_ms=now_ms
+    )
+
+
+def _reject_float(_unused: str) -> None:
+    raise ValueError("Floating point policy values are not supported")
+
+
+def _tls_context(config: SignedIngressConfig) -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_3
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_cert_chain(str(config.tls_cert_file), str(config.tls_key_file))
+    context.load_verify_locations(cafile=str(config.client_ca_file))
+    return context
+
+
+class _IngressHandler(BaseHTTPRequestHandler):
+    """Per-connection client certificate and token binding before forwarding."""
+
+    protocol_version = "HTTP/1.1"
+    config: SignedIngressConfig
+    clock: SystemClock
+
+    def _reply(self, status: int, data: dict[str, Any]) -> None:
+        body = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
+    def do_GET(self) -> None:
+        self._reply(404, {"error": "Not found"})
+
+    def do_OPTIONS(self) -> None:
+        self._reply(405, {"error": "Method not allowed"})
+
+    def _policy_safe(self) -> bool:
+        try:
+            if self.clock.now_ms() > self.config.expires_at_ms:
+                self._reply(503, {"error": "Signed ingress policy expired"})
+                return False
+        except Exception:
+            self._reply(503, {"error": "Ingress clock unavailable"})
+            return False
+        return True
+
+    def _authenticated_principal(self) -> tuple[str, str] | None:
+        leaf = self.connection.getpeercert(binary_form=True)
+        if not leaf:
+            self._reply(403, {"error": "Missing authenticated client certificate"})
+            return None
+        actor = self.config.cert_actors.get(hashlib.sha256(leaf).hexdigest())
+        if actor is None:
+            self._reply(403, {"error": "Client certificate not enrolled"})
+            return None
+        headers = self.headers.get_all("Authorization", [])
+        if len(headers) != 1 or not headers[0].startswith("Bearer "):
+            self._reply(401, {"error": "Missing agent credential"})
+            return None
+        bearer = headers[0]
+        if not bearer.startswith("Bearer " + actor + "."):
+            self._reply(403, {"error": "Certificate and bearer principal mismatch"})
+            return None
+        return actor, bearer
+
+    def _governed_body(self, actor: str) -> tuple[bytes, dict[str, Any]] | None:
+        try:
+            if self.headers.get_all("Transfer-Encoding", []):
+                raise ValueError("Transfer encoding not accepted")
+            length_headers = self.headers.get_all("Content-Length", [])
+            if len(length_headers) != 1:
+                raise ValueError("Request length missing")
+            length = int(length_headers[0])
+            if length <= 0 or length > _MAX_BODY_BYTES:
+                raise ValueError("Invalid request size")
+            if self.headers.get("Content-Type") != "application/json":
+                raise ValueError("JSON content type required")
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError("Truncated request")
+            payload = json.loads(
+                body.decode("utf-8"),
+                object_pairs_hook=_unique_pairs,
+                parse_constant=_reject_constant,
+                parse_float=_reject_float,
+            )
+        except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+            self._reply(400, {"error": "Invalid governed request"})
+            return None
+        if not isinstance(payload, dict) or payload.get("actor") != actor:
+            self._reply(403, {"error": "Certificate and request principal mismatch"})
+            return None
+        call = payload.get("tool_call")
+        if not isinstance(call, dict) or call.get("name") not in {"echo", "add"}:
+            self._reply(403, {"error": "Tool not available at ingress"})
+            return None
+        return body, payload
+
+    def _submit_to_operator(
+        self, body: bytes, payload: dict[str, Any], bearer: str
+    ) -> None:
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", self.config.operator_port, timeout=3
+        )
+        try:
+            conn.request(
+                "POST", "/submit", body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": bearer,
+                },
+            )
+            response = conn.getresponse()
+            data = response.read(_MAX_RESPONSE_BYTES + 1)
+            if len(data) > _MAX_RESPONSE_BYTES:
+                raise ValueError("Oversized operator response")
+            if response.status not in {200, 400, 401, 403, 413, 503}:
+                raise ValueError("Unexpected operator response")
+            receipt = json.loads(data.decode("utf-8"))
+            if not isinstance(receipt, dict):
+                raise ValueError("Invalid operator response")
+            if response.status == 200 and receipt.get("request_id") != payload.get("request_id"):
+                raise ValueError("Uncorrelated operator receipt")
+            self._reply(response.status, receipt)
+        except (OSError, ValueError, http.client.HTTPException, UnicodeError):
+            self._reply(502, {"error": "Local operator unavailable"})
+        finally:
+            conn.close()
+
+    def do_POST(self) -> None:
+        if self.path != "/submit":
+            self._reply(404, {"error": "Not found"})
+            return
+        if not self._policy_safe():
+            return
+        principal = self._authenticated_principal()
+        if principal is None:
+            return
+        actor, bearer = principal
+        result = self._governed_body(actor)
+        if result is None:
+            return
+        body, payload = result
+        self._submit_to_operator(body, payload, bearer)
+
+    # BaseHTTPRequestHandler requires the parameter name 'format' in its API.
+    def log_message(self, format: str, *args: Any) -> None:  # pylint: disable=redefined-builtin
+        """Never log request paths, bearer material or payloads."""
+        return
+
+
+def _make_handler(config: SignedIngressConfig, clock: SystemClock):
+    class BoundHandler(_IngressHandler):
+        pass
+
+    BoundHandler.config = config
+    BoundHandler.clock = clock
+    return BoundHandler
+
+
+class MTLSIngressServer:
+    """Isolated HTTPS/mTLS ingress. Never launches or signs for the kernel."""
+
+    def __init__(
+        self, config: SignedIngressConfig, *, allow_remote_listen: bool = False
+    ) -> None:
+        if config.listen_host != "127.0.0.1" and not allow_remote_listen:
+            raise ValueError("Remote interface requires explicit operator opt-in")
+        self.config = config
+        self._clock = SystemClock()
+        self._context = _tls_context(config)
+        self._server: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+
+    def start(self, *, blocking: bool = True) -> None:
+        server = ThreadingHTTPServer(
+            (self.config.listen_host, self.config.listen_port),
+            _make_handler(self.config, self._clock),
+        )
+        server.daemon_threads = True
+        server.socket = self._context.wrap_socket(server.socket, server_side=True)
+        self._server = server
+        if blocking:
+            server.serve_forever()
+        else:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            self._thread = thread
+            thread.start()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
+
+
+def run_mtls_ingress(config_path: str, *, allow_remote_listen: bool = False) -> int:
+    """Start only after checking the out-of-band signed ingress policy."""
+    try:
+        pinned = os.environ.get("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", "")
+        config = load_ingress_policy(
+            config_path, pinned_public_key_hex=pinned,
+            now_ms=SystemClock().now_ms(),
+        )
+        ingress = MTLSIngressServer(config, allow_remote_listen=allow_remote_listen)
+        try:
+            ingress.start(blocking=True)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            ingress.stop()
+        return 0
+    except Exception:
+        print("mTLS ingress refused startup or failed; verify trusted operator configuration")
+        return 2
