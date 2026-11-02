@@ -50,8 +50,18 @@ class StrictE2EGate:
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+def supported_environment(
+    python_version: tuple[int, ...] | None = None,
+    platform: str | None = None,
+) -> bool:
+    """Explicitly gate the supported OS/runtime, independently testable in CI."""
+    version = sys.version_info if python_version is None else python_version
+    current_platform = sys.platform if platform is None else platform
+    return version >= (3, 11) and current_platform == "linux"
+
+
 def main() -> int:
-    if sys.version_info < (3, 11) or sys.platform != "linux":
+    if not supported_environment():
         print("E2E release gate requires Linux and Python 3.11+", file=sys.stderr)
         return 2
 
