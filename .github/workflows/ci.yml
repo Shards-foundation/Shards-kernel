@@ -78,8 +78,20 @@ jobs:
             --cov-report=json:coverage.json \
             --cov-fail-under=90
 
-      - name: Enforce measured coverage threshold independently
-        run: python -m coverage report --fail-under=90
+      - name: Enforce exact measured coverage threshold independently
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import sys
+
+          with open("coverage.json", encoding="utf-8") as report:
+              percent = float(json.load(report)["totals"]["percent_covered"])
+          print(f"Unrounded branch-aware coverage: {percent:.6f}%")
+          if not math.isfinite(percent) or percent < 90.0:
+              print("CI hard failure: measured coverage below 90%", file=sys.stderr)
+              sys.exit(1)
+          PY
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
