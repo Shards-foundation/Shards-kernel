@@ -1,6 +1,5 @@
 """Two independent local agent credentials: no actor or tool impersonation."""
 
-import hashlib
 import json
 import multiprocessing
 import os
@@ -15,7 +14,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from shards_kernel.cli.service import build_operator_server, parse_operator_config
-from shards_kernel.integrations.auth import AgentIdentity, identify_agent
+from shards_kernel.integrations.auth import AgentIdentity, agent_token_mac, identify_agent
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_operator_policy, sign_v2_permit
 from shards_kernel.permits import PermitBuilder
@@ -24,6 +23,7 @@ from shards_kernel.permits import PermitBuilder
 def _setup(tmp_path):
     issuer = Ed25519PrivateKey.generate()
     alice_token, bob_token = secrets.token_urlsafe(40), secrets.token_urlsafe(40)
+    pepper = secrets.token_urlsafe(48)
     config = {
         "version": 2,
         "kernel_id": "multiagent-kernel",
@@ -31,12 +31,12 @@ def _setup(tmp_path):
         "agents": [
             {
                 "actor": "agent-alice",
-                "token_sha256": hashlib.sha256(alice_token.encode()).hexdigest(),
+                "token_hmac_sha256": agent_token_mac(alice_token, pepper.encode()),
                 "allowed_tools": ["echo"],
             },
             {
                 "actor": "agent-bob",
-                "token_sha256": hashlib.sha256(bob_token.encode()).hexdigest(),
+                "token_hmac_sha256": agent_token_mac(bob_token, pepper.encode()),
                 "allowed_tools": ["add"],
             },
         ],
@@ -49,7 +49,7 @@ def _setup(tmp_path):
         "audit_db": str(tmp_path / "multi-audit.sqlite3"),
         "port": 8124,
     }
-    return config, issuer, alice_token, bob_token
+    return config, issuer, alice_token, bob_token, pepper
 
 
 def _permit(issuer, actor, action, params):
@@ -94,10 +94,10 @@ def _http(base, method="GET", *, token=None, data=None):
 
 
 def test_two_agents_have_disjoint_credentials_and_scopes_with_replay(tmp_path):
-    raw, issuer, alice_token, bob_token = _setup(tmp_path)
+    raw, issuer, alice_token, bob_token, pepper = _setup(tmp_path)
     config = replace(parse_operator_config(raw), port=0)
     admin = secrets.token_urlsafe(40)
-    server = build_operator_server(config, api_key=admin)
+    server = build_operator_server(config, api_key=admin, agent_pepper=pepper)
     assert server.trusted_actor is None
     assert len(server.agent_identities) == 2
     assert server.kernel._keyring == {}
@@ -169,15 +169,15 @@ def test_two_agents_have_disjoint_credentials_and_scopes_with_replay(tmp_path):
     "single_agent", "actor_v1_mixed", "unsupported_version",
 ])
 def test_invalid_agent_enrolment_rejected(tmp_path, variant):
-    raw, _issuer, _alice, _bob = _setup(tmp_path)
+    raw, _issuer, _alice, _bob, _pepper = _setup(tmp_path)
     if variant == "duplicate_actor":
         raw["agents"][1]["actor"] = "agent-alice"
     elif variant == "duplicate_digest":
-        raw["agents"][1]["token_sha256"] = raw["agents"][0]["token_sha256"]
+        raw["agents"][1]["token_hmac_sha256"] = raw["agents"][0]["token_hmac_sha256"]
     elif variant == "wildcard_actor":
         raw["agents"][0]["actor"] = "*"
     elif variant == "invalid_digest":
-        raw["agents"][0]["token_sha256"] = "not-a-digest"
+        raw["agents"][0]["token_hmac_sha256"] = "not-a-digest"
     elif variant == "raw_secret":
         raw["agents"][0]["token"] = "forbidden"
     elif variant == "unknown_tool":
@@ -195,23 +195,23 @@ def test_invalid_agent_enrolment_rejected(tmp_path, variant):
 
 
 def test_principal_resolution_does_not_accept_tokens_with_whitespace_or_truncation(tmp_path):
-    raw, _issuer, alice_token, bob_token = _setup(tmp_path)
+    raw, _issuer, alice_token, bob_token, pepper = _setup(tmp_path)
     principals = parse_operator_config(raw).agents
-    assert identify_agent("Bearer " + alice_token, principals).actor == "agent-alice"
-    assert identify_agent("Bearer " + bob_token, principals).actor == "agent-bob"
+    assert identify_agent("Bearer " + alice_token, principals, pepper.encode()).actor == "agent-alice"
+    assert identify_agent("Bearer " + bob_token, principals, pepper.encode()).actor == "agent-bob"
     for header in (
         "Basic " + alice_token, alice_token, "Bearer " + alice_token + " ",
         "Bearer " + alice_token[:-1], "Bearer ", None,
     ):
-        assert identify_agent(header, principals) is None
+        assert identify_agent(header, principals, pepper.encode()) is None
     assert all(isinstance(p, AgentIdentity) for p in principals)
-    assert all(p.token_sha256 not in (alice_token, bob_token) for p in principals)
+    assert all(p.token_hmac_sha256 not in (alice_token, bob_token) for p in principals)
 
 
 def test_operator_and_agent_secret_collision_is_rejected(tmp_path):
-    raw, _issuer, alice_token, _bob_token = _setup(tmp_path)
+    raw, _issuer, alice_token, _bob_token, pepper = _setup(tmp_path)
     with pytest.raises(ValueError, match="credentials must not be shared"):
-        build_operator_server(parse_operator_config(raw), api_key=alice_token)
+        build_operator_server(parse_operator_config(raw), api_key=alice_token, agent_pepper=pepper)
 
 
 def _operator_process(config_file):
@@ -262,7 +262,7 @@ def _kill(process):
 def test_signed_two_agent_cli_survives_restart_and_preserves_separation(
     tmp_path, monkeypatch
 ):
-    raw, permit_issuer, alice_token, bob_token = _setup(tmp_path)
+    raw, permit_issuer, alice_token, bob_token, pepper = _setup(tmp_path)
     raw["port"] = _free_loopback_port()
     policy_issuer = Ed25519PrivateKey.generate()
     now = int(time.time() * 1000)
@@ -274,6 +274,7 @@ def test_signed_two_agent_cli_survives_restart_and_preserves_separation(
     path.write_text(json.dumps(signed))
     operator_secret = secrets.token_urlsafe(40)
     monkeypatch.setenv("SHARDS_KERNEL_API_KEY", operator_secret)
+    monkeypatch.setenv("SHARDS_KERNEL_AGENT_AUTH_PEPPER", pepper)
     monkeypatch.setenv(
         "SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX",
         policy_issuer.public_key().public_bytes_raw().hex(),
