@@ -109,3 +109,22 @@ handles. This preserves real-process evidence for missing, skipped, xfailed,
 xpassed, failed and successful scenario variants without creating a command
 injection surface in the test harness. It does not permit downstream code
 execution beyond the explicitly synthesised test fixture.
+
+
+## Tagged release gate (v* tags)
+
+The versioned release workflow `.github/workflows/release.yml` now refuses
+release candidates that have weaker tests than ordinary pull requests. It
+installs the official optional MCP SDK on Python 3.12, executes the same
+mandatory four-scenario **real-process E2E gate**, runs the complete suite with
+branch coverage (including the E2E runner) at **>=90%**, and independently
+checks the **unrounded** JSON percentage. Release builds also verify wheel and
+source distribution SHA-256 checksums before archiving the artifacts. The
+release tag must match the installed distribution version exactly.
+
+The tag workflow remains **pre-publication**: it uploads validated artifacts
+to GitHub Actions and deliberately does NOT publish a PyPI package, create a
+GitHub Release, or deploy services. Checksums are useful for transport
+integrity but are **not** cryptographic release signing, independent
+attestation or provenance. Require protected main, signed provenance and a
+separate staged deployment approval before any public publication.
