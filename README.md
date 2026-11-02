@@ -177,6 +177,20 @@ It limits signed capabilities to single-execution, short-lived built-in
 [offline issuer guide](docs/operations/OFFLINE_ISSUER.md) for exact
 commands, approval steps, threats and limitations.
 
+## Official MCP SDK v2 multi-agent local relay
+
+`shards-kernel mcp-relay --port <local-operator-port>` exposes a single
+`governed_execute` tool over the **official MCP v2 stdio transport**. It
+bridges a separately enrolled agent's bearer into the signed-policy HTTP
+operator on loopback, which enforces actor identity, tool scope and a
+separate Ed25519 permit. Two independent MCP stdio clients can use
+distinct credentials without holding operator privileges.
+
+Requires `shards-kernel[mcp,crypto]` on Python 3.11+ and one
+`SHARDS_KERNEL_AGENT_TOKEN` securely injected per local MCP client.
+**No remote MCP/OIDC/mTLS or financial tools have been implemented.**
+See [two-agent MCP operator guide](docs/operations/MCP_TWO_AGENT_RELAY.md).
+
 ## Two-agent identity boundary (local reference)
 
 A signed **operator config v2** can enroll 2–16 separate agents, each
