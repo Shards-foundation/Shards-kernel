@@ -101,15 +101,20 @@ def bootstrap_ingress_checkpoint(
 
 
 def checkpoint_ingress_revision(
-    path: Path, *, ingress_id: str, revision: int, digest: str
+    path: Path, *, ingress_id: str, revision: int, digest: str,
+    activate: bool = True,
 ) -> tuple[int, int]:
-    """Atomically advance an already enrolled signed revision.
+    """Validate a signed revision; optionally activate it transactionally.
 
-    Missing tables/rows are fatal. Only offline operator bootstrap may
-    establish the first trusted checkpoint. Do not recover a deleted
-    checkpoint automatically: require explicit, independently verified
-    recovery authority.
+    Preflight callers MUST use activate=False: merely constructing an ingress
+    instance cannot change persistent policy authority before its TLS files
+    validate and its listener successfully binds. The start() path uses the
+    default activate=True *after* the listener socket has bound but *before*
+    any request handling begins. Existing rows/identity are always required;
+    missing or replaced state fails closed, with no implicit enrolment.
     """
+    if type(activate) is not bool:
+        raise ValueError("Ingress activation must be a boolean")
     identity = _check_inputs(path, ingress_id, revision, digest)
     try:
         with _connect_existing(path) as db:
@@ -129,7 +134,7 @@ def checkpoint_ingress_revision(
                 or (revision == row[0] and digest != row[1])
             ):
                 raise ValueError("Ingress policy revision rollback or digest substitution")
-            if revision > row[0]:
+            if activate and revision > row[0]:
                 db.execute(
                     "UPDATE ingress_policy_checkpoint SET revision=?, digest=? WHERE ingress_id=?",
                     (revision, digest, ingress_id),
