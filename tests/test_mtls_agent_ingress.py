@@ -642,3 +642,64 @@ def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path)
             load_ingress_policy(
                 str(path), pinned_public_key_hex=setup["pinned"], now_ms=now,
             )
+
+
+def test_unfinished_tls_handshake_cannot_block_valid_client(tmp_path):
+    """A raw TCP peer must not block accept() before an enrolled TLS agent."""
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    stalled = None
+    try:
+        stalled = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        # Keep the unauthenticated connection open without a TLS ClientHello.
+        started = time.monotonic()
+        status, response = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "live-while-stalled", "echo", {"text": "x"}),
+        )
+        # The backend is intentionally absent: a prompt gateway 502 proves
+        # TLS and forwarding proceeded despite the stalled connection.
+        assert status == 502 and response["error"] == "Local operator unavailable"
+        assert time.monotonic() - started < 2.9
+    finally:
+        if stalled is not None:
+            stalled.close()
+        ingress.stop()
+
+
+def test_exhausted_tls_worker_capacity_rejects_and_recovers(tmp_path, monkeypatch):
+    """An adversary cannot create unbounded threads with incomplete handshakes."""
+    import shards_kernel.integrations.mtls_ingress as ingress_module
+
+    monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 2)
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    stalled = []
+    try:
+        for _ in range(2):
+            stalled.append(socket.create_connection(
+                ("127.0.0.1", setup["ingress_port"]), timeout=2,
+            ))
+        # The two accepted sockets are occupying the only handshake slots.
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 0
+
+        # At capacity, a new connection must fail closed rather than spawn
+        # a third worker or become a privileged unauthenticated request.
+        with pytest.raises((OSError, ssl.SSLError, http.client.HTTPException)):
+            _https(
+                setup["ingress_port"], setup["files"]["ca"],
+                setup["files"]["alpha"], bearer=setup["alpha"],
+                payload=_body("agent-alpha", "over-capacity", "echo", {"text": "x"}),
+            )
+    finally:
+        for connection in stalled:
+            connection.close()
+        ingress.stop()
