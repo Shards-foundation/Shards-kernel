@@ -8,8 +8,10 @@ refuses overwrites. It never prints private material or permit contents.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -92,11 +94,31 @@ def _write_private_output(path: str, data: dict[str, Any]) -> None:
         os.close(fd)
 
 
+def _operator_confirm(draft: Any) -> None:
+    """Require a local human to confirm the exact hash of reviewed scope."""
+    if not sys.stdin.isatty():
+        raise ValueError("Approval requires an interactive operator terminal")
+    print(
+        "Operator review — actor=" + draft.subject
+        + ", action=" + draft.action
+        + ", audience=" + draft.audience
+        + ", permitted params SHA256=" + hashlib.sha256(
+            json.dumps(draft.params, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    )
+    print("Read the full unsigned JSON draft independently before authorising.")
+    print("To authorise, type: APPROVE " + draft.permit_id)
+    if sys.stdin.readline().strip() != "APPROVE " + draft.permit_id:
+        raise ValueError("Operator did not approve the exact permit ID")
+
+
 def run_issuer_command(args: Any) -> int:
     """Do not expose this entrypoint through any model, tool or MCP adapter."""
     try:
         draft = permit_from_mapping(_load_json_file(args.draft))
         validate_narrow_draft(draft)
+        if args.issuer_command == "approve":
+            _operator_confirm(draft)
         signing_key = _read_fd_private_key(args.key_fd)
         now = SystemClock().now_ms()
         if args.issuer_command == "approve":
