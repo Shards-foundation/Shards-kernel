@@ -306,3 +306,103 @@ def test_sdk_process_exception_is_redacted_as_denial(tmp_path, monkeypatch, caps
         "decision": "DENY", "error": "Local MCP transport failed",
     }
     assert "secret" not in output and token not in output
+
+
+def test_large_integer_add_receipt_is_valid_without_float_conversion(monkeypatch):
+    """Python int is exact; float coercion would raise OverflowError."""
+    value = 10 ** 400 + 1
+    receipt = json.dumps({
+        "request_id": "mcp-relay-" + "f" * 32,
+        "decision": "ALLOW",
+        "result": value,
+    })
+    fake = _FakeClient(SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=receipt)],
+        is_error=False,
+    ))
+    monkeypatch.setitem(sys.modules, "mcp", SimpleNamespace(
+        Client=lambda _: fake, StdioServerParameters=lambda **kwargs: kwargs,
+    ))
+    status, parsed = asyncio.run(mcp_call._invoke(
+        port=8765, token="agent-one." + "x" * 48, tool="add",
+        args={"a": 10 ** 400, "b": 1}, permit={"signed": "approved"},
+    ))
+    assert status == 0
+    assert parsed["result"] == value
+
+
+@pytest.mark.parametrize("nonfinite", ["NaN", "Infinity", "-Infinity", "1e10000"])
+def test_nonfinite_allow_result_never_passes(monkeypatch, nonfinite):
+    receipt = (
+        '{"request_id":"mcp-relay-' + "b" * 32
+        + '","decision":"ALLOW","result":' + nonfinite + "}"
+    )
+    fake = _FakeClient(SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=receipt)],
+        is_error=False,
+    ))
+    monkeypatch.setitem(sys.modules, "mcp", SimpleNamespace(
+        Client=lambda _: fake, StdioServerParameters=lambda **kwargs: kwargs,
+    ))
+    with pytest.raises(ValueError, match="Non-finite"):
+        asyncio.run(mcp_call._invoke(
+            port=8765, token="agent-one." + "x" * 48, tool="add",
+            args={"a": 2, "b": 3}, permit={"signed": True},
+        ))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX private file descriptor requirement")
+def test_permit_read_rejects_growth_after_metadata_check(tmp_path, monkeypatch):
+    """Second bounded read must reject unexpected bytes even after safe stat."""
+    path = _private_permit(tmp_path, " " * (mcp_call._MAX_PERMIT_BYTES + 1))
+    real_fstat = os.fstat
+
+    def stale_stat(fd):
+        original = real_fstat(fd)
+        return SimpleNamespace(
+            st_mode=original.st_mode, st_size=0, st_uid=original.st_uid
+        )
+
+    monkeypatch.setattr(mcp_call.os, "fstat", stale_stat)
+    with pytest.raises(ValueError, match="too large"):
+        mcp_call._read_private_permit(path)
+
+
+def test_installed_main_dispatches_mcp_call(monkeypatch):
+    """Test the installed CLI routing rather than invoking the helper directly."""
+    import shards_kernel.__main__ as command
+
+    captured = []
+
+    def fake_call(args):
+        captured.extend(args)
+        return 7
+
+    monkeypatch.setattr(mcp_call, "main", fake_call)
+    monkeypatch.setattr(sys, "argv", [
+        "shards-kernel", "mcp-call", "--port", "8765", "--tool", "echo",
+        "--arguments-json", '{"text":"approved"}',
+        "--permit-file", "/absolute/permit.json",
+    ])
+    assert command.main() == 7
+    assert captured == [
+        "--port", "8765", "--tool", "echo",
+        "--arguments-json", '{"text":"approved"}',
+        "--permit-file", "/absolute/permit.json",
+    ]
+
+
+def test_direct_module_entrypoint_exits_with_redacted_denial(monkeypatch, capsys):
+    import runpy
+
+    monkeypatch.setattr(sys, "argv", [
+        "mcp_call.py", "--port", "0", "--tool", "echo",
+        "--arguments-json", '{"text":"hello"}',
+        "--permit-file", "/absolute/no-permit.json",
+    ])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(mcp_call.__file__), run_name="__main__")
+    assert exit_info.value.code == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "decision": "DENY", "error": "Invalid client configuration",
+    }
