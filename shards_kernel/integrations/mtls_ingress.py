@@ -348,7 +348,7 @@ class _IngressHandler(BaseHTTPRequestHandler):
         body, payload = result
         self._submit_to_operator(body, payload, bearer)
 
-    def log_message(self, _format: str, *_args: Any) -> None:
+    def log_message(self, format: str, *args: Any) -> None:
         """Never log request paths, bearer material or payloads."""
         return
 
