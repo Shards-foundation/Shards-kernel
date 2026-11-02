@@ -160,10 +160,10 @@ jobs:
       id-token: write
     steps:
       - name: Download verified distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-pypi-distributions
           path: dist/
 
       - name: Publish to PyPI (trusted publishing, no API token)
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1 (pinned 2026-11-02)
