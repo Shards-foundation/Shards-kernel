@@ -186,14 +186,24 @@ but is **not pinned**. The test proves:
   operator's own secret infrastructure. CRL/OCSP, automated certificate
   renewal, post-compromise trust-anchor rotation and secrets vaulting are
   not implemented; operator certificate pin removal/re-signing is manual.
-- Signed v2 policy adds an explicit monotonic revision, deliberate one-time
-  trusted-operator bootstrap and local SQLite checkpoint. Service startup
-  never implicitly enrols an empty/deleted database. This is **not externally anchored**: a privileged actor who
-  restores an old policy and its old checkpoint database together can evade
-  local rollback detection. A trusted external anti-rollback anchor and
-  safe recovery/rotation operations remain P0 work. The runtime's checkpoint
-  validation uses explicit exceptions (not Python assertions), and the test
-  suite verifies it remains fail-closed under Python's optimised `-O` mode.
+- Legacy signed v1 policies have no persistence-backed revision high-water
+  mark. Signed v2 adds an explicit monotonic revision, deliberate one-time
+  trusted-operator bootstrap and a local SQLite checkpoint; startup never
+  implicitly enrols an empty or deleted database. The v2 checkpoint is **not
+  externally anchored**: an actor able to restore an old policy and its old
+  checkpoint together can evade local rollback detection. A trusted external
+  anti-rollback anchor and safe recovery/rotation operations remain P0 work.
+  Runtime checkpoint validation uses explicit exceptions (not Python
+  assertions), and CI exercises the guards under optimised `-O` mode.
+- Ingress request-line and HTTP headers share a **16 KiB cumulative byte
+  limit**, including line terminators, in addition to the absolute 8-second
+  parsing deadline. Oversized pre-authentication headers are rejected.
+- `MTLSIngressServer.stop()` is a **forward-dispatch revocation boundary**:
+  it prevents new operator forwarding before closing its listener and drains
+  in-flight forwarding before returning. Already completed operator actions
+  cannot be rolled back. Accepted sockets may finish TLS after shutdown
+  starts, but must never dispatch new operator calls. A slow or hung trusted
+  operator can delay stop while an earlier forwarding request drains.
 - The reference ingress now admits at most 32 concurrent TLS connections,
   performs TLS handshakes in bounded worker threads (3-second handshake
   timeout), applies a 3-second socket-read timeout, and enforces separate
