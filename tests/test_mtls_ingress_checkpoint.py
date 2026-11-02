@@ -90,7 +90,17 @@ def test_signed_revision_checkpoint_survives_restart_and_denies_rollback(tmp_pat
         newer, pinned_public_key_hex=env["pinned"], now_ms=now,
     )
     upgraded = MTLSIngressServer(v2)
-    upgraded._verify_policy_checkpoint()
+    # Merely constructing the v2 ingress does NOT ratchet persistent trust.
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+            (v1.ingress_id,),
+        ).fetchone() == (1,)
+    upgraded.start(blocking=False)
+    try:
+        upgraded._verify_policy_checkpoint()
+    finally:
+        upgraded.stop()
     with pytest.raises(ValueError, match="rollback"):
         MTLSIngressServer(v1)
     with pytest.raises(ValueError, match="no longer matches"):
@@ -442,3 +452,124 @@ def test_checkpoint_invalid_identity_wrong_owner_and_malformed_sqlite(
             revision=1, digest="a" * 64,
             identity=module._identity(malformed),
         )
+
+
+def test_v2_signature_is_cryptographically_domain_separated_from_v1(tmp_path):
+    """Legacy v1 canonical signed bytes must never verify as v2 authority."""
+    from shards_kernel.integrations.mtls_ingress import canonical_ingress_policy
+
+    env, _, signed_v2, _, _ = _versioned(tmp_path)
+    modern = canonical_ingress_policy(signed_v2)
+    legacy = canonical_ingress_policy(env["policy"])
+    assert modern.startswith(b"SHARDS-MTLS-INGRESS-V2\x00")
+    assert legacy.startswith(b"SHARDS-MTLS-INGRESS-V1\x00")
+    assert not modern.startswith(b"SHARDS-MTLS-INGRESS-V1\x00")
+
+    forged_v2 = dict(signed_v2)
+    forged_v2["signature_hex"] = env["ingress_key"].sign(
+        b"SHARDS-MTLS-INGRESS-V1\x00"
+        + modern[len(b"SHARDS-MTLS-INGRESS-V2\x00"):]
+    ).hex()
+    with pytest.raises(ValueError, match="signature"):
+        verify_ingress_policy(
+            forged_v2,
+            pinned_public_key_hex=env["pinned"],
+            now_ms=int(time.time() * 1000),
+        )
+    # Existing properly signed v1 loopback configurations remain readable.
+    valid_v1 = verify_ingress_policy(
+        env["policy"],
+        pinned_public_key_hex=env["pinned"],
+        now_ms=int(time.time() * 1000),
+    )
+    assert valid_v1.revision == 0
+
+
+def test_revision_is_not_advanced_when_new_listener_cannot_bind(tmp_path):
+    """Rejected port binding must leave the previously trusted revision intact."""
+    import socket
+
+    env, raw, _, config, path = _versioned(tmp_path)
+    now = int(time.time() * 1000)
+    newer = sign_mtls_ingress_policy(
+        raw, env["ingress_key"], issued_at_ms=now - 1000,
+        expires_at_ms=now + 600_000, revision=2,
+    )
+    v2 = verify_ingress_policy(
+        newer, pinned_public_key_hex=env["pinned"], now_ms=now,
+    )
+    server = MTLSIngressServer(v2)
+
+    occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupied.bind((v2.listen_host, v2.listen_port))
+    occupied.listen(1)
+    try:
+        with pytest.raises(OSError):
+            server.start(blocking=False)
+        assert server._server is None
+        with sqlite3.connect(path) as db:
+            assert db.execute(
+                "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+                (config.ingress_id,),
+            ).fetchone() == (1,)
+    finally:
+        occupied.close()
+
+    server.start(blocking=False)
+    try:
+        server._verify_policy_checkpoint()
+        with sqlite3.connect(path) as db:
+            assert db.execute(
+                "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+                (config.ingress_id,),
+            ).fetchone() == (2,)
+    finally:
+        server.stop()
+
+
+def test_tls_initialization_failure_cannot_advance_revision(tmp_path, monkeypatch):
+    """Invalid TLS setup must not burn a signed revision before bind."""
+    from shards_kernel.integrations import mtls_ingress as module
+
+    env, raw, _, config, path = _versioned(tmp_path)
+    now = int(time.time() * 1000)
+    newer = sign_mtls_ingress_policy(
+        raw, env["ingress_key"], issued_at_ms=now - 1000,
+        expires_at_ms=now + 600_000, revision=2,
+    )
+    v2 = verify_ingress_policy(
+        newer, pinned_public_key_hex=env["pinned"], now_ms=now,
+    )
+
+    def cannot_load_tls(_config):
+        raise OSError("temporary test TLS load failure")
+
+    monkeypatch.setattr(module, "_tls_context", cannot_load_tls)
+    with pytest.raises(OSError, match="TLS load failure"):
+        MTLSIngressServer(v2)
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+            (config.ingress_id,),
+        ).fetchone() == (1,)
+
+
+def test_checkpoint_preflight_is_read_only_and_blocks_untrusted_activation(tmp_path):
+    """An instance cannot act under a newer policy until start() activates it."""
+    env, raw, _, config, path = _versioned(tmp_path)
+    now = int(time.time() * 1000)
+    new_policy = sign_mtls_ingress_policy(
+        raw, env["ingress_key"], issued_at_ms=now - 1000,
+        expires_at_ms=now + 600_000, revision=2,
+    )
+    v2 = verify_ingress_policy(
+        new_policy, pinned_public_key_hex=env["pinned"], now_ms=now,
+    )
+    server = MTLSIngressServer(v2)
+    with pytest.raises(ValueError, match="no longer matches"):
+        server._verify_policy_checkpoint()
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+            (config.ingress_id,),
+        ).fetchone() == (1,)
