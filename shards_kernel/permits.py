@@ -335,37 +335,42 @@ def _verify_public_signature(
     public_keys: dict[str, PublicVerificationKey],
     expected_audience: str | None,
 ) -> PermitVerificationResult:
-    """Verify an Ed25519 permit using pinned public material only."""
-        if permit.version != 2 or permit.algorithm != "Ed25519":
-            return PermitVerificationResult(Decision.DENY, ["ALGORITHM_NOT_ALLOWED"])
-        record = public_keys.get(permit.key_id)
-        if record is None:
-            return PermitVerificationResult(Decision.DENY, ["UNKNOWN_KEY_ID"])
-        if record.revoked:
-            return PermitVerificationResult(Decision.DENY, ["ISSUER_KEY_REVOKED"])
-        if permit.issuer != record.issuer:
-            return PermitVerificationResult(Decision.DENY, ["ISSUER_MISMATCH"])
-        if not expected_audience or permit.audience != expected_audience:
-            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
-        if record.audience != expected_audience:
-            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
-        if permit.permit_id != compute_permit_id(permit):
-            return PermitVerificationResult(Decision.DENY, ["PERMIT_ID_MISMATCH"])
-        try:
-            from cryptography.exceptions import InvalidSignature
-            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    
-            signature = bytes.fromhex(permit.signature)
-            if len(signature) != 64:
-                raise ValueError("Invalid Ed25519 signature length")
-            Ed25519PublicKey.from_public_bytes(record.public_key).verify(
-                signature,
-                b"SHARDS-PERMIT-ED25519-V2\x00" + canonical_permit_bytes(permit),
-            )
-        except (InvalidSignature, ValueError):
-            return PermitVerificationResult(Decision.DENY, ["SIGNATURE_INVALID"])
-        return PermitVerificationResult(Decision.ALLOW, [])
-    
+    """Verify the issuer and audience before checking Ed25519 cryptography."""
+    if permit.version != 2 or permit.algorithm != "Ed25519":
+        return PermitVerificationResult(Decision.DENY, ["ALGORITHM_NOT_ALLOWED"])
+    record = public_keys.get(permit.key_id)
+    if record is None:
+        return PermitVerificationResult(Decision.DENY, ["UNKNOWN_KEY_ID"])
+    if record.revoked:
+        return PermitVerificationResult(Decision.DENY, ["ISSUER_KEY_REVOKED"])
+    if permit.issuer != record.issuer:
+        return PermitVerificationResult(Decision.DENY, ["ISSUER_MISMATCH"])
+    if (
+        not expected_audience
+        or permit.audience != expected_audience
+        or record.audience != expected_audience
+    ):
+        return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
+    if permit.permit_id != compute_permit_id(permit):
+        return PermitVerificationResult(Decision.DENY, ["PERMIT_ID_MISMATCH"])
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        return PermitVerificationResult(Decision.DENY, ["CRYPTO_UNAVAILABLE"])
+
+    try:
+        signature = bytes.fromhex(permit.signature)
+        if len(signature) != 64:
+            raise ValueError("Invalid Ed25519 signature length")
+        Ed25519PublicKey.from_public_bytes(record.public_key).verify(
+            signature,
+            b"SHARDS-PERMIT-ED25519-V2\x00" + canonical_permit_bytes(permit),
+        )
+    except (InvalidSignature, ValueError):
+        return PermitVerificationResult(Decision.DENY, ["SIGNATURE_INVALID"])
+    return PermitVerificationResult(Decision.ALLOW, [])
+
 
 def verify_signature(
     permit: PermitToken,
