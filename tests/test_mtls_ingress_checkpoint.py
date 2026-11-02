@@ -10,7 +10,7 @@ import time
 import pytest
 
 from shards_kernel.integrations.mtls_checkpoint import (
-    checkpoint_ingress_revision, verify_ingress_checkpoint,
+    bootstrap_ingress_checkpoint, checkpoint_ingress_revision, verify_ingress_checkpoint,
 )
 from shards_kernel.integrations.mtls_ingress import (
     MTLSIngressServer, verify_ingress_policy,
@@ -35,6 +35,10 @@ def _versioned(tmp_path, *, revision=1, ingress_id="primary-ingress"):
     )
     config = verify_ingress_policy(
         policy, pinned_public_key_hex=env["pinned"], now_ms=now,
+    )
+    bootstrap_ingress_checkpoint(
+        checkpoint_path, ingress_id=config.ingress_id,
+        revision=config.revision, digest=config.policy_digest,
     )
     return env, raw, policy, config, checkpoint_path
 
@@ -177,7 +181,13 @@ def test_checkpoint_corrupted_or_deleted_state_is_not_an_authority(tmp_path):
         db.execute("DELETE FROM ingress_policy_checkpoint")
     with pytest.raises(ValueError, match="no longer matches"):
         server._verify_policy_checkpoint()
-    MTLSIngressServer(config)  # A restart can recreate a deleted local row.
+    with pytest.raises(ValueError, match="Missing enrolled"):
+        MTLSIngressServer(config)  # Must not re-enrol deleted rows.
+    with pytest.raises(ValueError, match="already initialised"):
+        bootstrap_ingress_checkpoint(
+            path, ingress_id=config.ingress_id,
+            revision=config.revision, digest=config.policy_digest,
+        )
     # Local checkpoints are not an external tamper-evident anchor;
     # externally backed proof is an intentionally separate release gate.
     path.write_bytes(b"bad database")
@@ -205,3 +215,46 @@ def test_missing_runtime_checkpoint_authority_is_rejected(missing):
         setattr(ingress.config, missing, None)
     with pytest.raises(ValueError, match="Missing signed ingress checkpoint authority"):
         ingress._verify_policy_checkpoint()
+
+
+def test_empty_existing_checkpoint_never_auto_enrols(tmp_path):
+    """An attacker cannot erase the local checkpoint and restart at revision one."""
+    _, _, _, config, db = _versioned(tmp_path)
+    initial = MTLSIngressServer(config)
+    initial._verify_policy_checkpoint()
+    db.unlink()
+    with sqlite3.connect(db):
+        pass
+    os.chmod(db, 0o600)
+    with pytest.raises(ValueError, match="unavailable"):
+        MTLSIngressServer(config)
+    # A new blank file is not a trusted recovery path without an explicit
+    # operator bootstrap. This is not protection from whole-DB rollback.
+    bootstrap_ingress_checkpoint(
+        db, ingress_id=config.ingress_id,
+        revision=config.revision, digest=config.policy_digest,
+    )
+    MTLSIngressServer(config)._verify_policy_checkpoint()
+
+
+def test_checkpoint_bootstrap_requires_virgin_database_and_is_one_shot(tmp_path):
+    _, _, _, config, db = _versioned(tmp_path)
+    with pytest.raises(ValueError, match="already initialised"):
+        bootstrap_ingress_checkpoint(
+            db, ingress_id=config.ingress_id,
+            revision=config.revision, digest=config.policy_digest,
+        )
+    with pytest.raises(ValueError, match="unavailable"):
+        checkpoint_ingress_revision(
+            tmp_path / "does-not-exist.sqlite3",
+            ingress_id=config.ingress_id,
+            revision=config.revision, digest=config.policy_digest,
+        )
+
+
+def test_runtime_rejects_removed_schema_without_recreating_it(tmp_path):
+    _, _, _, config, db = _versioned(tmp_path)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP TABLE ingress_policy_checkpoint")
+    with pytest.raises(ValueError, match="unavailable"):
+        MTLSIngressServer(config)
