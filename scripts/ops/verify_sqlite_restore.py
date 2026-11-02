@@ -68,12 +68,39 @@ def _source_identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
+def _require_trusted_source_ancestors(directory: Path) -> None:
+    """Reject ancestor paths that another UID can rename or replace.
+
+    A 0700 source parent is insufficient when its own parent is replaceable.
+    Every ancestor up to / must be owned by this UID or root. A writable
+    ancestor is accepted only with sticky-bit protection for our child.
+    """
+    ancestor = directory.parent
+    owner_uid = os.geteuid()
+    while True:
+        try:
+            info = ancestor.lstat()
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or ancestor.resolve() != ancestor
+                or info.st_uid not in (0, owner_uid)
+                or ((info.st_mode & 0o022) and not (info.st_mode & stat.S_ISVTX))
+            ):
+                raise DrillError("UNTRUSTED_SOURCE_ANCESTOR")
+        except (OSError, RuntimeError) as exc:
+            raise DrillError("UNTRUSTED_SOURCE_ANCESTOR") from exc
+        if ancestor == ancestor.parent:
+            return
+        ancestor = ancestor.parent
+
+
 def _open_private_source(path: Path, expected: tuple[int, int]) -> int:
     """Pin a no-follow FD inside a directory not writable by other users.
 
     sqlite3's standard Python API opens by pathname rather than by an
     already-open FD. That is safe against *other OS users* only if the parent
-    directory is private to this operator UID. A hostile process running
+    directory and every ancestor are protected from other OS users. A hostile
+    process running
     under the operator UID is not isolated by this check and remains out of
     scope for this single-host diagnostic.
     """
@@ -81,6 +108,7 @@ def _open_private_source(path: Path, expected: tuple[int, int]) -> int:
         raise DrillError("SECURE_LOCAL_FILESYSTEM_REQUIRED")
     directory = path.parent
     try:
+        _require_trusted_source_ancestors(directory)
         directory_info = directory.stat()
         if (
             directory.is_symlink()
