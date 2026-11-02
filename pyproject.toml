@@ -44,6 +44,7 @@ crypto = ["cryptography>=43,<51"]
 dev = [
     "pytest>=7",
     "pytest-cov>=4",
+    "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
     "hypothesis>=6",
     "ruff==0.17.2",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
