@@ -171,12 +171,14 @@ built-in tools, one locally authenticated actor and SQLite audit/replay recovery
 
 ```bash
 python -m pip install -e ".[crypto]"
-shards-kernel serve --config /absolute/path/to/operator.json
+shards-kernel serve --config /absolute/path/to/signed-operator-policy.json
 ```
 
-It will **refuse startup** without a valid operator JSON configuration and
+It will **refuse startup** without a valid **Ed25519-signed operator policy**, a
+separately pinned `SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX`, and
 `SHARDS_KERNEL_API_KEY` set to a protected strong bearer credential. It
-cannot run financial tools or bind remote interfaces. See the
+cannot run financial tools or bind remote interfaces. Unsigned policies require
+an explicit development-only `--allow-unsigned-local` flag. See the
 [operator service guide](docs/operations/LOOPBACK_OPERATOR_SERVICE.md)
 for config fields, trust boundaries and unverified production requirements.
 
