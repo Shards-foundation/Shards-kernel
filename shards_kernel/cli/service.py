@@ -229,6 +229,7 @@ def run_service(config_path: str) -> int:
         config = load_operator_config(config_path)
         with exclusive_local_audit_lock(config.audit_db):
             server = build_operator_server(config)
+            print("Operator service: LOCAL LOOPBACK ONLY; NOT production-ready")
             try:
                 server.start(blocking=True)
             except KeyboardInterrupt:
@@ -236,6 +237,7 @@ def run_service(config_path: str) -> int:
             finally:
                 server.stop()
         return 0
-    except (ValueError, OSError, RuntimeError):
-        print("Operator service refused startup: invalid configuration, lock or runtime")
+    except Exception:
+        # Never leak signing material, filesystem details or bearer values.
+        print("Operator service refused startup or failed; inspect local diagnostic logs")
         return 2
