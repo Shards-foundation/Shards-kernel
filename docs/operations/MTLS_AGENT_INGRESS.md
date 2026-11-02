@@ -49,10 +49,32 @@ a client-auth CA certificate, and **separate client certificates** for
 two enrolled agents. Follow a proper CA and key lifecycle; do not save
 test keys or operator signing keys in git.
 
+**Signed ingress-policy v2 is required for any non-loopback listener.**
+Legacy v1 signed envelopes remain supported on loopback for compatibility
+only, with no persistence-backed revision check. The v2 envelope signs an
+explicit positive `revision`, fixed `ingress_id` and
+`checkpoint_db_file` as well as the existing TLS and agent configuration.
+The host operator must independently provision this private persistent file
+before starting ingress:
+
+```bash
+install -m 0600 /dev/null /secure/ingress/ingress-checkpoint.sqlite3
+```
+
+The path must be absolute, a regular non-symlink file, owned by the service
+user, and inaccessible to group/other users. Keep the **same file** across
+restarts and policy rotations; preserve it in backups. The v2 service
+transactionally remembers the highest accepted signed revision and digest.
+A lower revision, a different signed config at the same revision, a missing
+checkpoint or replacement of the file while the process runs fails closed.
+On a newer signed revision, old running instances reject subsequent calls.
+
 A reference *unsigned* configuration object to sign is:
 
 ```json
 {
+  "ingress_id": "production-agent-ingress",
+  "checkpoint_db_file": "/secure/ingress/ingress-checkpoint.sqlite3",
   "listen_host": "127.0.0.1",
   "listen_port": 9443,
   "operator_port": 8765,
@@ -68,8 +90,8 @@ A reference *unsigned* configuration object to sign is:
 
 Only the trusted **offline** operator signs the object, using
 `shards_kernel.issuer.sign_mtls_ingress_policy(config, signing_key,
-issued_at_ms=..., expires_at_ms=...)`. It creates a domain-separated
-Ed25519 envelope `shards.mtls-ingress.v1`. Expiry must be at most 24
+issued_at_ms=..., expires_at_ms=..., revision=1)`. It creates a domain-separated
+Ed25519 envelope `shards.mtls-ingress.v2` with an explicit monotonic revision. Expiry must be at most 24
 hours. This root key should be independent of permit signing and TLS keys.
 
 The ingress service receives **only** the independently pinned
@@ -83,7 +105,7 @@ shards-kernel mtls-ingress --config /absolute/path/signed-ingress.json
 
 An external bind, such as a specifically assigned signed\n`listen_host="192.0.2.44"` (documentation-only address), is
 **refused by default** and additionally requires the explicit operator
-flag `--allow-remote-listen`. Wildcard binds are not supported. In a\nreal deployment use an actual interface address assigned to that host.\nThe backend operator always stays on
+flag `--allow-remote-listen`. **Legacy v1 envelopes are rejected for remote binds even with this flag.** Wildcard binds are not supported. In a\nreal deployment use an actual interface address assigned to that host.\nThe backend operator always stays on
 `127.0.0.1`; never enable `allow_remote_bind` for the kernel itself.
 
 The operator signs and reviews exactly which two agent identities own
@@ -96,7 +118,7 @@ The gateway does not infer agent identity merely from certificate CN.
 
 ```bash
 python -m pip install -e ".[dev,crypto]"
-pytest -q tests/test_mtls_agent_ingress.py
+pytest -q tests/test_mtls_agent_ingress.py tests/test_mtls_ingress_checkpoint.py
 ```
 
 The live test generates a temporary CA, TLS 1.3 server identity and
@@ -124,8 +146,11 @@ but is **not pinned**. The test proves:
   operator's own secret infrastructure. CRL/OCSP, automated certificate
   renewal, post-compromise trust-anchor rotation and secrets vaulting are
   not implemented; operator certificate pin removal/re-signing is manual.
-- There is no signed monotonic ingress-policy revision high-water mark;
-  the short expiry and pinned root do not provide external anti-rollback.
+- Signed v2 policy adds an explicit monotonic revision and local SQLite
+  checkpoint. This is **not externally anchored**: a privileged actor who
+  restores an old policy and its old checkpoint database together can evade
+  local rollback detection. A trusted external anti-rollback anchor and
+  safe recovery/rotation operations remain P0 work.
 - The reference ingress now admits at most 32 concurrent TLS connections,
   performs TLS handshakes in bounded worker threads (3-second handshake
   timeout), applies a 3-second socket-read timeout, and enforces an 8-second
