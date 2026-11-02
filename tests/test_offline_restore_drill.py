@@ -317,6 +317,36 @@ def test_restore_artifacts_are_cleaned_on_success_and_rejection(tmp_path, monkey
     assert all(not folder.exists() for folder in observed)
 
 
+def test_restore_drill_rejects_world_writable_ancestor(tmp_path):
+    """Private file and directory alone do not prevent ancestor replacement."""
+    outer = tmp_path / "ancestor"
+    outer.mkdir(mode=0o700)
+    private = outer / "private"
+    private.mkdir(mode=0o700)
+    database, root = _audit(private)
+
+    # Baseline: safely owned, private ancestor is accepted.
+    assert verify_restore(
+        source=database, kernel_id="restore-example", expected_root=root
+    ).entry_count == 2
+
+    # Another UID can rename the private directory when its parent is open.
+    outer.chmod(0o777)
+    try:
+        _must_reject(database, "UNTRUSTED_SOURCE_ANCESTOR")
+    finally:
+        outer.chmod(0o700)
+
+    # A sticky ancestor protects the user-owned child from other UIDs.
+    outer.chmod(0o1777)
+    try:
+        assert verify_restore(
+            source=database, kernel_id="restore-example", expected_root=root
+        ).entry_count == 2
+    finally:
+        outer.chmod(0o700)
+
+
 def test_private_source_directory_and_mode_are_required(tmp_path):
     database, _ = _audit(tmp_path)
     database.chmod(0o644)
