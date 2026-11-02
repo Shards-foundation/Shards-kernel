@@ -250,6 +250,7 @@ def exclusive_local_audit_lock(audit_db: Path) -> Iterator[None]:
 
 def build_operator_server(
     config: OperatorServiceConfig, *, api_key: str | None = None,
+    agent_pepper: str | None = None,
     policy_expires_at_ms: int | None = None,
 ) -> KernelServer:
     """Create a service kernel; no arbitrary tools or HMAC private secrets."""
@@ -278,6 +279,7 @@ def build_operator_server(
         api_key=key,
         trusted_actor=config.actor,
         agent_identities=config.agents,
+        agent_auth_pepper=agent_pepper,
         policy_expires_at_ms=policy_expires_at_ms,
     )
 
