@@ -93,6 +93,9 @@ jobs:
               sys.exit(1)
           PY
 
+      - name: Verify ingress trust guards under optimised Python
+        run: python -O scripts/ci/verify_optimised_ingress_checkpoint.py
+
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
 
