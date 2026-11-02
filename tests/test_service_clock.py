@@ -127,3 +127,33 @@ def test_default_http_framework_factories_do_not_use_virtual_time():
         api_key="service-clock-test-http-api-key-32-characters",
     )
     assert isinstance(api.state.kernel.config.clock, SystemClock)
+
+
+def test_http_service_rejects_injected_frozen_clock_without_explicit_test_override():
+    from shards_kernel.sdk.server import KernelServer
+
+    frozen = boot_strict_kernel("frozen-direct-server")
+    with pytest.raises(ValueError, match="Frozen VirtualClock"):
+        KernelServer(frozen, api_key="http-test-key-at-least-32-characters-long")
+    assert KernelServer(
+        frozen,
+        api_key="http-test-key-at-least-32-characters-long",
+        allow_test_clock=True,
+    ).kernel is frozen
+
+
+def test_flask_and_fastapi_reject_frozen_kernel_injection():
+    pytest.importorskip("flask")
+    pytest.importorskip("fastapi")
+    from shards_kernel.integrations.flask_adapter import create_flask_app
+    from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
+
+    frozen = boot_strict_kernel("frozen-framework-server")
+    key = "http-test-key-at-least-32-characters-long"
+    with pytest.raises(ValueError, match="Frozen VirtualClock"):
+        create_flask_app(kernel=frozen, api_key=key)
+    with pytest.raises(ValueError, match="Frozen VirtualClock"):
+        create_fastapi_app(kernel=frozen, api_key=key)
+
+    assert create_flask_app(kernel=frozen, api_key=key, allow_test_clock=True)
+    assert create_fastapi_app(kernel=frozen, api_key=key, allow_test_clock=True)
