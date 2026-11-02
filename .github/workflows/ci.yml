@@ -124,7 +124,7 @@ jobs:
       # empty upload when source code, tests, or any other file has changed.
       - name: Classify non-coverable workflow-only PR
         if: matrix.python-version == '3.12' && github.event_name == 'pull_request'
-        id: workflow-only
+        id: workflow_only
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -156,7 +156,7 @@ jobs:
       # The explicit file classifier above is required before force can be
       # used. Codecov may otherwise omit codecov/patch for YAML-only PRs.
       - name: Report non-coverable PR to Codecov
-        if: matrix.python-version == '3.12' && github.event_name == 'pull_request' && steps.codecov-token.outputs.available == 'true' && steps.workflow-only.outputs.eligible == 'true'
+        if: matrix.python-version == '3.12' && github.event_name == 'pull_request' && steps.codecov-token.outputs.available == 'true' && steps.workflow_only.outputs.eligible == 'true'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
