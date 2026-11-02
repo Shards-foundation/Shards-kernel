@@ -248,3 +248,61 @@ def test_missing_agent_token_rejected_without_logging_sensitive_data(capsys, mon
     assert json.loads(capsys.readouterr().out) == {
         "decision": "DENY", "error": "Invalid client configuration",
     }
+
+
+@pytest.mark.parametrize("raw", ['{"a":NaN,"b":1}', '{"a":Infinity,"b":1}', '{"a":-Infinity,"b":1}'])
+def test_nonfinite_json_constants_are_rejected(raw):
+    with pytest.raises(ValueError, match="Non-finite"):
+        mcp_call._arguments("add", raw)
+
+
+def test_successful_numeric_add_requires_correlated_typed_receipt(monkeypatch):
+    receipt = json.dumps({
+        "request_id": "mcp-relay-" + "c" * 32,
+        "decision": "ALLOW",
+        "result": 5,
+    })
+    fake = _FakeClient(SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=receipt)],
+        is_error=False,
+    ))
+    monkeypatch.setitem(sys.modules, "mcp", SimpleNamespace(
+        Client=lambda _: fake, StdioServerParameters=lambda **kw: kw,
+    ))
+    status, result = asyncio.run(mcp_call._invoke(
+        port=8765, token="agent-one." + "x" * 48, tool="add",
+        args={"a": 2, "b": 3}, permit={"signed": "approved"},
+    ))
+    assert status == 0
+    assert result["result"] == 5
+    assert result["request_id"].startswith("mcp-relay-")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Private POSIX file checks")
+def test_invalid_permit_utf8_fails_closed(tmp_path):
+    path = tmp_path / "bad-permit.json"
+    path.write_bytes(b"\\xff\\xfe")
+    path.chmod(0o600)
+    with pytest.raises(UnicodeDecodeError):
+        mcp_call._read_private_permit(path)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Private POSIX permit checks")
+def test_sdk_process_exception_is_redacted_as_denial(tmp_path, monkeypatch, capsys):
+    path = _private_permit(tmp_path)
+    token = "agent-one." + "x" * 48
+    monkeypatch.setenv("SHARDS_KERNEL_AGENT_TOKEN", token)
+
+    async def failing_transport(**_kwargs):
+        raise RuntimeError("internal transport carried a secret")
+
+    monkeypatch.setattr(mcp_call, "_invoke", failing_transport)
+    assert mcp_call.main([
+        "--port", "8765", "--tool", "echo",
+        "--arguments-json", '{"text":"ok"}', "--permit-file", str(path),
+    ]) == 2
+    output = capsys.readouterr().out
+    assert json.loads(output) == {
+        "decision": "DENY", "error": "Local MCP transport failed",
+    }
+    assert "secret" not in output and token not in output
