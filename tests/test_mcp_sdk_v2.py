@@ -138,3 +138,35 @@ def test_factory_requires_explicit_policy_trusted_actor_and_unique_tools():
     kernel._dispatcher.registry.register("repeat", lambda text: text)
     with pytest.raises(ValueError, match="collides"):
         create_official_mcp_server(kernel, actor="alice", handlers={"repeat": lambda text: text})
+
+
+def test_real_stdio_subprocess_negotiates_and_denies_without_permit():
+    """The official client launches the actual example through stdio."""
+    import pathlib
+    import sys
+
+    from mcp import StdioServerParameters
+
+    example = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "examples"
+        / "12_official_mcp_sdk_v2_stdio.py"
+    )
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=[str(example)],
+        env={"SHARDS_KERNEL_MCP_KEY": "test-only-32-byte-key-for-stdio-process-12345"},
+    )
+
+    async def scenario():
+        async with Client(parameters) as client:
+            assert client.protocol_version is not None
+            listed = await client.list_tools()
+            assert "governed_execute" in {tool.name for tool in listed.tools}
+            denied = await client.call_tool(
+                "governed_execute",
+                {"name": "repeat", "arguments": {"text": "do-not-execute"}},
+            )
+            assert denied.is_error
+
+    asyncio.run(scenario())
