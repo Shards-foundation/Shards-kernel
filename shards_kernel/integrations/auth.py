@@ -37,17 +37,31 @@ class AgentIdentity:
     """Signed-config principal metadata; NEVER contains a bearer secret."""
 
     actor: str
-    token_sha256: str
+    token_hmac_sha256: str
     allowed_tools: frozenset[str]
 
 
+def resolve_agent_pepper(pepper: str | None = None) -> bytes:
+    """Require an independent high-entropy MAC key outside signed policy."""
+    value = pepper if pepper is not None else os.environ.get("SHARDS_KERNEL_AGENT_AUTH_PEPPER")
+    if not isinstance(value, str) or len(value) < 32 or value != value.strip():
+        raise ValueError("Operator must provision a separate 32+ character agent authentication pepper")
+    return value.encode("utf-8")
+
+
+def agent_token_mac(token: str, pepper: bytes) -> str:
+    """Keyed lookup digest of a randomly generated high-entropy agent token."""
+    return hmac.new(pepper, token.encode("ascii"), hashlib.sha256).hexdigest()
+
+
 def identify_agent(
-    header: Optional[str], identities: tuple[AgentIdentity, ...]
+    header: Optional[str], identities: tuple[AgentIdentity, ...], pepper: bytes
 ) -> AgentIdentity | None:
     """Resolve a v2 loopback transport credential to one exact signed identity.
 
-    Token digests are compared in constant time. The raw bearer token is never
-    logged, stored in configuration, or used as a kernel signing key.
+    HMAC digests are compared in constant time. A separate operator-held
+    MAC key prevents offline guesses from a stolen signed policy. Raw bearer
+    tokens are never logged, stored in config, or used for kernel signing.
     """
     if not isinstance(header, str) or not header.startswith("Bearer "):
         return None
@@ -58,9 +72,9 @@ def identify_agent(
         or any(ch.isspace() for ch in token)
     ):
         return None
-    digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+    digest = agent_token_mac(token, pepper)
     match: AgentIdentity | None = None
     for identity in identities:
-        if hmac.compare_digest(digest, identity.token_sha256):
+        if hmac.compare_digest(digest, identity.token_hmac_sha256):
             match = identity
     return match
