@@ -65,6 +65,11 @@ class PermitToken:
     # Cryptographic binding
     signature: str
     key_id: str
+    # v1 HMAC remains wire-compatible. v2 uses domain-separated Ed25519
+    # signatures with a mandatory intended kernel audience.
+    version: int = 1
+    algorithm: str = "HS256"
+    audience: str = ""
 
     def __post_init__(self) -> None:
         """Validate field constraints at construction time."""
@@ -102,6 +107,14 @@ class PermitToken:
             raise ValueError("signature must be str")
         if not isinstance(self.key_id, str) or len(self.key_id) == 0:
             raise ValueError("key_id must be non-empty str")
+        if self.version == 1:
+            if self.algorithm != "HS256" or self.audience != "":
+                raise ValueError("v1 permits require HS256 and an empty audience")
+        elif self.version == 2:
+            if self.algorithm != "Ed25519" or not isinstance(self.audience, str) or not self.audience:
+                raise ValueError("v2 permits require Ed25519 and a nonempty audience")
+        else:
+            raise ValueError("Unsupported permit version")
 
 
 @dataclass(frozen=True)
@@ -119,6 +132,22 @@ class PermitVerificationResult:
     def is_allowed(self) -> bool:
         """Check if verification succeeded."""
         return self.status == Decision.ALLOW and len(self.reasons) == 0
+
+
+@dataclass(frozen=True)
+class PublicVerificationKey:
+    """Operator-pinned public verifier (never private or shared signing keys)."""
+
+    issuer: str
+    audience: str
+    public_key: bytes  # 32-byte Ed25519 public key, raw encoding
+    revoked: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.issuer or not self.audience:
+            raise ValueError("Verifier issuer and audience are required")
+        if not isinstance(self.public_key, bytes) or len(self.public_key) != 32:
+            raise ValueError("Ed25519 public key must be 32 raw bytes")
 
 
 @dataclass(frozen=True)
@@ -204,6 +233,11 @@ def canonical_permit_bytes(
         "valid_from_ms": permit.valid_from_ms,
         "valid_until_ms": permit.valid_until_ms,
     }
+
+    if permit.version == 2:
+        data["version"] = permit.version
+        data["algorithm"] = permit.algorithm
+        data["audience"] = permit.audience
 
     if not exclude_permit_id:
         data["permit_id"] = permit.permit_id
@@ -297,7 +331,11 @@ def sign_permit(permit: PermitToken, key: bytes, key_id: str) -> PermitToken:
 
 
 def verify_signature(
-    permit: PermitToken, keyring: dict[str, bytes]
+    permit: PermitToken,
+    keyring: dict[str, bytes],
+    *,
+    public_keys: dict[str, PublicVerificationKey] | None = None,
+    expected_audience: str | None = None,
 ) -> PermitVerificationResult:
     """
     Verify permit signature against keyring.
@@ -314,6 +352,42 @@ def verify_signature(
     Returns:
         PermitVerificationResult with ALLOW/DENY and reason codes
     """
+    if public_keys is not None:
+        if permit.version != 2 or permit.algorithm != "Ed25519":
+            return PermitVerificationResult(Decision.DENY, ["ALGORITHM_NOT_ALLOWED"])
+        record = public_keys.get(permit.key_id)
+        if record is None:
+            return PermitVerificationResult(Decision.DENY, ["UNKNOWN_KEY_ID"])
+        if record.revoked:
+            return PermitVerificationResult(Decision.DENY, ["ISSUER_KEY_REVOKED"])
+        if permit.issuer != record.issuer:
+            return PermitVerificationResult(Decision.DENY, ["ISSUER_MISMATCH"])
+        if not expected_audience or permit.audience != expected_audience:
+            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
+        if record.audience != expected_audience:
+            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
+        if permit.permit_id != compute_permit_id(permit):
+            return PermitVerificationResult(Decision.DENY, ["PERMIT_ID_MISMATCH"])
+        try:
+            from cryptography.exceptions import InvalidSignature
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+            signature = bytes.fromhex(permit.signature)
+            if len(signature) != 64:
+                raise ValueError("Invalid Ed25519 signature length")
+            Ed25519PublicKey.from_public_bytes(record.public_key).verify(
+                signature,
+                b"SHARDS-PERMIT-ED25519-V2\\x00" + canonical_permit_bytes(permit),
+            )
+        except (InvalidSignature, ValueError):
+            return PermitVerificationResult(Decision.DENY, ["SIGNATURE_INVALID"])
+        return PermitVerificationResult(Decision.ALLOW, [])
+
+    # Legacy HMAC verification is only available when no public verifier
+    # policy is configured. Never interpret an asymmetric signature as HMAC.
+    if permit.version != 1 or permit.algorithm != "HS256":
+        return PermitVerificationResult(Decision.DENY, ["ALGORITHM_NOT_ALLOWED"])
+
     # Check 1: Key ID known
     if permit.key_id not in keyring:
         return PermitVerificationResult(
@@ -457,6 +531,9 @@ def verify_permit(
     request_params: dict[str, Any],
     request_evidence: str | None = None,
     commit_use: bool = True,
+    *,
+    public_keys: dict[str, PublicVerificationKey] | None = None,
+    expected_audience: str | None = None,
 ) -> PermitVerificationResult:
     """
     Comprehensive fail-closed permit verification.
@@ -495,7 +572,9 @@ def verify_permit(
     reasons: list[str] = []
 
     # Checks 1-3: Cryptographic verification
-    sig_result = verify_signature(permit, keyring)
+    sig_result = verify_signature(
+        permit, keyring, public_keys=public_keys, expected_audience=expected_audience
+    )
     if not sig_result.is_allowed():
         return sig_result
 
@@ -732,6 +811,30 @@ class PermitBuilder:
         """Set nonce (or generate if empty)."""
         self._nonce = nonce
         return self
+
+    def build_unsigned_v2(self, *, key_id: str, audience: str) -> PermitToken:
+        """Prepare a v2 permit for a trusted issuer service to sign separately."""
+        unsigned = PermitToken(
+            permit_id="",
+            issuer=self._issuer,
+            subject=self._subject,
+            jurisdiction=self._jurisdiction,
+            action=self._action,
+            params=self._params,
+            constraints=self._constraints,
+            max_executions=self._max_executions,
+            valid_from_ms=self._valid_from_ms,
+            valid_until_ms=self._valid_until_ms,
+            evidence_hash=self._evidence_hash,
+            proposal_hash=self._proposal_hash,
+            nonce=self._nonce or generate_nonce(),
+            signature="",
+            key_id=key_id,
+            version=2,
+            algorithm="Ed25519",
+            audience=audience,
+        )
+        return replace(unsigned, permit_id=compute_permit_id(unsigned))
 
     def build(self, keyring: dict[str, bytes], key_id: str) -> PermitToken:
         """
