@@ -39,6 +39,26 @@ def test_e2e_supported_environment(version, platform, expected):
     assert gate.supported_environment(version, platform) is expected
 
 
+def test_e2e_main_hands_off_to_exact_strict_scenarios(monkeypatch):
+    """Cover the real gate's supported path without nested pytest execution."""
+    monkeypatch.setattr(gate, "supported_environment", lambda: True)
+    observed = {}
+
+    def fake_pytest_main(args, plugins):
+        observed["args"] = args
+        observed["plugins"] = plugins
+        return pytest.ExitCode.OK
+
+    monkeypatch.setattr(gate.pytest, "main", fake_pytest_main)
+    assert gate.main() == int(pytest.ExitCode.OK)
+    assert len(observed["plugins"]) == 1
+    assert isinstance(observed["plugins"][0], gate.StrictE2EGate)
+    assert observed["args"] == [
+        "-q", "-ra", "--strict-markers", "-o", "addopts=",
+        "--junitxml=e2e-results.xml", *gate.SCENARIOS,
+    ]
+
+
 def test_e2e_rejects_unsupported_runtime_before_running_pytest(monkeypatch, capsys):
     monkeypatch.setattr(gate, "supported_environment", lambda: False)
 
