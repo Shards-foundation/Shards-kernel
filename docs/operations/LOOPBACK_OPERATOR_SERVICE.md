@@ -71,6 +71,29 @@ An exclusive advisory lock held for the **entire process lifetime** refuses
 another writer on the same local host / database. Do not deploy this
 implementation on a network filesystem or across replicas.
 
+## Independent-process restart verification
+
+The test `tests/test_operator_process_restart.py` starts the real
+`shards-kernel serve --config` CLI in a **spawned, separate Python
+interpreter**. The issuer's Ed25519 private key remains in the parent test
+process; the child receives only a JSON file with the **public** key.
+
+The test authenticates HTTP with an independently generated bearer key,
+verifies DENY without transport auth, DENY for a spoofed actor and ALLOW
+for a narrowly scoped Ed25519 signed permit. It then forcibly terminates
+the service process, starts a new interpreter with the same SQLite ledger,
+compares the restored audit root and proves that reuse of the original
+signed permit is denied as a replay.
+
+```bash
+python -m pytest tests/test_operator_process_restart.py -q
+```
+
+This is a real process crash/restart integration test but **not** a side
+effect reconciliation proof. The only permitted tool is a deterministic
+in-process `echo`; no distributed worker, externally committed transaction
+or multi-host nonce registry is involved.
+
 ## Deliberate scope restrictions
 
 The operator config format allows only exactly the built-in, deterministic,
