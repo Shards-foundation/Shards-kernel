@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from shards_kernel.cli.service import (
-    build_operator_server, exclusive_local_audit_lock, parse_operator_config,
+    build_operator_server, exclusive_local_audit_lock,
 )
 from shards_kernel.cli.signed_policy import verify_signed_policy
 from shards_kernel.integrations.auth import agent_token_kdf
@@ -314,7 +314,7 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
         signed, pinned_public_key_hex=pinned, now_ms=now,
     ).listen_host == "127.0.0.1"
     for field, value in (
-        ("listen_host", "0.0.0.0"),
+        ("listen_host", "192.0.2.44"),
         ("operator_port", 9999),
         ("tls_cert_file", str(tmp_path / "missing.pem")),
         ("agents", []),
@@ -337,7 +337,7 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
             signed, pinned_public_key_hex=pinned, now_ms=now + 720_000,
         )
     changed = copy.deepcopy(signed)
-    changed["config"]["listen_host"] = "0.0.0.0"
+    changed["config"]["listen_host"] = "192.0.2.44"
     resig = sign_mtls_ingress_policy(
         changed["config"], data["ingress_key"],
         issued_at_ms=now - 10_000, expires_at_ms=now + 60_000,
