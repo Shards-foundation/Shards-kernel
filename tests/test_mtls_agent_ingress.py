@@ -861,3 +861,63 @@ def test_authenticated_socket_idle_timeout_releases_worker(tmp_path, monkeypatch
         if tls_sock is not None:
             tls_sock.close()
         ingress.stop()
+
+
+@pytest.mark.parametrize("unfinished", [
+    b"POST /sub",
+    b"POST /submit HTTP/1.1\\r\\nHost: local\\r\\nX-Slow: ",
+])
+def test_aggregate_http_header_deadline_releases_tls_slot(
+    tmp_path, monkeypatch, unfinished,
+):
+    """Slow request-line/header bytes cannot extend the absolute admission slot."""
+    monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 1)
+    monkeypatch.setattr(ingress_module, "_HEADER_DEADLINE_SECONDS", 0.35)
+    monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 1.5)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    peer = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["unlisted"][0]),
+            str(setup["files"]["unlisted"][1]),
+        )
+        raw = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
+        peer.settimeout(2)
+        started = time.monotonic()
+        peer.sendall(unfinished)
+        # The peer has a CA-valid but *unpinned* certificate. Request-header
+        # parsing must end before actor pin and bearer checks are reached.
+        for _ in range(2):
+            time.sleep(0.08)
+            try:
+                peer.sendall(b"x")
+            except OSError:
+                break
+        try:
+            remaining = peer.recv(1)
+        except (OSError, ssl.SSLError):
+            remaining = b""
+        elapsed = time.monotonic() - started
+        assert remaining == b""
+        assert elapsed < 1.2
+
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 1
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "header-deadline-recovery", "echo", {"text": "ok"}),
+        )
+        assert status == 502  # TLS accepted again; backend is intentionally absent.
+    finally:
+        if peer is not None:
+            peer.close()
+        ingress.stop()
