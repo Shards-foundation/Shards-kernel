@@ -122,7 +122,7 @@ def test_runtime_database_replacement_corruption_and_permissions_fail_closed(tmp
     os.chmod(path, 0o600)
     with pytest.raises(ValueError, match="replaced"):
         server._verify_policy_checkpoint()
-    with pytest.raises(ValueError, match="revision"):
+    with pytest.raises(ValueError, match="replaced"):
         # Empty replacement can *not* be mistaken for the previous database
         # by the already running server; new process would require a
         # separate external trusted anchor, still an explicit P0 gap.
