@@ -607,7 +607,29 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
     )
     with pytest.raises(ValueError, match="explicit"):
         ingress_module.MTLSIngressServer(config)
-    ingress = ingress_module.MTLSIngressServer(config, allow_remote_listen=True)
+    with pytest.raises(ValueError, match="versioned"):
+        ingress_module.MTLSIngressServer(config, allow_remote_listen=True)
+    # Remote access requires v2 signed revision + a private local checkpoint.
+    import sqlite3
+    checkpoint = tmp_path / "ingress-checkpoint.sqlite3"
+    with sqlite3.connect(checkpoint):
+        pass
+    checkpoint.chmod(0o600)
+    raw["ingress_id"] = "remote-test"
+    raw["checkpoint_db_file"] = str(checkpoint)
+    signed_v2 = sign_mtls_ingress_policy(
+        raw, setup["ingress_key"], issued_at_ms=now - 1_000,
+        expires_at_ms=now + 60_000, revision=1,
+    )
+    v2 = ingress_module.verify_ingress_policy(
+        signed_v2, pinned_public_key_hex=setup["pinned"], now_ms=now,
+    )
+    from shards_kernel.integrations.mtls_checkpoint import bootstrap_ingress_checkpoint
+    bootstrap_ingress_checkpoint(
+        checkpoint, ingress_id=v2.ingress_id,
+        revision=v2.revision, digest=v2.policy_digest,
+    )
+    ingress = ingress_module.MTLSIngressServer(v2, allow_remote_listen=True)
     assert ingress.config.listen_host == "192.0.2.99"
 
     monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
@@ -627,6 +649,55 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
     monkeypatch.setattr(ingress_module, "MTLSIngressServer", Interrupted)
     assert ingress_module.run_mtls_ingress(str(path)) == 0
     assert calls == ["start", "stop"]
+
+
+def test_blocking_start_interrupt_revokes_and_drains_forwarding(tmp_path, monkeypatch):
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    server_instances = []
+    forward_started = threading.Event()
+    start_returned = threading.Event()
+    start_errors = []
+
+    def interrupt_serve_forever(server):
+        server_instances.append(server)
+        assert server.begin_forward()
+        forward_started.set()
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(
+        ingress_module._BoundedTLSServer, "serve_forever", interrupt_serve_forever,
+    )
+
+    def start_blocking_ingress():
+        try:
+            ingress.start(blocking=True)
+        except (Exception, KeyboardInterrupt) as exc:
+            start_errors.append(exc)
+        finally:
+            start_returned.set()
+
+    runner = threading.Thread(target=start_blocking_ingress, daemon=True)
+    runner.start()
+    try:
+        assert forward_started.wait(2), "expected a dispatch before startup interruption"
+        server = server_instances[0]
+        can_forward = server.begin_forward()
+        if can_forward:
+            server.end_forward()
+        assert not can_forward, "interrupted startup must revoke new forwarding"
+        runner.join(timeout=0.1)
+        assert runner.is_alive(), "interrupted startup must drain active dispatches"
+    finally:
+        if server_instances:
+            server_instances[0].end_forward()
+        runner.join(timeout=5)
+        ingress.stop()
+
+    assert not runner.is_alive()
+    assert start_returned.is_set()
+    assert len(start_errors) == 1
+    assert isinstance(start_errors[0], KeyboardInterrupt)
 
 
 def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path):
@@ -907,6 +978,7 @@ def test_aggregate_http_header_deadline_releases_tls_slot(
             peer.close()
         ingress.stop()
 
+
 def test_header_stream_enforces_cumulative_byte_budget(tmp_path, monkeypatch):
     """Separately valid lines cannot exceed the combined header-byte budget."""
     monkeypatch.setattr(ingress_module, "_MAX_HEADER_BYTES", 8)
@@ -1045,6 +1117,15 @@ def test_stop_drains_inflight_operator_dispatch(tmp_path, monkeypatch):
     )
     ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
+    shutdown_complete = threading.Event()
+    server = ingress._server
+    original_shutdown = server.shutdown
+
+    def observed_shutdown():
+        original_shutdown()
+        shutdown_complete.set()
+
+    monkeypatch.setattr(server, "shutdown", observed_shutdown)
 
     def client_request():
         try:
@@ -1065,7 +1146,8 @@ def test_stop_drains_inflight_operator_dispatch(tmp_path, monkeypatch):
         client.start()
         assert entered.wait(4), "expected an active operator dispatch"
         stopper.start()
-        time.sleep(0.15)
+        assert shutdown_complete.wait(2), "listener shutdown did not complete"
+        stopper.join(timeout=0.2)
         assert stopper.is_alive(), "stop() returned before dispatch drained"
     finally:
         release.set()

@@ -25,8 +25,12 @@ from typing import Any
 
 from shards_kernel.cli.service import _reject_constant, _unique_pairs
 from shards_kernel.common.time import SystemClock
+from shards_kernel.integrations.mtls_checkpoint import (
+    checkpoint_ingress_revision, verify_ingress_checkpoint,
+)
 
-_DOMAIN = b"SHARDS-MTLS-INGRESS-V1\x00"
+_DOMAIN_V1 = b"SHARDS-MTLS-INGRESS-V1\x00"
+_DOMAIN_V2 = b"SHARDS-MTLS-INGRESS-V2\x00"
 _MAX_CONFIG_BYTES = 96 * 1024
 _MAX_BODY_BYTES = 64 * 1024
 _MAX_HEADER_BYTES = 16 * 1024
@@ -49,6 +53,10 @@ class SignedIngressConfig:
     client_ca_file: Path
     cert_actors: dict[str, str]
     expires_at_ms: int
+    ingress_id: str | None = None
+    revision: int = 0
+    policy_digest: str | None = None
+    checkpoint_db_file: Path | None = None
 
 
 def _fields(value: Any, expected: set[str]) -> dict[str, Any]:
@@ -84,11 +92,17 @@ def _actor(value: Any) -> str:
 
 def canonical_ingress_policy(envelope: dict[str, Any]) -> bytes:
     """Domain-separated, deterministic bytes signed by an OFFLINE operator."""
-    fields = {
-        key: envelope[key]
-        for key in ("schema", "issued_at_ms", "expires_at_ms", "config")
-    }
-    return _DOMAIN + json.dumps(
+    schema = envelope["schema"]
+    if schema == "shards.mtls-ingress.v2":
+        names = ("schema", "revision", "issued_at_ms", "expires_at_ms", "config")
+        domain = _DOMAIN_V2
+    elif schema == "shards.mtls-ingress.v1":
+        names = ("schema", "issued_at_ms", "expires_at_ms", "config")
+        domain = _DOMAIN_V1
+    else:
+        raise ValueError("Unrecognised ingress protocol")
+    fields = {key: envelope[key] for key in names}
+    return domain + json.dumps(
         fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
@@ -99,10 +113,21 @@ def _validate_envelope(record: Any, public_key_hex: str, now_ms: int) -> dict[st
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-    obj = _fields(record, {
-        "schema", "issued_at_ms", "expires_at_ms", "config", "signature_hex",
-    })
-    if obj["schema"] != "shards.mtls-ingress.v1":
+    if not isinstance(record, dict):
+        raise ValueError("Ingress policy must be a JSON object")
+    schema = record.get("schema")
+    if schema == "shards.mtls-ingress.v2":
+        obj = _fields(record, {
+            "schema", "revision", "issued_at_ms", "expires_at_ms",
+            "config", "signature_hex",
+        })
+        if type(obj["revision"]) is not int or obj["revision"] < 1:
+            raise ValueError("Signed ingress revision must be positive")
+    elif schema == "shards.mtls-ingress.v1":
+        obj = _fields(record, {
+            "schema", "issued_at_ms", "expires_at_ms", "config", "signature_hex",
+        })
+    else:
         raise ValueError("Unrecognised ingress protocol")
     issued, expires = obj["issued_at_ms"], obj["expires_at_ms"]
     if (
@@ -169,10 +194,14 @@ def verify_ingress_policy(
 ) -> SignedIngressConfig:
     """Verify signature and exact TLS identity policy before network binding."""
     obj = _validate_envelope(envelope, pinned_public_key_hex, now_ms)
-    raw = _fields(obj["config"], {
+    versioned = obj["schema"] == "shards.mtls-ingress.v2"
+    fields = {
         "listen_host", "listen_port", "operator_port", "tls_cert_file",
         "tls_key_file", "client_ca_file", "agents",
-    })
+    }
+    if versioned:
+        fields |= {"ingress_id", "checkpoint_db_file"}
+    raw = _fields(obj["config"], fields)
     return SignedIngressConfig(
         listen_host=_listen_ip(raw["listen_host"]),
         listen_port=_port(raw["listen_port"]),
@@ -182,6 +211,11 @@ def verify_ingress_policy(
         client_ca_file=_path(raw["client_ca_file"]),
         cert_actors=_pinned_cert_actors(raw["agents"]),
         expires_at_ms=obj["expires_at_ms"],
+        ingress_id=_actor(raw["ingress_id"]) if versioned else None,
+        revision=obj["revision"] if versioned else 0,
+        policy_digest=hashlib.sha256(canonical_ingress_policy(obj)).hexdigest()
+        if versioned else None,
+        checkpoint_db_file=_path(raw["checkpoint_db_file"]) if versioned else None,
     )
 
 
@@ -262,6 +296,7 @@ class _IngressHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     config: SignedIngressConfig
     clock: SystemClock
+    policy_guard: Any
 
     def handle_one_request(self) -> None:
         """Apply an absolute deadline before parsing any HTTP bytes."""
@@ -303,11 +338,12 @@ class _IngressHandler(BaseHTTPRequestHandler):
 
     def _policy_safe(self) -> bool:
         try:
+            self.policy_guard()
             if self.clock.now_ms() > self.config.expires_at_ms:
                 self._reply(503, {"error": "Signed ingress policy expired"})
                 return False
         except Exception:
-            self._reply(503, {"error": "Ingress clock unavailable"})
+            self._reply(503, {"error": "Ingress policy checkpoint or clock unavailable"})
             return False
         return True
 
@@ -431,13 +467,12 @@ class _IngressHandler(BaseHTTPRequestHandler):
         if result is None:
             return
         body, payload = result
-        # Shutdown admission and operator dispatch share one synchronised gate:
-        # a pre-accepted TLS worker must never forward after ingress stops.
+        # Revoke forwarding on shutdown, and recheck policy after body receipt.
+        # A pre-accepted TLS worker must never dispatch after ingress stops.
         if not self.server.begin_forward():
             self._reply(503, {"error": "Ingress stopping"})
             return
         try:
-            # Authority can expire while receiving a bounded request body.
             if self._policy_safe():
                 self._submit_to_operator(body, payload, bearer)
         finally:
@@ -449,12 +484,13 @@ class _IngressHandler(BaseHTTPRequestHandler):
         return
 
 
-def _make_handler(config: SignedIngressConfig, clock: SystemClock):
+def _make_handler(config: SignedIngressConfig, clock: SystemClock, policy_guard: Any):
     class BoundHandler(_IngressHandler):
         pass
 
     BoundHandler.config = config
     BoundHandler.clock = clock
+    BoundHandler.policy_guard = staticmethod(policy_guard)
     return BoundHandler
 
 
@@ -533,33 +569,94 @@ class MTLSIngressServer:
     def __init__(
         self, config: SignedIngressConfig, *, allow_remote_listen: bool = False
     ) -> None:
-        if config.listen_host != "127.0.0.1" and not allow_remote_listen:
-            raise ValueError("Remote interface requires explicit operator opt-in")
+        if config.listen_host != "127.0.0.1":
+            if not allow_remote_listen:
+                raise ValueError("Remote interface requires explicit operator opt-in")
+            if not config.revision:
+                raise ValueError("Remote interface requires signed versioned ingress policy")
         self.config = config
+        self._checkpoint_identity: tuple[int, int] | None = None
+        if config.revision:
+            if not (config.checkpoint_db_file and config.ingress_id and config.policy_digest):
+                raise ValueError("Versioned ingress policy missing checkpoint identity")
+            # Validate against the enrolled checkpoint WITHOUT ratcheting
+            # its revision. TLS configuration and listener bind may still
+            # fail; only a successfully bound listener can activate a policy.
+            self._checkpoint_identity = checkpoint_ingress_revision(
+                config.checkpoint_db_file,
+                ingress_id=config.ingress_id,
+                revision=config.revision,
+                digest=config.policy_digest,
+                activate=False,
+            )
         self._clock = SystemClock()
         self._context = _tls_context(config)
         self._server: _BoundedTLSServer | None = None
         self._thread: threading.Thread | None = None
 
+    def _verify_policy_checkpoint(self) -> None:
+        if self.config.revision:
+            # Never use asserts for runtime trust checks. Python -O removes
+            # assertions and would silently bypass these authority guards.
+            checkpoint = self.config.checkpoint_db_file
+            ingress_id = self.config.ingress_id
+            digest = self.config.policy_digest
+            identity = self._checkpoint_identity
+            if (
+                checkpoint is None
+                or ingress_id is None
+                or digest is None
+                or identity is None
+            ):
+                raise ValueError("Missing signed ingress checkpoint authority")
+            verify_ingress_checkpoint(
+                checkpoint,
+                ingress_id=ingress_id,
+                revision=self.config.revision,
+                digest=digest,
+                identity=identity,
+            )
+
     def start(self, *, blocking: bool = True) -> None:
+        if self._server is not None:
+            raise RuntimeError("mTLS ingress already started")
+        # The constructor binds the socket immediately. No checkpoint may
+        # advance if another process holds the port or TLS setup failed.
         server = _BoundedTLSServer(
             (self.config.listen_host, self.config.listen_port),
-            _make_handler(self.config, self._clock),
+            _make_handler(self.config, self._clock, self._verify_policy_checkpoint),
             self._context,
         )
-        self._server = server
-        if blocking:
-            server.serve_forever()
-        else:
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            self._thread = thread
-            thread.start()
+        try:
+            if self.config.revision:
+                checkpoint = self.config.checkpoint_db_file
+                ingress_id = self.config.ingress_id
+                digest = self.config.policy_digest
+                if checkpoint is None or ingress_id is None or digest is None:
+                    raise ValueError("Missing signed ingress checkpoint authority")
+                activated_identity = checkpoint_ingress_revision(
+                    checkpoint, ingress_id=ingress_id,
+                    revision=self.config.revision, digest=digest,
+                )
+                if activated_identity != self._checkpoint_identity:
+                    raise ValueError("Ingress checkpoint database changed before binding")
+            self._server = server
+            if blocking:
+                server.serve_forever()
+            else:
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                self._thread = thread
+                thread.start()
+        except BaseException:
+            server.disable_forwarding()
+            server.server_close()
+            server.await_forwards()
+            self._server = None
+            raise
 
     def stop(self) -> None:
         if self._server is not None:
             server = self._server
-            # Revoke dispatch before closing the listener. Accepted sockets
-            # can still finish TLS, but may no longer call the operator.
             server.disable_forwarding()
             server.shutdown()
             server.server_close()

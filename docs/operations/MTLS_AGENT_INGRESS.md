@@ -49,10 +49,69 @@ a client-auth CA certificate, and **separate client certificates** for
 two enrolled agents. Follow a proper CA and key lifecycle; do not save
 test keys or operator signing keys in git.
 
+**Signed ingress-policy v2 is required for any non-loopback listener.**
+Legacy v1 signed envelopes remain supported on loopback for compatibility
+only, with no persistence-backed revision check. The v2 envelope signs an
+explicit positive `revision`, fixed `ingress_id` and
+`checkpoint_db_file` as well as the existing TLS and agent configuration.
+The host operator must independently provision this private persistent file
+before starting ingress:
+
+```bash
+install -m 0600 /dev/null /secure/ingress/ingress-checkpoint.sqlite3
+```
+
+The path must be absolute, a regular non-symlink file, owned by the service
+user, and inaccessible to group/other users. **Creating the empty file is not
+enough to activate ingress.** The trusted host operator must initialise it
+**once, out of band**, after verifying the operator-signed v2 policy:
+
+```bash
+# Run as the same service user that owns the private checkpoint file.
+export SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX='<independently-pinned-public-key-hex>'
+python - /absolute/path/signed-ingress.json <<'PY'
+import os
+import sys
+from shards_kernel.common.time import SystemClock
+from shards_kernel.integrations.mtls_ingress import load_ingress_policy
+from shards_kernel.integrations.mtls_checkpoint import bootstrap_ingress_checkpoint
+
+config = load_ingress_policy(
+    sys.argv[1],
+    pinned_public_key_hex=os.environ["SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX"],
+    now_ms=SystemClock().now_ms(),
+)
+if not (config.revision and config.checkpoint_db_file
+        and config.ingress_id and config.policy_digest):
+    raise SystemExit("Refusing to bootstrap legacy or incomplete ingress policy")
+bootstrap_ingress_checkpoint(
+    config.checkpoint_db_file,
+    ingress_id=config.ingress_id,
+    revision=config.revision,
+    digest=config.policy_digest,
+)
+PY
+```
+
+Do not run this bootstrapping operation during ingress startup or as part
+of automated recovery. Once the checkpoint is enrolled, subsequent starts
+**require the existing table and signed ingress identity**: missing tables
+or rows, damaged databases and unexpected file replacements fail closed.
+An administrator must investigate a missing checkpoint and obtain
+independently verifiable recovery authority; restoring an old database
+alone is not proof of authorisation. Keep the **same file** across restarts
+and policy rotations; preserve it in protected backups. The v2 service
+transactionally remembers the highest accepted signed revision and digest.
+A lower revision, a different signed config at the same revision, a missing
+checkpoint or replacement of the file while the process runs fails closed.
+On a newer signed revision, old running instances reject subsequent calls.
+
 A reference *unsigned* configuration object to sign is:
 
 ```json
 {
+  "ingress_id": "production-agent-ingress",
+  "checkpoint_db_file": "/secure/ingress/ingress-checkpoint.sqlite3",
   "listen_host": "127.0.0.1",
   "listen_port": 9443,
   "operator_port": 8765,
@@ -68,9 +127,9 @@ A reference *unsigned* configuration object to sign is:
 
 Only the trusted **offline** operator signs the object, using
 `shards_kernel.issuer.sign_mtls_ingress_policy(config, signing_key,
-issued_at_ms=..., expires_at_ms=...)`. It creates a domain-separated
-Ed25519 envelope `shards.mtls-ingress.v1`. Expiry must be at most 24
-hours. This root key should be independent of permit signing and TLS keys.
+issued_at_ms=..., expires_at_ms=..., revision=1)`. It creates a domain-separated
+Ed25519 envelope `shards.mtls-ingress.v2` with an explicit monotonic revision.
+Expiry must be at most 24 hours. This root key should be independent of permit signing and TLS keys.
 
 The ingress service receives **only** the independently pinned
 `SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX` and the signed JSON file.
@@ -81,9 +140,12 @@ python -m pip install -e ".[crypto]"
 shards-kernel mtls-ingress --config /absolute/path/signed-ingress.json
 ```
 
-An external bind, such as a specifically assigned signed\n`listen_host="192.0.2.44"` (documentation-only address), is
+An external bind, such as a specifically assigned signed
+`listen_host="192.0.2.44"` (documentation-only address), is
 **refused by default** and additionally requires the explicit operator
-flag `--allow-remote-listen`. Wildcard binds are not supported. In a\nreal deployment use an actual interface address assigned to that host.\nThe backend operator always stays on
+flag `--allow-remote-listen`. **Legacy v1 envelopes are rejected for remote binds even with this flag.** Wildcard binds are not supported. In a
+real deployment use an actual interface address assigned to that host.
+The backend operator always stays on
 `127.0.0.1`; never enable `allow_remote_bind` for the kernel itself.
 
 The operator signs and reviews exactly which two agent identities own
@@ -96,7 +158,7 @@ The gateway does not infer agent identity merely from certificate CN.
 
 ```bash
 python -m pip install -e ".[dev,crypto]"
-pytest -q tests/test_mtls_agent_ingress.py
+pytest -q tests/test_mtls_agent_ingress.py tests/test_mtls_ingress_checkpoint.py
 ```
 
 The live test generates a temporary CA, TLS 1.3 server identity and
@@ -124,8 +186,15 @@ but is **not pinned**. The test proves:
   operator's own secret infrastructure. CRL/OCSP, automated certificate
   renewal, post-compromise trust-anchor rotation and secrets vaulting are
   not implemented; operator certificate pin removal/re-signing is manual.
-- There is no signed monotonic ingress-policy revision high-water mark;
-  the short expiry and pinned root do not provide external anti-rollback.
+- Legacy signed v1 policies have no persistence-backed revision high-water
+  mark. Signed v2 adds an explicit monotonic revision, deliberate one-time
+  trusted-operator bootstrap and a local SQLite checkpoint; startup never
+  implicitly enrols an empty or deleted database. The v2 checkpoint is **not
+  externally anchored**: an actor able to restore an old policy and its old
+  checkpoint together can evade local rollback detection. A trusted external
+  anti-rollback anchor and safe recovery/rotation operations remain P0 work.
+  Runtime checkpoint validation uses explicit exceptions (not Python
+  assertions), and CI exercises the guards under optimised `-O` mode.
 - Ingress request-line and HTTP headers share a **16 KiB cumulative byte
   limit**, including line terminators, in addition to the absolute 8-second
   parsing deadline. Oversized pre-authentication headers are rejected.
@@ -140,8 +209,8 @@ but is **not pinned**. The test proves:
   timeout), applies a 3-second socket-read timeout, and enforces separate
   8-second monotonic aggregate deadlines for HTTP request-line/header parsing
   **and** request-body receipt. Each blocked byte read is bounded by the
-  remaining deadline, so slow clients cannot reset the budget indefinitely. Excess connections are closed before
-  HTTP handling. These are **local resource bounds**, not a substitute for
+  remaining deadline, so slow clients cannot reset the budget indefinitely.
+  Excess connections are closed before HTTP handling. These are **local resource bounds**, not a substitute for
   network-edge connection controls, a DDoS service or independently measured
   throughput under attack.
 - No network segmentation proof, vulnerability assessment under hostile
@@ -153,3 +222,47 @@ Release work remains in
 [issue #79](https://github.com/Shards-foundation/Shards-kernel/issues/79),
 [issue #64](https://github.com/Shards-foundation/Shards-kernel/issues/64) and
 [issue #63](https://github.com/Shards-foundation/Shards-kernel/issues/63).
+
+
+## Checkpoint SQLite connection lifecycle (security hardening)
+
+The signed v2 ingress opens a transaction when checking every authenticated
+request. SQLite's Python connection context manager **does not automatically
+close its file descriptor**; it only commits or rolls back. The checkpoint
+helper now wraps every transaction with explicit connection closure on
+successful verification, bootstrap, revision advancement and failures.
+Repeated authentication must not depend on cyclic garbage collection to
+release descriptor capacity. Regression coverage retains 125+ live
+connection references to prove that all SQLite handles were explicitly
+closed before another request.
+
+This mitigates local file-descriptor exhaustion, **not** hostile network
+load or upstream denial-of-service: admission limits, deadline enforcement,
+network firewalls and platform monitoring remain independent release gates.
+
+
+## Versioned signature-domain migration and activation
+
+Signed v1 policies use the domain `SHARDS-MTLS-INGRESS-V1\0`.
+Signed v2 policies now use the **distinct**
+`SHARDS-MTLS-INGRESS-V2\0` domain. In both cases the final byte is a
+literal zero byte, not a printable backslash sequence. The offline issuer
+and verifier must agree exactly on that canonical message.
+
+**Compatibility note:** early development snapshots of v2 erroneously
+signed the v2 envelope using the v1 domain. Those signatures are **not**
+accepted by the corrected verifier. A trusted offline operator must
+**reissue** a v2 policy under the correct domain and advance to a new,
+positive revision when any prior v2 revision was already enrolled.
+Re-signing a different payload at the same revision is rejected by the
+existing checkpoint and must not be treated as emergency recovery
+authority. Do not silently accept either domain for v2.
+
+The ingress constructor now performs read-only, revision-aware preflight
+of the already-enrolled checkpoint. It does **not** ratchet the trusted
+revision during TLS file loading or while preparing the server. The
+revision advances atomically only **after** the HTTPS listener binds
+successfully, and **before** it can accept requests. A failed bind cannot
+consume a policy revision; failures during activation close the newly
+bound listening socket. Independent external monotonic anchoring is still
+required before production.
