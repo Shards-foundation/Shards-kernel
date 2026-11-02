@@ -672,7 +672,7 @@ def test_blocking_start_interrupt_revokes_and_drains_forwarding(tmp_path, monkey
     def start_blocking_ingress():
         try:
             ingress.start(blocking=True)
-        except BaseException as exc:
+        except (Exception, KeyboardInterrupt) as exc:
             start_errors.append(exc)
         finally:
             start_returned.set()
