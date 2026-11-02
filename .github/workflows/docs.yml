@@ -48,6 +48,7 @@ jobs:
 
       - name: Validate legal documentation contract and PR scope
         env:
+          LEGAL_DOC_SCOPE_REQUIRED: ${{ github.event_name == 'pull_request' }}
           LEGAL_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           LEGAL_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python -m unittest tests.test_legal_docs -v
