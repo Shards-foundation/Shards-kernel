@@ -163,6 +163,20 @@ test clock and an in-memory evidence bundle; it is **not a live gateway,
 trusted issuer deployment, or evidence of production readiness**. See
 [offline acceptance demo](docs/operations/OFFLINE_PERMIT_DEMO.md).
 
+## Separate offline permit issuer and human approver
+
+`shards-kernel issuer approve` and `shards-kernel issuer sign` provide
+two **offline-only**, distinct Ed25519 authorities: a human-reviewed
+signature of an exact unsigned permit draft, followed by a separately
+trusted issuer signature. Private keys are provided only via inherited
+file descriptors, never the Shards-Kernel HTTP/MCP service.
+
+This is a **local reference workflow**, not a KMS-backed production issuer.
+It limits signed capabilities to single-execution, short-lived built-in
+`echo` and `add` tools. See the
+[offline issuer guide](docs/operations/OFFLINE_ISSUER.md) for exact
+commands, approval steps, threats and limitations.
+
 ## Restricted local operator service
 
 A standalone, loopback-only HTTP reference service is available with pinned
