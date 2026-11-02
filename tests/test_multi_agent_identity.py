@@ -14,7 +14,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from shards_kernel.cli.service import build_operator_server, parse_operator_config
-from shards_kernel.integrations.auth import AgentIdentity, agent_token_mac, identify_agent
+from shards_kernel.integrations.auth import AgentIdentity, agent_token_kdf, identify_agent
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_operator_policy, sign_v2_permit
 from shards_kernel.permits import PermitBuilder
@@ -22,7 +22,8 @@ from shards_kernel.permits import PermitBuilder
 
 def _setup(tmp_path):
     issuer = Ed25519PrivateKey.generate()
-    alice_token, bob_token = secrets.token_urlsafe(40), secrets.token_urlsafe(40)
+    alice_token = "agent-alice." + secrets.token_urlsafe(40)
+    bob_token = "agent-bob." + secrets.token_urlsafe(40)
     pepper = secrets.token_urlsafe(48)
     config = {
         "version": 2,
@@ -31,12 +32,12 @@ def _setup(tmp_path):
         "agents": [
             {
                 "actor": "agent-alice",
-                "token_hmac_sha256": agent_token_mac(alice_token, pepper.encode()),
+                "token_scrypt": agent_token_kdf(alice_token, pepper.encode()),
                 "allowed_tools": ["echo"],
             },
             {
                 "actor": "agent-bob",
-                "token_hmac_sha256": agent_token_mac(bob_token, pepper.encode()),
+                "token_scrypt": agent_token_kdf(bob_token, pepper.encode()),
                 "allowed_tools": ["add"],
             },
         ],
@@ -173,11 +174,11 @@ def test_invalid_agent_enrolment_rejected(tmp_path, variant):
     if variant == "duplicate_actor":
         raw["agents"][1]["actor"] = "agent-alice"
     elif variant == "duplicate_digest":
-        raw["agents"][1]["token_hmac_sha256"] = raw["agents"][0]["token_hmac_sha256"]
+        raw["agents"][1]["token_scrypt"] = raw["agents"][0]["token_scrypt"]
     elif variant == "wildcard_actor":
         raw["agents"][0]["actor"] = "*"
     elif variant == "invalid_digest":
-        raw["agents"][0]["token_hmac_sha256"] = "not-a-digest"
+        raw["agents"][0]["token_scrypt"] = "not-a-digest"
     elif variant == "raw_secret":
         raw["agents"][0]["token"] = "forbidden"
     elif variant == "unknown_tool":
@@ -205,7 +206,7 @@ def test_principal_resolution_does_not_accept_tokens_with_whitespace_or_truncati
     ):
         assert identify_agent(header, principals, pepper.encode()) is None
     assert all(isinstance(p, AgentIdentity) for p in principals)
-    assert all(p.token_hmac_sha256 not in (alice_token, bob_token) for p in principals)
+    assert all(p.token_scrypt not in (alice_token, bob_token) for p in principals)
 
 
 def test_operator_and_agent_secret_collision_is_rejected(tmp_path):
