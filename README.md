@@ -181,7 +181,9 @@ commands, approval steps, threats and limitations.
 
 A signed **operator config v2** can enroll 2–16 separate agents, each
 with a unique high-entropy bearer token and its own tool allowlist. The
-signed file stores only SHA-256 token digests, not raw bearer secrets.
+signed file stores only HMAC-SHA256 token digests, not raw bearer secrets.
+A separate operator-held `SHARDS_KERNEL_AGENT_AUTH_PEPPER` supplies the
+MAC key outside the signed policy.
 `POST /submit` binds each authenticated bearer to the exact actor and
 its permitted tool; a **separately signed Ed25519 permit is still
 mandatory**. The distinct operator bearer alone can access halt,
