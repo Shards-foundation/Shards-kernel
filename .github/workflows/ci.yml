@@ -10,7 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  e2e:
+    name: Mandatory local E2E release gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install E2E dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,crypto,mcp]"
+
+      - name: Run strict multi-process E2E acceptance gate
+        run: python scripts/ci/run_e2e_gate.py
+
   quality:
+    needs: e2e
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
