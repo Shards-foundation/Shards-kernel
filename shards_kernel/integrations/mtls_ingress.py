@@ -29,6 +29,7 @@ from shards_kernel.common.time import SystemClock
 _DOMAIN = b"SHARDS-MTLS-INGRESS-V1\x00"
 _MAX_CONFIG_BYTES = 96 * 1024
 _MAX_BODY_BYTES = 64 * 1024
+_MAX_HEADER_BYTES = 16 * 1024
 _MAX_RESPONSE_BYTES = 64 * 1024
 _MAX_POLICY_MS = 24 * 60 * 60 * 1000
 _MAX_CONCURRENT_CONNECTIONS = 32
@@ -233,11 +234,14 @@ class _DeadlineHeaderStream:
         self._stream = stream
         self._connection = connection
         self._deadline = deadline
+        self._bytes_read = 0
 
     def readline(self, limit: int = -1) -> bytes:
         limit = 65537 if limit < 0 else min(limit, 65537)
         data = bytearray()
         while len(data) < limit:
+            if self._bytes_read >= _MAX_HEADER_BYTES:
+                raise TimeoutError("HTTP aggregate header byte budget exceeded")
             remaining = self._deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("HTTP header deadline exceeded")
@@ -246,6 +250,7 @@ class _DeadlineHeaderStream:
             if not char:
                 break
             data.extend(char)
+            self._bytes_read += len(char)
             if char == b"\n":
                 break
         return bytes(data)
@@ -426,11 +431,17 @@ class _IngressHandler(BaseHTTPRequestHandler):
         if result is None:
             return
         body, payload = result
-        # A policy can expire during a slow (but bounded) body upload.
-        # Do not forward under authority that expired after admission.
-        if not self._policy_safe():
+        # Shutdown admission and operator dispatch share one synchronised gate:
+        # a pre-accepted TLS worker must never forward after ingress stops.
+        if not self.server.begin_forward():
+            self._reply(503, {"error": "Ingress stopping"})
             return
-        self._submit_to_operator(body, payload, bearer)
+        try:
+            # Authority can expire while receiving a bounded request body.
+            if self._policy_safe():
+                self._submit_to_operator(body, payload, bearer)
+        finally:
+            self.server.end_forward()
 
     # BaseHTTPRequestHandler requires the parameter name 'format' in its API.
     def log_message(self, format: str, *args: Any) -> None:  # pylint: disable=redefined-builtin
@@ -462,7 +473,33 @@ class _BoundedTLSServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], handler: type, context: ssl.SSLContext):
         self._tls_context = context
         self._slots = threading.BoundedSemaphore(_MAX_CONCURRENT_CONNECTIONS)
+        self._forwarding = threading.Condition()
+        self._stopping = False
+        self._inflight_forwards = 0
         super().__init__(address, handler)
+
+    def begin_forward(self) -> bool:
+        """Atomically reject new dispatch once shutdown starts."""
+        with self._forwarding:
+            if self._stopping:
+                return False
+            self._inflight_forwards += 1
+            return True
+
+    def end_forward(self) -> None:
+        with self._forwarding:
+            self._inflight_forwards -= 1
+            self._forwarding.notify_all()
+
+    def disable_forwarding(self) -> None:
+        with self._forwarding:
+            self._stopping = True
+
+    def await_forwards(self) -> None:
+        """Do not report shutdown complete while a dispatch is in progress."""
+        with self._forwarding:
+            while self._inflight_forwards:
+                self._forwarding.wait()
 
     def process_request(self, request: Any, client_address: Any) -> None:
         if not self._slots.acquire(blocking=False):
@@ -520,8 +557,13 @@ class MTLSIngressServer:
 
     def stop(self) -> None:
         if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
+            server = self._server
+            # Revoke dispatch before closing the listener. Accepted sockets
+            # can still finish TLS, but may no longer call the operator.
+            server.disable_forwarding()
+            server.shutdown()
+            server.server_close()
+            server.await_forwards()
             self._server = None
         if self._thread is not None:
             self._thread.join(timeout=5)

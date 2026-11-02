@@ -5,10 +5,12 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import http.client
+import io
 import json
 import secrets
 import socket
 import ssl
+import threading
 import time
 
 import pytest
@@ -904,3 +906,174 @@ def test_aggregate_http_header_deadline_releases_tls_slot(
         if peer is not None:
             peer.close()
         ingress.stop()
+
+def test_header_stream_enforces_cumulative_byte_budget(tmp_path, monkeypatch):
+    """Separately valid lines cannot exceed the combined header-byte budget."""
+    monkeypatch.setattr(ingress_module, "_MAX_HEADER_BYTES", 8)
+    stream = io.BytesIO(b"A: 1\\r\\nB: 2\\r\\n")
+
+    class TimeoutSocket:
+        def settimeout(self, _seconds):
+            pass
+
+    reader = ingress_module._DeadlineHeaderStream(
+        stream, TimeoutSocket(), time.monotonic() + 2,
+    )
+    assert reader.readline() == b"A: 1\\r\\n"
+    with pytest.raises(TimeoutError, match="header byte budget"):
+        reader.readline()
+
+
+def test_live_tls_header_byte_budget_recovers_slot(tmp_path, monkeypatch):
+    """A valid-CA peer cannot retain a TLS slot using oversized total headers."""
+    monkeypatch.setattr(ingress_module, "_MAX_HEADER_BYTES", 1024)
+    monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 1)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    peer = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["unlisted"][0]),
+            str(setup["files"]["unlisted"][1]),
+        )
+        raw = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
+        peer.settimeout(2)
+        oversized = (
+            b"POST /submit HTTP/1.1\\r\\nHost: local\\r\\n"
+            + b"X-Oversized: " + b"x" * 1100 + b"\\r\\n\\r\\n"
+        )
+        try:
+            peer.sendall(oversized)
+            result = peer.recv(4096)
+            assert b"200 OK" not in result
+        except (OSError, ssl.SSLError, http.client.HTTPException):
+            pass  # An early close is valid fail-closed rejection.
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 1
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "after-header-cap", "echo", {"text": "ok"}),
+        )
+        assert status == 502  # No local operator is running in this test.
+    finally:
+        if peer is not None:
+            peer.close()
+        ingress.stop()
+
+
+def test_preaccepted_tls_connection_cannot_forward_after_stop(
+    tmp_path, monkeypatch,
+):
+    """An accepted but unauthenticated socket has no authority after stop()."""
+    setup = _setup(tmp_path)
+    forwarded = threading.Event()
+
+    def record_forward(self, body, payload, bearer):
+        forwarded.set()
+        self._reply(200, {"request_id": payload["request_id"], "decision": "ALLOW"})
+
+    monkeypatch.setattr(
+        ingress_module._IngressHandler, "_submit_to_operator", record_forward,
+    )
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    raw = socket.create_connection(
+        ("127.0.0.1", setup["ingress_port"]), timeout=2,
+    )
+    try:
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 31 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 31
+        ingress.stop()
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["alpha"][0]),
+            str(setup["files"]["alpha"][1]),
+        )
+        try:
+            peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
+            peer.settimeout(2)
+            body = json.dumps(_body(
+                "agent-alpha", "post-stop", "echo", {"text": "never"},
+                _permit(setup["issuer"], "agent-alpha", "echo", {"text": "never"}),
+            )).encode("utf-8")
+            request = (
+                b"POST /submit HTTP/1.1\\r\\n"
+                b"Host: localhost\\r\\n"
+                b"Authorization: Bearer " + setup["alpha"].encode() + b"\\r\\n"
+                b"Content-Type: application/json\\r\\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\\r\\n\\r\\n"
+                + body
+            )
+            peer.sendall(request)
+            response = peer.recv(4096)
+            assert b"200 OK" not in response
+            peer.close()
+        except (OSError, ssl.SSLError, http.client.HTTPException):
+            pass  # Closing pre-accepted connections is also a safe outcome.
+        assert not forwarded.is_set()
+    finally:
+        raw.close()
+        ingress.stop()
+
+
+def test_stop_drains_inflight_operator_dispatch(tmp_path, monkeypatch):
+    """stop() must not return while an authorised dispatch is still underway."""
+    setup = _setup(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    responses = []
+    errors = []
+
+    def blocked_forward(self, body, payload, bearer):
+        entered.set()
+        if not release.wait(8):
+            raise TimeoutError("test dispatch was not released")
+        self._reply(200, {"request_id": payload["request_id"], "decision": "ALLOW"})
+
+    monkeypatch.setattr(
+        ingress_module._IngressHandler, "_submit_to_operator", blocked_forward,
+    )
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+
+    def client_request():
+        try:
+            responses.append(_https(
+                setup["ingress_port"], setup["files"]["ca"],
+                setup["files"]["alpha"], bearer=setup["alpha"],
+                payload=_body(
+                    "agent-alpha", "inflight-stop", "echo", {"text": "ok"},
+                    _permit(setup["issuer"], "agent-alpha", "echo", {"text": "ok"}),
+                ),
+            ))
+        except Exception as exc:
+            errors.append(exc)
+
+    client = threading.Thread(target=client_request, daemon=True)
+    stopper = threading.Thread(target=ingress.stop, daemon=True)
+    try:
+        client.start()
+        assert entered.wait(4), "expected an active operator dispatch"
+        stopper.start()
+        time.sleep(0.15)
+        assert stopper.is_alive(), "stop() returned before dispatch drained"
+    finally:
+        release.set()
+        client.join(timeout=5)
+        if stopper.ident is not None:
+            stopper.join(timeout=5)
+        ingress.stop()
+    assert not stopper.is_alive()
+    assert not client.is_alive()
+    assert not errors
+    assert responses[0][0] == 200

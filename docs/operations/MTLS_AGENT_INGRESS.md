@@ -126,6 +126,15 @@ but is **not pinned**. The test proves:
   not implemented; operator certificate pin removal/re-signing is manual.
 - There is no signed monotonic ingress-policy revision high-water mark;
   the short expiry and pinned root do not provide external anti-rollback.
+- Ingress request-line and HTTP headers share a **16 KiB cumulative byte
+  limit**, including line terminators, in addition to the absolute 8-second
+  parsing deadline. Oversized pre-authentication headers are rejected.
+- `MTLSIngressServer.stop()` is a **forward-dispatch revocation boundary**:
+  it prevents new operator forwarding before closing its listener and drains
+  in-flight forwarding before returning. Already completed operator actions
+  cannot be rolled back. Accepted sockets may finish TLS after shutdown
+  starts, but must never dispatch new operator calls. A slow or hung trusted
+  operator can delay stop while an earlier forwarding request drains.
 - The reference ingress now admits at most 32 concurrent TLS connections,
   performs TLS handshakes in bounded worker threads (3-second handshake
   timeout), applies a 3-second socket-read timeout, and enforces separate
