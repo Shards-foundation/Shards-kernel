@@ -34,47 +34,65 @@ def bearer_authorized(header: Optional[str], api_key: str) -> bool:
 
 @dataclass(frozen=True)
 class AgentIdentity:
-    """Signed-config principal metadata; NEVER contains a bearer secret."""
+    """Public identity and memory-hard token verifier, not a bearer secret."""
 
     actor: str
-    token_hmac_sha256: str
+    token_scrypt: str
     allowed_tools: frozenset[str]
 
 
 def resolve_agent_pepper(pepper: str | None = None) -> bytes:
-    """Require an independent high-entropy MAC key outside signed policy."""
+    """Require a separately provisioned secret for per-agent KDF salts."""
     value = pepper if pepper is not None else os.environ.get("SHARDS_KERNEL_AGENT_AUTH_PEPPER")
     if not isinstance(value, str) or len(value) < 32 or value != value.strip():
         raise ValueError("Operator must provision a separate 32+ character agent authentication pepper")
     return value.encode("utf-8")
 
 
-def agent_token_mac(token: str, pepper: bytes) -> str:
-    """Keyed lookup digest of a randomly generated high-entropy agent token."""
-    return hmac.new(pepper, token.encode("ascii"), hashlib.sha256).hexdigest()
+def agent_token_kdf(token: str, pepper: bytes) -> str:
+    """Derive a per-actor, memory-hard verifier for an agent-labelled token.
+
+    An operator provisions `<actor>.<cryptographically-random-secret>`.
+    The actor prefix is public routing metadata, NEVER an identity proof.
+    """
+    if not isinstance(token, str) or not token.isascii() or token.count(".") != 1:
+        raise ValueError("Token must be actor-labelled and ASCII")
+    actor, secret = token.split(".", 1)
+    if (
+        not actor or not 32 <= len(secret) <= 512
+        or any(c.isspace() for c in secret)
+    ):
+        raise ValueError("Token must include a nonempty actor and high-entropy secret")
+    salt = hmac.new(
+        pepper, b"SHARDS-AGENT-TOKEN-KDF-V2\\x00" + actor.encode("ascii"), hashlib.sha256
+    ).digest()
+    return hashlib.scrypt(
+        token.encode("ascii"), salt=salt, n=2**14, r=8, p=1, dklen=32
+    ).hex()
 
 
 def identify_agent(
     header: Optional[str], identities: tuple[AgentIdentity, ...], pepper: bytes
 ) -> AgentIdentity | None:
-    """Resolve a v2 loopback transport credential to one exact signed identity.
+    """Bind an agent-labelled bearer to one pinned principal using scrypt.
 
-    HMAC digests are compared in constant time. A separate operator-held
-    MAC key prevents offline guesses from a stolen signed policy. Raw bearer
-    tokens are never logged, stored in config, or used for kernel signing.
+    The untrusted label selects the verifier row only. It cannot authenticate
+    the actor without the constant-time memory-hard digest comparison.
     """
     if not isinstance(header, str) or not header.startswith("Bearer "):
         return None
     token = header[len("Bearer ") :]
     if (
-        not 32 <= len(token) <= 512
-        or not token.isascii()
-        or any(ch.isspace() for ch in token)
+        len(token) > 640 or not token.isascii()
+        or any(ch.isspace() for ch in token) or token.count(".") != 1
     ):
         return None
-    digest = agent_token_mac(token, pepper)
-    match: AgentIdentity | None = None
+    actor = token.split(".", 1)[0]
     for identity in identities:
-        if hmac.compare_digest(digest, identity.token_hmac_sha256):
-            match = identity
-    return match
+        if identity.actor == actor:
+            try:
+                derived = agent_token_kdf(token, pepper)
+            except (ValueError, UnicodeError):
+                return None
+            return identity if hmac.compare_digest(derived, identity.token_scrypt) else None
+    return None
