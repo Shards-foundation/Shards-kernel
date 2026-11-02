@@ -125,21 +125,28 @@ def test_http_server_no_wildcard_cors(live_server):
 
 
 def test_http_server_rejects_oversized_body_without_executing(live_server):
-    server, url = live_server
-    oversized = b"x" * (1024 * 1024 + 1)
-    request = urllib.request.Request(
-        url + "/submit",
-        data=oversized,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {TEST_KEY}",
-        },
-        method="POST",
-    )
-    with pytest.raises(urllib.error.HTTPError) as error:
-        urllib.request.urlopen(request, timeout=3)  # nosec B310: loopback-only test
-    assert error.value.code == 413
-    assert json.loads(error.value.read())["error"] == "Request body too large"
+    import http.client
+
+    server, _url = live_server
+    port = server._server.server_address[1]
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    try:
+        # Deliberately declare an oversized payload; do not send it. The server
+        # must reject Content-Length before reading any request body bytes.
+        connection.request(
+            "POST",
+            "/submit",
+            body=b"",
+            headers={
+                "Content-Length": str(1024 * 1024 + 1),
+                "Authorization": f"Bearer {TEST_KEY}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 413
+        assert json.loads(response.read())["error"] == "Request body too large"
+    finally:
+        connection.close()
     assert server.kernel.get_state().value != "HALTED"
 
 
