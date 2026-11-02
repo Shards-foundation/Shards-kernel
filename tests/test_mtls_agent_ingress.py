@@ -535,7 +535,7 @@ def test_cli_ingress_valid_signed_policy_runs_and_stops_without_leaking(tmp_path
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(ingress_module, "ingress_module.MTLSIngressServer", FakeIngress)
+    monkeypatch.setattr(ingress_module, "MTLSIngressServer", FakeIngress)
     assert ingress_module.run_mtls_ingress(str(signed_path)) == 0
     assert calls == ["start", "stop"]
 
@@ -622,7 +622,7 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(ingress_module, "ingress_module.MTLSIngressServer", Interrupted)
+    monkeypatch.setattr(ingress_module, "MTLSIngressServer", Interrupted)
     assert ingress_module.run_mtls_ingress(str(path)) == 0
     assert calls == ["start", "stop"]
 
