@@ -132,7 +132,7 @@ async def _invoke(
                 or (tool == "echo" and not isinstance(value, str))
                 or (tool == "add" and (
                     type(value) not in (int, float)
-                    or not math.isfinite(value)
+                    or (type(value) is float and not math.isfinite(value))
                 ))
             ):
                 raise ValueError("Incomplete or inconsistent MCP receipt")
