@@ -110,7 +110,7 @@ def test_permit_expiration_rejects_side_effect_under_wall_clock():
 
 
 def test_default_http_framework_factories_do_not_use_virtual_time():
-    flask = pytest.importorskip("flask")
+    pytest.importorskip("flask")
     from shards_kernel.integrations.flask_adapter import create_flask_app
 
     app = create_flask_app(
