@@ -275,7 +275,7 @@ def _validate_registered_principals(
         raise ValueError("Agent identities exceed strict kernel policy")
     if len({identity.actor for identity in agent_identities}) != len(agent_identities):
         raise ValueError("Duplicate agent principals")
-    if len({identity.token_hmac_sha256 for identity in agent_identities}) != len(agent_identities):
+    if len({identity.token_scrypt for identity in agent_identities}) != len(agent_identities):
         raise ValueError("Duplicate agent credentials")
     if identify_agent(
         "Bearer " + operator_secret, agent_identities, agent_auth_pepper
