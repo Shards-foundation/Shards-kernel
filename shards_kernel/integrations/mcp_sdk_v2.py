@@ -26,29 +26,16 @@ except ImportError:  # Optional extra; the base kernel supports Python 3.9+.
     TextContent = None
 
 
-def create_official_mcp_server(
+def _validate_configuration(
     kernel: BaseKernel,
-    *,
     actor: str,
     handlers: Mapping[str, Callable[..., Any]],
-) -> Any:
-    """Build an MCP v2 server with an explicit, kernel-governed tool allowlist.
-
-    `actor` is set by the trusted local process, never supplied by an LLM.
-    The incoming `permit` is a signed, narrowly scoped capability; this
-    function does not issue permits or derive identity from the tool payload.
-    """
-    if MCPServer is None:
-        raise RuntimeError(
-            "Official MCP SDK v2 is required: install shards-kernel[mcp] on Python 3.11+"
-        )
-
+) -> None:
     if not isinstance(actor, str) or not actor.strip() or "*" in actor:
         raise ValueError("A concrete, trusted local actor identity is required")
     if not isinstance(handlers, Mapping) or not handlers:
         raise ValueError("At least one explicitly registered handler is required")
 
-    # Never launch a gateway with the kernel's wildcard example policy.
     policy = kernel.policy
     if "*" in policy.allowed_actors or "*" in policy.allowed_tools:
         raise ValueError("MCP bridge requires explicit actor and tool allowlists")
@@ -64,6 +51,73 @@ def create_official_mcp_server(
         if registry.has(name):
             raise ValueError("Tool name collides with an existing registry entry")
 
+
+def _mcp_reply(payload: Any, *, error: bool) -> CallToolResult:
+    try:
+        body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        body = '{"error":"Result not JSON serializable"}'
+        error = True
+    return CallToolResult(content=[TextContent(type="text", text=body)], is_error=error)
+
+
+def _execute(
+    adapter: MCPAdapter,
+    handlers: Mapping[str, Callable[..., Any]],
+    lock: threading.RLock,
+    name: str,
+    arguments: dict[str, Any],
+    permit: dict[str, Any] | None,
+) -> CallToolResult:
+    if name not in handlers:
+        return _mcp_reply({"error": "Tool not registered"}, error=True)
+    if not isinstance(arguments, dict):
+        return _mcp_reply({"error": "Invalid arguments"}, error=True)
+
+    with lock:
+        try:
+            token = permit_from_mapping(permit) if permit is not None else None
+        except (TypeError, ValueError, KeyError):
+            return _mcp_reply({"error": "Invalid permit format"}, error=True)
+
+        request_id = "mcp-" + token_hex(16)
+        try:
+            outcome = adapter.handle_tool_call(
+                MCPToolCall(id=request_id, name=name, arguments=arguments),
+                permit_token=token,
+            )
+        except Exception:
+            return _mcp_reply(
+                {"request_id": request_id, "error": "Kernel operation failed"},
+                error=True,
+            )
+
+    return _mcp_reply(
+        {
+            "request_id": request_id,
+            "result": outcome.content if not outcome.is_error else None,
+            "error": outcome.content if outcome.is_error else None,
+        },
+        error=outcome.is_error,
+    )
+
+
+def create_official_mcp_server(
+    kernel: BaseKernel,
+    *,
+    actor: str,
+    handlers: Mapping[str, Callable[..., Any]],
+) -> Any:
+    """Build an official MCP v2 server for explicitly governed local tools.
+
+    The actor is configured by the trusted host, never supplied by an LLM.
+    This factory issues no permits and does not implement remote identity.
+    """
+    if MCPServer is None:
+        raise RuntimeError(
+            "Official MCP SDK v2 is required: install shards-kernel[mcp] on Python 3.11+"
+        )
+    _validate_configuration(kernel, actor, handlers)
     adapter = MCPAdapter(kernel, actor=actor)
     for name, handler in handlers.items():
         adapter.register_tool(name, handler)
@@ -71,56 +125,13 @@ def create_official_mcp_server(
     lock = threading.RLock()
     server = MCPServer("Shards-Kernel")
 
-    def result_response(result: Any, *, error: bool) -> CallToolResult:
-        try:
-            body = json.dumps(result, sort_keys=True, separators=(",", ":"))
-        except (TypeError, ValueError):
-            return CallToolResult(
-                content=[TextContent(type="text", text='{"error":"Result not JSON serializable"}')],
-                is_error=True,
-            )
-        return CallToolResult(
-            content=[TextContent(type="text", text=body)],
-            is_error=error,
-        )
-
     @server.tool()
     def governed_execute(
         name: str,
         arguments: dict[str, Any],
         permit: dict[str, Any] | None = None,
     ) -> CallToolResult:
-        """Execute an allowlisted operation only after signed-permit governance."""
-        if name not in handlers:
-            return result_response({"error": "Tool not registered"}, error=True)
-        if not isinstance(arguments, dict):
-            return result_response({"error": "Invalid arguments"}, error=True)
-
-        with lock:
-            try:
-                token = permit_from_mapping(permit) if permit is not None else None
-            except (TypeError, ValueError, KeyError):
-                return result_response({"error": "Invalid permit format"}, error=True)
-
-            request_id = "mcp-" + token_hex(16)
-            try:
-                outcome = adapter.handle_tool_call(
-                    MCPToolCall(id=request_id, name=name, arguments=arguments),
-                    permit_token=token,
-                )
-            except Exception:
-                # Never surface runtime exception details, credentials, or raw traces.
-                return result_response(
-                    {"request_id": request_id, "error": "Kernel operation failed"},
-                    error=True,
-                )
-            return result_response(
-                {
-                    "request_id": request_id,
-                    "result": outcome.content if not outcome.is_error else None,
-                    "error": outcome.content if outcome.is_error else None,
-                },
-                error=outcome.is_error,
-            )
+        """Execute an explicitly registered tool through signed-permit governance."""
+        return _execute(adapter, handlers, lock, name, arguments, permit)
 
     return server
