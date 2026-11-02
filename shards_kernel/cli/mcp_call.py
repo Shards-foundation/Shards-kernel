@@ -12,6 +12,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -54,7 +55,8 @@ def _read_private_permit(path: Path) -> dict[str, Any]:
     if not path.is_absolute() or os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
         raise ValueError("Absolute private POSIX permit file required")
     fd = os.open(
-        str(path), os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
+        getattr(os, "O_CLOEXEC", 0)
     )
     try:
         metadata = os.fstat(fd)
@@ -120,6 +122,20 @@ async def _invoke(
         if not isinstance(result, dict):
             raise ValueError("Invalid MCP receipt")
         if not reply.is_error and result.get("decision") == "ALLOW":
+            request_id = result.get("request_id")
+            value = result.get("result")
+            # An ALLOW bit without a correlated, typed tool result is never
+            # sufficient evidence of completed execution.
+            if (
+                not isinstance(request_id, str)
+                or re.fullmatch(r"mcp-relay-[0-9a-f]{32}", request_id) is None
+                or (tool == "echo" and not isinstance(value, str))
+                or (tool == "add" and (
+                    type(value) not in (int, float)
+                    or not math.isfinite(value)
+                ))
+            ):
+                raise ValueError("Incomplete or inconsistent MCP receipt")
             return 0, {
                 "decision": "ALLOW",
                 "request_id": result.get("request_id"),
