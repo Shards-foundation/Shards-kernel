@@ -147,6 +147,24 @@ Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
 For existing users migrating from the old `kernels` Python import path, see [the package migration guide](docs/PACKAGE_MIGRATION.md).
 
+## HTTP server authentication
+
+The HTTP server and Flask/FastAPI adapters require a configured bearer key.
+Without one, they refuse to start; audit exports, policy inspection, submit,
+status and halt are authenticated routes. The SDK's `api_key` argument now
+has a corresponding server-side check.
+
+```bash
+export SHARDS_KERNEL_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+python -m shards_kernel.sdk.server
+curl --fail http://127.0.0.1:8080/health
+curl --fail -H "Authorization: Bearer ${SHARDS_KERNEL_API_KEY}" http://127.0.0.1:8080/status
+```
+
+This is a local **reference** HTTP interface, not a production-ready public
+multi-agent gateway. Do not publicly expose the built-in server.
+See [HTTP authentication and deployment limitations](docs/operations/HTTP_API_AUTH.md).
+
 ## Quickstart
 
 ```bash

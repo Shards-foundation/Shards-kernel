@@ -43,6 +43,8 @@ except ImportError:
 
 
 KEYRING = {"key1": b"test-secret-key-32-bytes-long123"}
+HTTP_TEST_KEY = "shards-test-http-key-32-characters-long-0001"
+HTTP_AUTH = {"Authorization": f"Bearer {HTTP_TEST_KEY}"}
 
 
 def _kernel() -> StrictKernel:
@@ -117,10 +119,10 @@ class _AdapterCases:
 class TestFlaskAdapter(unittest.TestCase, _AdapterCases):
     def setUp(self) -> None:
         self.kernel = _kernel()
-        self.client = create_flask_app(self.kernel).test_client()
+        self.client = create_flask_app(self.kernel, api_key=HTTP_TEST_KEY).test_client()
 
     def post(self, payload: dict) -> dict:
-        response = self.client.post("/submit", json=payload)
+        response = self.client.post("/submit", json=payload, headers=HTTP_AUTH)
         self.assertEqual(response.status_code, 200)
         return response.get_json()
 
@@ -129,10 +131,10 @@ class TestFlaskAdapter(unittest.TestCase, _AdapterCases):
 class TestFastAPIAdapter(unittest.TestCase, _AdapterCases):
     def setUp(self) -> None:
         self.kernel = _kernel()
-        self.client = TestClient(create_fastapi_app(self.kernel))
+        self.client = TestClient(create_fastapi_app(self.kernel, api_key=HTTP_TEST_KEY))
 
     def post(self, payload: dict) -> dict:
-        response = self.client.post("/submit", json=payload)
+        response = self.client.post("/submit", json=payload, headers=HTTP_AUTH)
         self.assertEqual(response.status_code, 200)
         return response.json()
 
@@ -140,7 +142,7 @@ class TestFastAPIAdapter(unittest.TestCase, _AdapterCases):
 class TestSdkServer(unittest.TestCase, _AdapterCases):
     def setUp(self) -> None:
         self.kernel = _kernel()
-        self.server = KernelServer(self.kernel, host="127.0.0.1", port=0)
+        self.server = KernelServer(self.kernel, host="127.0.0.1", port=0, api_key=HTTP_TEST_KEY)
         # Bind an ephemeral port, then start.
         from http.server import HTTPServer
 
@@ -161,7 +163,7 @@ class TestSdkServer(unittest.TestCase, _AdapterCases):
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.server.port}/submit",
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **HTTP_AUTH},
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -170,7 +172,7 @@ class TestSdkServer(unittest.TestCase, _AdapterCases):
     def test_client_round_trip(self) -> None:
         params = {"text": "via-client"}
         permit = _permit("echo", params)
-        client = KernelClient(f"http://127.0.0.1:{self.server.port}")
+        client = KernelClient(f"http://127.0.0.1:{self.server.port}", api_key=HTTP_TEST_KEY)
         receipt = client.submit(
             KernelRequest(
                 request_id="client",
