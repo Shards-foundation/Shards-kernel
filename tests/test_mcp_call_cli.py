@@ -281,7 +281,7 @@ def test_successful_numeric_add_requires_correlated_typed_receipt(monkeypatch):
 @pytest.mark.skipif(os.name != "posix", reason="Private POSIX file checks")
 def test_invalid_permit_utf8_fails_closed(tmp_path):
     path = tmp_path / "bad-permit.json"
-    path.write_bytes(b"\\xff\\xfe")
+    path.write_bytes(bytes((0xFF, 0xFE)))
     path.chmod(0o600)
     with pytest.raises(UnicodeDecodeError):
         mcp_call._read_private_permit(path)
