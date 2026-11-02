@@ -78,13 +78,13 @@ def test_valid_detached_trust_root_signed_policy_and_checkpoint(tmp_path):
         ("port", 9999),
         ("tools", ["echo", "add"]),
         ("kernel_id", "another-kernel"),
-        ("audit_db", "/tmp/attacker.sqlite3"),
+        ("audit_db", "__alternate_db__"),
     ],
 )
 def test_signed_config_modification_never_validates(tmp_path, field, value):
     envelope, signing_key, now = _signed(tmp_path)
     changed = deepcopy(envelope)
-    changed["config"][field] = value
+    changed["config"][field] = str(tmp_path / "other.sqlite3") if value == "__alternate_db__" else value
     with pytest.raises(ValueError):
         _verify(changed, signing_key, now)
 
