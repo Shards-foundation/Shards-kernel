@@ -8,18 +8,19 @@ cross-host quorum, or production secret-management integration.
 
 ## Enrollment and trust
 
-The trusted operator provisions a **different 48-byte random secret** for
-each agent via its existing approved secret manager. For example, the
-operator can use `secrets.token_urlsafe(48)` on a protected terminal.
+The trusted operator provisions an actor-labelled credential
+`<actor>.<random-secret>` using a **different 48-byte random secret**
+for each agent via its existing approved secret manager. For example, the
+operator can use `"agent-alpha." + secrets.token_urlsafe(48)` on a protected terminal.
 The raw value is transferred to **one** designated agent. It must **never**
 be entered in a prompt, committed to git, logged by an LLM or embedded in
 the signed operator config.
 
-The operator records only **HMAC-SHA256 digests** of those tokens in the
+The operator records only **memory-hard scrypt verifiers** of those tokens in the
 signed policy, using a **separate operator-held, high-entropy MAC key**
 `SHARDS_KERNEL_AGENT_AUTH_PEPPER`. That pepper is not stored in the policy.
-The operator computes each lookup digest in a protected provisioning session
-using `shards_kernel.integrations.auth.agent_token_mac(token, pepper.encode())`.
+The operator computes each memory-hard verifier in a protected provisioning session
+using `shards_kernel.integrations.auth.agent_token_kdf(token, pepper.encode())`.
 The operator injects the same pepper into the service independently of
 the signed policy. A stolen config is not sufficient to test offline
 guesses without the pepper, although token entropy must still be high.
@@ -37,12 +38,12 @@ The operator/halt bearer credential is independent and supplied via
   "agents": [
     {
       "actor": "agent-alpha",
-      "token_hmac_sha256": "REPLACE_WITH_HMAC_SHA256_OF_UNIQUE_HIGH_ENTROPY_ALPHA_TOKEN",
+      "token_scrypt": "REPLACE_WITH_HMAC_SHA256_OF_UNIQUE_HIGH_ENTROPY_ALPHA_TOKEN",
       "allowed_tools": ["echo"]
     },
     {
       "actor": "agent-beta",
-      "token_hmac_sha256": "REPLACE_WITH_HMAC_SHA256_OF_UNIQUE_HIGH_ENTROPY_BETA_TOKEN",
+      "token_scrypt": "REPLACE_WITH_HMAC_SHA256_OF_UNIQUE_HIGH_ENTROPY_BETA_TOKEN",
       "allowed_tools": ["add"]
     }
   ],
@@ -61,7 +62,7 @@ The operator/halt bearer credential is independent and supplied via
 
 The service requires the independently supplied high-entropy
 `SHARDS_KERNEL_AGENT_AUTH_PEPPER` to start in v2 mode. Changing this key
-requires signed policy re-enrollment of all agent token digests.
+requires signed policy re-enrollment of all agent token verifiers.
 
 The operator signs this configuration using the existing separate Ed25519
 operator-policy signer (`shards.operator-policy.v1` envelope). V2 is the
@@ -79,8 +80,9 @@ policy, and that bypass remains **development only**.
 ## Authorization sequence
 
 1. An agent sends `Authorization: Bearer <its-own-credential>` to
-   `POST /submit`. The server compares the HMAC-SHA256 of the presented
-   credential (under the operator-held pepper) to all signed-config digests using constant-time comparisons.
+   `POST /submit`. The server uses the **untrusted actor label solely to locate one signed-config row**, then
+   compares a memory-hard scrypt verifier derived with the operator-held pepper
+   to that row's signed digest using a constant-time comparison.
 2. The server resolves a **single pinned actor** from the credential.
    The request's JSON `actor` must match exactly, or the service returns
    HTTP **403** before kernel execution.
