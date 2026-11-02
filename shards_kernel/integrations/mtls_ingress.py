@@ -290,14 +290,24 @@ class _IngressHandler(BaseHTTPRequestHandler):
             deadline = time.monotonic() + _BODY_DEADLINE_SECONDS
             chunks: list[bytes] = []
             received = 0
-            while received < length:
-                if time.monotonic() >= deadline:
-                    raise ValueError("Request body deadline exceeded")
-                chunk = self.rfile.read1(min(8192, length - received))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                received += len(chunk)
+            previous_timeout = self.connection.gettimeout()
+            try:
+                while received < length:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ValueError("Request body deadline exceeded")
+                    # Every blocking read is limited by the *remaining*
+                    # total deadline, not merely the idle socket timeout.
+                    self.connection.settimeout(
+                        min(_REQUEST_TIMEOUT_SECONDS, remaining)
+                    )
+                    chunk = self.rfile.read1(min(8192, length - received))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    received += len(chunk)
+            finally:
+                self.connection.settimeout(previous_timeout)
             if received != length or time.monotonic() >= deadline:
                 raise ValueError("Truncated or timed-out request")
             body = b"".join(chunks)
