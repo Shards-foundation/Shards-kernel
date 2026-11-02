@@ -87,6 +87,27 @@ Output files are created exclusively (`O_EXCL`) with mode 0600; a
 preexisting output is never overwritten. Failures use sanitised messages
 and nonzero exit status.
 
+## End-to-end separate-process acceptance test
+
+`tests/test_separate_issuer_process_e2e.py` launches an approver CLI,
+issuer CLI and local signed-policy kernel service in **separate spawned
+Python interpreters** (POSIX test environment). The test first proves
+issuer refusal without a signed approval, then models an operator
+confirming the full permit ID, issuing from a DIFFERENT Ed25519 key,
+authorising a single protected HTTP `echo` call, forcibly terminating
+the service, and denying replay after SQLite recovery on restart.
+
+```bash
+pytest -q tests/test_separate_issuer_process_e2e.py
+```
+
+The private-key PEM is passed to each independent child using a
+**test-only multiprocessing transport**, then written into a
+child-created, short-lived key FD. This is solely a deterministic
+simulation of external secret-manager provisioning. It is **not** a
+live secret manager, hardware custody, strong operator presence proof
+or remotely authenticated multi-agent integration.
+
 ## Safety and assurance limits
 
 - The interactive check is an **operator UX gate**, not a trusted hardware
