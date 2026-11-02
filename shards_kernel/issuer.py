@@ -82,6 +82,7 @@ def sign_mtls_ingress_policy(
     *,
     issued_at_ms: int,
     expires_at_ms: int,
+    revision: int = 0,
 ) -> dict[str, Any]:
     """Offline operator signature over exact mTLS ingress identity/bind policy.
 
@@ -101,12 +102,16 @@ def sign_mtls_ingress_policy(
         or not 0 < expires_at_ms - issued_at_ms <= 24 * 60 * 60 * 1000
     ):
         raise ValueError("Ingress policy validity must not exceed 24 hours")
+    if type(revision) is not int or revision < 0:
+        raise ValueError("Ingress revision must be a non-negative integer")
     envelope = {
-        "schema": "shards.mtls-ingress.v1",
+        "schema": "shards.mtls-ingress.v2" if revision else "shards.mtls-ingress.v1",
         "issued_at_ms": issued_at_ms,
         "expires_at_ms": expires_at_ms,
         "config": config,
     }
+    if revision:
+        envelope["revision"] = revision
     envelope["signature_hex"] = private_key.sign(
         canonical_ingress_policy(envelope)
     ).hex()
