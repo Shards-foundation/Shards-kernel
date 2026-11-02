@@ -699,6 +699,20 @@ def test_exhausted_tls_worker_capacity_rejects_and_recovers(tmp_path, monkeypatc
                 setup["files"]["alpha"], bearer=setup["alpha"],
                 payload=_body("agent-alpha", "over-capacity", "echo", {"text": "x"}),
             )
+        # Recovery is part of the admission contract, not just rejection.
+        for connection in stalled:
+            connection.close()
+        stalled.clear()
+        deadline = time.monotonic() + 3
+        while ingress._server._slots._value != 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 2
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "recovered-capacity", "echo", {"text": "x"}),
+        )
+        assert status == 502  # Missing backend; TLS admission recovered.
     finally:
         for connection in stalled:
             connection.close()
@@ -762,12 +776,77 @@ def test_slow_body_has_total_deadline_not_just_socket_timeout(tmp_path, monkeypa
         connection.endheaders()
         connection.send(body[:1])
         assert started.wait(timeout=2)
-        time.sleep(0.15)  # Deliberately exceed aggregate deadline, not idle timeout.
-        connection.send(body[1:])
+        # No more bytes arrive. A strictly bounded read must terminate
+        # promptly without waiting for the longer socket idle timeout.
+        started_at = time.monotonic()
         response = connection.getresponse()
+        elapsed = time.monotonic() - started_at
         assert response.status == 400
         assert json.loads(response.read())["error"] == "Invalid governed request"
+        assert elapsed < 0.8
     finally:
         if connection is not None:
             connection.close()
+        ingress.stop()
+
+
+def test_tls_handshake_times_out_and_releases_capacity(tmp_path, monkeypatch):
+    """Half-open pre-authentication TLS sockets cannot hold slots indefinitely."""
+    from shards_kernel.integrations import mtls_ingress as module
+
+    monkeypatch.setattr(module, "_HANDSHAKE_TIMEOUT_SECONDS", 0.15)
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    stalled = None
+    try:
+        assert ingress._server.request_queue_size == 16
+        stalled = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        stalled.settimeout(2)
+        assert stalled.recv(1) == b""  # Server drops incomplete handshake.
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != module._MAX_CONCURRENT_CONNECTIONS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == module._MAX_CONCURRENT_CONNECTIONS
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "handshake-timeout-recovery", "echo", {"text": "x"}),
+        )
+        assert status == 502  # Valid TLS accepted; backend remains absent.
+    finally:
+        if stalled is not None:
+            stalled.close()
+        ingress.stop()
+
+
+def test_authenticated_socket_idle_timeout_releases_worker(tmp_path, monkeypatch):
+    """An authenticated TLS peer cannot stall HTTP header parsing indefinitely."""
+    from shards_kernel.integrations import mtls_ingress as module
+
+    monkeypatch.setattr(module, "_REQUEST_TIMEOUT_SECONDS", 0.15)
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    tls_sock = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["alpha"][0]), str(setup["files"]["alpha"][1])
+        )
+        raw = socket.create_connection(("127.0.0.1", setup["ingress_port"]), timeout=2)
+        tls_sock = context.wrap_socket(raw, server_hostname="127.0.0.1")
+        tls_sock.settimeout(2)
+        tls_sock.sendall(b"POST /submit HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n")
+        # No HTTP header terminator: server must release worker on idle timeout.
+        assert tls_sock.recv(1) == b""
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != module._MAX_CONCURRENT_CONNECTIONS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == module._MAX_CONCURRENT_CONNECTIONS
+    finally:
+        if tls_sock is not None:
+            tls_sock.close()
         ingress.stop()
