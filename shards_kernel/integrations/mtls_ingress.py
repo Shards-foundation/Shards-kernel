@@ -34,6 +34,7 @@ _MAX_POLICY_MS = 24 * 60 * 60 * 1000
 _MAX_CONCURRENT_CONNECTIONS = 32
 _HANDSHAKE_TIMEOUT_SECONDS = 3.0
 _REQUEST_TIMEOUT_SECONDS = 3.0
+_HEADER_DEADLINE_SECONDS = 8.0
 _BODY_DEADLINE_SECONDS = 8.0
 
 
@@ -220,12 +221,63 @@ def _tls_context(config: SignedIngressConfig) -> ssl.SSLContext:
     return context
 
 
+class _DeadlineHeaderStream:
+    """Constrain all request-line/header byte reads to one monotonic deadline.
+
+    A socket idle timeout is insufficient against a client sending one byte
+    just before each timeout. Avoid BufferedReader.readline(), which may
+    perform multiple blocking reads inside one call.
+    """
+
+    def __init__(self, stream: Any, connection: ssl.SSLSocket, deadline: float):
+        self._stream = stream
+        self._connection = connection
+        self._deadline = deadline
+
+    def readline(self, limit: int = -1) -> bytes:
+        limit = 65537 if limit < 0 else min(limit, 65537)
+        data = bytearray()
+        while len(data) < limit:
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP header deadline exceeded")
+            self._connection.settimeout(min(_REQUEST_TIMEOUT_SECONDS, remaining))
+            char = self._stream.read1(1)
+            if not char:
+                break
+            data.extend(char)
+            if char == b"\\n":
+                break
+        return bytes(data)
+
+
 class _IngressHandler(BaseHTTPRequestHandler):
     """Per-connection client certificate and token binding before forwarding."""
 
     protocol_version = "HTTP/1.1"
     config: SignedIngressConfig
     clock: SystemClock
+
+    def handle_one_request(self) -> None:
+        """Apply an absolute deadline before parsing any HTTP bytes."""
+        self._unwrapped_rfile = self.rfile
+        self.rfile = _DeadlineHeaderStream(
+            self._unwrapped_rfile, self.connection,
+            time.monotonic() + _HEADER_DEADLINE_SECONDS,
+        )
+        try:
+            super().handle_one_request()
+        finally:
+            self.rfile = self._unwrapped_rfile
+            self.connection.settimeout(_REQUEST_TIMEOUT_SECONDS)
+
+    def parse_request(self) -> bool:
+        """Restore the normal reader only once all headers have been parsed."""
+        try:
+            return super().parse_request()
+        finally:
+            self.rfile = self._unwrapped_rfile
+            self.connection.settimeout(_REQUEST_TIMEOUT_SECONDS)
 
     def _reply(self, status: int, data: dict[str, Any]) -> None:
         body = json.dumps(data, separators=(",", ":")).encode("utf-8")
