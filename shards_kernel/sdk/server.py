@@ -245,6 +245,40 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         pass  # Suppress default logging
 
 
+def _validate_registered_principals(
+    kernel: BaseKernel,
+    *,
+    trusted_actor: Optional[str],
+    agent_identities: tuple[AgentIdentity, ...],
+    operator_secret: str,
+) -> None:
+    """Reject privilege overlap, implicit actor identity and credential reuse."""
+    if trusted_actor is not None and (
+        not isinstance(trusted_actor, str)
+        or not trusted_actor
+        or "*" in trusted_actor
+        or trusted_actor not in kernel.policy.allowed_actors
+    ):
+        raise ValueError("Trusted actor must be explicitly present in kernel policy")
+    if not agent_identities:
+        return
+    if trusted_actor is not None:
+        raise ValueError("Multi-agent and single-agent authentication cannot be combined")
+    if any(
+        identity.actor not in kernel.policy.allowed_actors
+        or not identity.allowed_tools.issubset(kernel.policy.allowed_tools)
+        for identity in agent_identities
+    ):
+        raise ValueError("Agent identities exceed strict kernel policy")
+    if len({identity.actor for identity in agent_identities}) != len(agent_identities):
+        raise ValueError("Duplicate agent principals")
+    if len({identity.token_sha256 for identity in agent_identities}) != len(agent_identities):
+        raise ValueError("Duplicate agent credentials")
+    operator_digest = hashlib.sha256(operator_secret.encode("utf-8")).hexdigest()
+    if any(identity.token_sha256 == operator_digest for identity in agent_identities):
+        raise ValueError("Operator and agent credentials must not be shared")
+
+
 class KernelServer:
     """
     HTTP server for Shards-Kernel.
@@ -277,31 +311,11 @@ class KernelServer:
             )
         if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
             raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
-        if trusted_actor is not None and (
-            not isinstance(trusted_actor, str)
-            or not trusted_actor
-            or "*" in trusted_actor
-            or trusted_actor not in kernel.policy.allowed_actors
-        ):
-            raise ValueError("Trusted actor must be explicitly present in kernel policy")
-        if agent_identities:
-            if trusted_actor is not None:
-                raise ValueError("Multi-agent and single-agent authentication cannot be combined")
-            if any(
-                identity.actor not in kernel.policy.allowed_actors
-                or not identity.allowed_tools.issubset(kernel.policy.allowed_tools)
-                for identity in agent_identities
-            ):
-                raise ValueError("Agent identities exceed strict kernel policy")
-            if len({identity.actor for identity in agent_identities}) != len(agent_identities):
-                raise ValueError("Duplicate agent principals")
-            if len({identity.token_sha256 for identity in agent_identities}) != len(agent_identities):
-                raise ValueError("Duplicate agent credentials")
         self.api_key = resolve_api_key(api_key)
-        if agent_identities:
-            admin_digest = hashlib.sha256(self.api_key.encode("utf-8")).hexdigest()
-            if any(identity.token_sha256 == admin_digest for identity in agent_identities):
-                raise ValueError("Operator and agent credentials must not be shared")
+        _validate_registered_principals(
+            kernel, trusted_actor=trusted_actor,
+            agent_identities=agent_identities, operator_secret=self.api_key,
+        )
         if policy_expires_at_ms is not None and (
             type(policy_expires_at_ms) is not int or policy_expires_at_ms < 0
         ):
