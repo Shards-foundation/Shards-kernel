@@ -622,6 +622,11 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
     v2 = ingress_module.verify_ingress_policy(
         signed_v2, pinned_public_key_hex=setup["pinned"], now_ms=now,
     )
+    from shards_kernel.integrations.mtls_checkpoint import bootstrap_ingress_checkpoint
+    bootstrap_ingress_checkpoint(
+        checkpoint, ingress_id=v2.ingress_id,
+        revision=v2.revision, digest=v2.policy_digest,
+    )
     ingress = ingress_module.MTLSIngressServer(v2, allow_remote_listen=True)
     assert ingress.config.listen_host == "192.0.2.99"
 
