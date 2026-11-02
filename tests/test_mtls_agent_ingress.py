@@ -22,9 +22,7 @@ from shards_kernel.cli.service import (
 )
 from shards_kernel.cli.signed_policy import verify_signed_policy
 from shards_kernel.integrations.auth import agent_token_kdf
-from shards_kernel.integrations.mtls_ingress import (
-    MTLSIngressServer, load_ingress_policy, run_mtls_ingress, verify_ingress_policy,
-)
+from shards_kernel.integrations import mtls_ingress as ingress_module
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_mtls_ingress_policy, sign_operator_policy, sign_v2_permit
 from shards_kernel.permits import PermitBuilder
@@ -203,7 +201,7 @@ def _setup(tmp_path):
         expires_at_ms=now + 600_000,
     )
     pinned = ingress_key.public_key().public_bytes_raw().hex()
-    config = verify_ingress_policy(
+    config = ingress_module.verify_ingress_policy(
         signed_ingress, pinned_public_key_hex=pinned, now_ms=now,
     )
     return {
@@ -224,7 +222,7 @@ def test_real_mutual_tls_agent_cert_and_bearer_and_permit_separation(tmp_path):
             agent_pepper=setup["pepper"],
             policy_expires_at_ms=operator.expires_at_ms,
         )
-        ingress = MTLSIngressServer(setup["config"])
+        ingress = ingress_module.MTLSIngressServer(setup["config"])
         server.start(blocking=False)
         ingress.start(blocking=False)
         try:
@@ -306,11 +304,11 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
     now = int(time.time() * 1000)
     path = tmp_path / "policy.json"
     path.write_text(json.dumps(signed))
-    assert load_ingress_policy(
+    assert ingress_module.load_ingress_policy(
         str(path), pinned_public_key_hex=pinned, now_ms=now
     ) == data["config"]
-    assert run_mtls_ingress(str(path)) == 2  # Trust root missing by default.
-    assert verify_ingress_policy(
+    assert ingress_module.run_mtls_ingress(str(path)) == 2  # Trust root missing by default.
+    assert ingress_module.verify_ingress_policy(
         signed, pinned_public_key_hex=pinned, now_ms=now,
     ).listen_host == "127.0.0.1"
     for field, value in (
@@ -322,18 +320,18 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
         changed = copy.deepcopy(signed)
         changed["config"][field] = value
         with pytest.raises(ValueError):
-            verify_ingress_policy(
+            ingress_module.verify_ingress_policy(
                 changed, pinned_public_key_hex=pinned, now_ms=now,
             )
     other = ed25519.Ed25519PrivateKey.generate()
     with pytest.raises(ValueError, match="signature"):
-        verify_ingress_policy(
+        ingress_module.verify_ingress_policy(
             signed,
             pinned_public_key_hex=other.public_key().public_bytes_raw().hex(),
             now_ms=now,
         )
     with pytest.raises(ValueError, match="expired"):
-        verify_ingress_policy(
+        ingress_module.verify_ingress_policy(
             signed, pinned_public_key_hex=pinned, now_ms=now + 720_000,
         )
     changed = copy.deepcopy(signed)
@@ -342,11 +340,11 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
         changed["config"], data["ingress_key"],
         issued_at_ms=now - 10_000, expires_at_ms=now + 60_000,
     )
-    remote = verify_ingress_policy(
+    remote = ingress_module.verify_ingress_policy(
         resig, pinned_public_key_hex=pinned, now_ms=now,
     )
     with pytest.raises(ValueError, match="explicit"):
-        MTLSIngressServer(remote)
+        ingress_module.MTLSIngressServer(remote)
 
 
 def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
@@ -359,7 +357,7 @@ def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
     ):
         path.write_text(text)
         with pytest.raises(ValueError, match=pattern):
-            load_ingress_policy(
+            ingress_module.load_ingress_policy(
                 str(path), pinned_public_key_hex=data["pinned"],
                 now_ms=int(time.time() * 1000),
             )
@@ -367,7 +365,7 @@ def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
     symlink = tmp_path / "symlink.json"
     symlink.symlink_to(path)
     with pytest.raises(ValueError, match="invalid"):
-        load_ingress_policy(
+        ingress_module.load_ingress_policy(
             str(symlink), pinned_public_key_hex=data["pinned"],
             now_ms=int(time.time() * 1000),
         )
@@ -388,7 +386,7 @@ def test_signed_ingress_policy_validation_rejects_ambiguous_network_and_identity
             issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
         )
         with pytest.raises(ValueError):
-            verify_ingress_policy(
+            ingress_module.verify_ingress_policy(
                 signed, pinned_public_key_hex=setup["pinned"], now_ms=now
             )
 
@@ -425,14 +423,14 @@ def test_ingress_envelope_schema_clock_and_signature_fail_closed(tmp_path):
     ):
         forged = dict(signed, **change)
         with pytest.raises(ValueError):
-            verify_ingress_policy(forged, pinned_public_key_hex=pinned, now_ms=now)
+            ingress_module.verify_ingress_policy(forged, pinned_public_key_hex=pinned, now_ms=now)
     for root in ("", "0", "g" * 64):
         with pytest.raises(ValueError):
-            verify_ingress_policy(
+            ingress_module.verify_ingress_policy(
                 signed, pinned_public_key_hex=root, now_ms=now
             )
     with pytest.raises(ValueError, match="expired"):
-        verify_ingress_policy(signed, pinned_public_key_hex=pinned, now_ms=now - 120_000)
+        ingress_module.verify_ingress_policy(signed, pinned_public_key_hex=pinned, now_ms=now - 120_000)
     for start, end in (
         (now, now + 25 * 60 * 60 * 1000),
         (-1, now + 10_000),
@@ -452,7 +450,7 @@ def test_ingress_envelope_schema_clock_and_signature_fail_closed(tmp_path):
 def test_runtime_expiry_invalid_body_privileged_path_and_downstream_outage(tmp_path, monkeypatch):
     """TLS handshake and policy are valid, but unauthorised payloads never run."""
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     try:
         port, ca = setup["ingress_port"], setup["files"]["ca"]
@@ -526,7 +524,6 @@ def test_cli_ingress_valid_signed_policy_runs_and_stops_without_leaking(tmp_path
     signed_path.write_text(json.dumps(setup["policy"]))
     monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
     calls = []
-    import shards_kernel.integrations.mtls_ingress as module
 
     class FakeIngress:
         def __init__(self, config, *, allow_remote_listen=False):
@@ -538,8 +535,8 @@ def test_cli_ingress_valid_signed_policy_runs_and_stops_without_leaking(tmp_path
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(module, "MTLSIngressServer", FakeIngress)
-    assert run_mtls_ingress(str(signed_path)) == 0
+    monkeypatch.setattr(ingress_module, "MTLSIngressServer", FakeIngress)
+    assert ingress_module.run_mtls_ingress(str(signed_path)) == 0
     assert calls == ["start", "stop"]
 
 
@@ -549,7 +546,7 @@ def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
     path = tmp_path / "big-policy.json"
     path.write_bytes(b" " * (96 * 1024 + 1))
     with pytest.raises(ValueError, match="too large"):
-        load_ingress_policy(
+        ingress_module.load_ingress_policy(
             str(path), pinned_public_key_hex=setup["pinned"], now_ms=now
         )
     signed_config = copy.deepcopy(setup["policy"]["config"])
@@ -561,7 +558,7 @@ def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
         issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
     )
     with pytest.raises(ValueError, match="regular"):
-        verify_ingress_policy(
+        ingress_module.verify_ingress_policy(
             signed, pinned_public_key_hex=setup["pinned"], now_ms=now
         )
 
@@ -603,13 +600,13 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
         raw, setup["ingress_key"],
         issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
     )
-    config = verify_ingress_policy(
+    config = ingress_module.verify_ingress_policy(
         signed, pinned_public_key_hex=setup["pinned"], now_ms=now,
     )
     with pytest.raises(ValueError, match="explicit"):
-        MTLSIngressServer(config)
+        ingress_module.MTLSIngressServer(config)
     with pytest.raises(ValueError, match="versioned"):
-        MTLSIngressServer(config, allow_remote_listen=True)
+        ingress_module.MTLSIngressServer(config, allow_remote_listen=True)
     # Remote access requires v2 signed revision + a private local checkpoint.
     import sqlite3
     checkpoint = tmp_path / "ingress-checkpoint.sqlite3"
@@ -622,13 +619,12 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
         raw, setup["ingress_key"], issued_at_ms=now - 1_000,
         expires_at_ms=now + 60_000, revision=1,
     )
-    v2 = verify_ingress_policy(
+    v2 = ingress_module.verify_ingress_policy(
         signed_v2, pinned_public_key_hex=setup["pinned"], now_ms=now,
     )
-    ingress = MTLSIngressServer(v2, allow_remote_listen=True)
+    ingress = ingress_module.MTLSIngressServer(v2, allow_remote_listen=True)
     assert ingress.config.listen_host == "192.0.2.99"
 
-    import shards_kernel.integrations.mtls_ingress as module
     monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
     path = tmp_path / "signed-policy.json"
     path.write_text(json.dumps(setup["policy"]))
@@ -643,8 +639,8 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(module, "MTLSIngressServer", Interrupted)
-    assert run_mtls_ingress(str(path)) == 0
+    monkeypatch.setattr(ingress_module, "MTLSIngressServer", Interrupted)
+    assert ingress_module.run_mtls_ingress(str(path)) == 0
     assert calls == ["start", "stop"]
 
 
@@ -656,7 +652,7 @@ def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path)
     for bytes_ in (b"{invalid-json", b"\xff\xfe\x00"):
         path.write_bytes(bytes_)
         with pytest.raises(ValueError, match="Invalid ingress policy JSON"):
-            load_ingress_policy(
+            ingress_module.load_ingress_policy(
                 str(path), pinned_public_key_hex=setup["pinned"], now_ms=now,
             )
 
@@ -664,7 +660,7 @@ def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path)
 def test_unfinished_tls_handshake_cannot_block_valid_client(tmp_path):
     """A raw TCP peer must not block accept() before an enrolled TLS agent."""
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     stalled = None
     try:
@@ -690,11 +686,10 @@ def test_unfinished_tls_handshake_cannot_block_valid_client(tmp_path):
 
 def test_exhausted_tls_worker_capacity_rejects_and_recovers(tmp_path, monkeypatch):
     """An adversary cannot create unbounded threads with incomplete handshakes."""
-    import shards_kernel.integrations.mtls_ingress as ingress_module
 
     monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 2)
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     stalled = []
     try:
@@ -739,7 +734,7 @@ def test_exhausted_tls_worker_capacity_rejects_and_recovers(tmp_path, monkeypatc
 def test_policy_expiring_during_body_parse_denies_forward(tmp_path, monkeypatch):
     """Authority must still be live at execution, not just at admission."""
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     try:
         expiry = setup["config"].expires_at_ms
@@ -759,7 +754,6 @@ def test_policy_expiring_during_body_parse_denies_forward(tmp_path, monkeypatch)
 def test_slow_body_has_total_deadline_not_just_socket_timeout(tmp_path, monkeypatch):
     """A client trickling bytes must not occupy a worker indefinitely."""
     import threading
-    import shards_kernel.integrations.mtls_ingress as ingress_module
 
     monkeypatch.setattr(ingress_module, "_BODY_DEADLINE_SECONDS", 0.05)
     monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 1.0)
@@ -772,7 +766,7 @@ def test_slow_body_has_total_deadline_not_just_socket_timeout(tmp_path, monkeypa
 
     monkeypatch.setattr(ingress_module._IngressHandler, "_governed_body", signal_body_read)
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     connection = None
     try:
@@ -811,9 +805,9 @@ def test_tls_handshake_times_out_and_releases_capacity(tmp_path, monkeypatch):
     """Half-open pre-authentication TLS sockets cannot hold slots indefinitely."""
     from shards_kernel.integrations import mtls_ingress as module
 
-    monkeypatch.setattr(module, "_HANDSHAKE_TIMEOUT_SECONDS", 0.15)
+    monkeypatch.setattr(ingress_module, "_HANDSHAKE_TIMEOUT_SECONDS", 0.15)
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     stalled = None
     try:
@@ -843,9 +837,9 @@ def test_authenticated_socket_idle_timeout_releases_worker(tmp_path, monkeypatch
     """An authenticated TLS peer cannot stall HTTP header parsing indefinitely."""
     from shards_kernel.integrations import mtls_ingress as module
 
-    monkeypatch.setattr(module, "_REQUEST_TIMEOUT_SECONDS", 0.15)
+    monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 0.15)
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     tls_sock = None
     try:
