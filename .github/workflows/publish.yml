@@ -106,7 +106,7 @@ jobs:
           checksums = (directory / "SHA256SUMS").read_text().splitlines()
           referenced = []
           for line in checksums:
-              match = re.fullmatch(r"([a-fA-F0-9]{64})  ([A-Za-z0-9._-]+)", line)
+              match = re.fullmatch(r"([a-fA-F0-9]{64})  (?:\./)?([A-Za-z0-9._-]+)", line)
               if not match:
                   raise SystemExit("Malformed release checksum record")
               referenced.append(match.group(2))
