@@ -2,16 +2,15 @@
 
 import json
 import secrets
-import socket
 import time
 import urllib.error
 import urllib.request
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from shards_kernel.common.types import KernelRequest, ToolCall
 from shards_kernel.cli.service import (
     build_operator_server,
     exclusive_local_audit_lock,
@@ -240,12 +239,12 @@ def test_live_http_single_identity_ed25519_and_sqlite_restart(tmp_path):
         assert restarted.kernel.export_evidence().root_hash == evidence["root_hash"]
         assert restarted.kernel._keyring == {}
         replay = restarted.kernel.submit(
-            __import__("shards_kernel.common.types", fromlist=["KernelRequest"]).KernelRequest(
+            KernelRequest(
                 request_id="after-restart",
                 ts_ms=int(time.time() * 1000),
                 actor="signed-local-agent",
                 intent="repeat approved text",
-                tool_call=__import__("shards_kernel.common.types", fromlist=["ToolCall"]).ToolCall(
+                tool_call=ToolCall(
                     name="echo", params={"text": "approved"}
                 ),
                 params={"text": "approved"},
