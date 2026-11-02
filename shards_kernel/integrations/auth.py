@@ -64,7 +64,7 @@ def agent_token_kdf(token: str, pepper: bytes) -> str:
     ):
         raise ValueError("Token must include a nonempty actor and high-entropy secret")
     salt = hmac.new(
-        pepper, b"SHARDS-AGENT-TOKEN-KDF-V2\\x00" + actor.encode("ascii"), hashlib.sha256
+        pepper, b"SHARDS-AGENT-TOKEN-KDF-V2\x00" + actor.encode("ascii"), hashlib.sha256
     ).digest()
     return hashlib.scrypt(
         token.encode("ascii"), salt=salt, n=2**14, r=8, p=1, dklen=32
