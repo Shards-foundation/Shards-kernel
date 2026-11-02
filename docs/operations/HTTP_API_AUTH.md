@@ -54,6 +54,26 @@ startup. Flask and FastAPI only expose `/` and `/health` anonymously by
 default. FastAPI's optional `cors_origins` must be configured explicitly
 when browser access is required; avoid wildcard origins for control APIs.
 
+## Permit-expiry clock safety
+
+The HTTP, Flask and FastAPI convenience factories now boot with a
+`SystemClock` (real UTC milliseconds), rather than an unmoving
+`VirtualClock(0)`. The same is true of `create_mcp_adapter`. They also
+start with an explicit deny-all actor/tool policy. A trusted operator must
+configure a scoped policy and keyring before executing tools.
+
+`SystemClock` detects a backward timestamp **within its own process** and
+permanently refuses further readings. This is deliberately fail-closed:
+a suddenly rolled-back clock must not make an expired signed permit valid
+again. Legitimate backwards NTP adjustments can therefore require operator
+intervention and restart. It is not a replacement for hardened time sync,
+trusted timestamping or detection across process restarts.
+
+Callers injecting their own kernel into `KernelServer`,
+`create_flask_app` or `create_fastapi_app` are responsible for passing
+a production-safe clock. The legacy `boot_strict_kernel` remains for
+deterministic tests; it must not be used to validate real-time permit expiry.
+
 ## External deployments
 
 The example HTTP server is **not** a public production gateway. Keep its
