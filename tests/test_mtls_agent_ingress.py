@@ -629,3 +629,16 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
     monkeypatch.setattr(module, "MTLSIngressServer", Interrupted)
     assert run_mtls_ingress(str(path)) == 0
     assert calls == ["start", "stop"]
+
+
+def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path):
+    """Malformed UTF-8 and JSON exercise the loader's fail-closed error path."""
+    setup = _setup(tmp_path)
+    path = tmp_path / "bad-ingress.json"
+    now = int(time.time() * 1000)
+    for bytes_ in (b"{invalid-json", b"\xff\xfe\x00"):
+        path.write_bytes(bytes_)
+        with pytest.raises(ValueError, match="Invalid ingress policy JSON"):
+            load_ingress_policy(
+                str(path), pinned_public_key_hex=setup["pinned"], now_ms=now,
+            )
