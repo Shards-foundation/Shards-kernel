@@ -244,7 +244,7 @@ def test_checkpoint_bootstrap_requires_virgin_database_and_is_one_shot(tmp_path)
             db, ingress_id=config.ingress_id,
             revision=config.revision, digest=config.policy_digest,
         )
-    with pytest.raises(ValueError, match="unavailable"):
+    with pytest.raises(ValueError, match="existing absolute regular file"):
         checkpoint_ingress_revision(
             tmp_path / "does-not-exist.sqlite3",
             ingress_id=config.ingress_id,
