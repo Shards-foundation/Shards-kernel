@@ -4,8 +4,10 @@ Provides deterministic time handling through VirtualClock and utilities
 for timestamp validation.
 """
 
+import sqlite3
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 from shards_kernel.common.types import VirtualClock
@@ -49,6 +51,84 @@ class SystemClock:
             self._last_ms = now
             return now
 
+
+
+class PersistentSystemClock(SystemClock):
+    """Single-host wall clock whose high-water mark survives process restarts.
+
+    Each now_ms() persists the latest accepted UTC millisecond timestamp
+    synchronously in a dedicated SQLite table. The DB must already exist
+    and remain the SAME local filesystem inode for this clock instance.
+    Storage failures or backward reads permanently fail this instance.
+    This is local protection only, NOT a secure hardware clock or external
+    anti-rollback anchor.
+    """
+
+    def __init__(
+        self,
+        database_path: str,
+        kernel_id: str,
+        source_ns: Optional[Callable[[], int]] = None,
+    ) -> None:
+        super().__init__(source_ns=source_ns)
+        self._db_path = Path(database_path)
+        if not self._db_path.is_file() or self._db_path.is_symlink():
+            raise ClockRollbackError("Clock requires a pre-existing regular audit database")
+        self._db_identity = self._identity()
+        if not kernel_id:
+            raise ValueError("Kernel identity required for persistent wall clock")
+        self._kernel_id = kernel_id
+        self._db_lock = threading.Lock()
+
+    def _identity(self) -> tuple[int, int]:
+        info = self._db_path.lstat()
+        if not self._db_path.is_file() or self._db_path.is_symlink():
+            raise ClockRollbackError("Clock database cannot be missing or a symlink")
+        return info.st_dev, info.st_ino
+
+    def now_ms(self) -> int:
+        with self._db_lock:
+            if self._failed:
+                raise ClockRollbackError("Persistent system clock was declared unsafe")
+            now = super().now_ms()
+            try:
+                if self._identity() != self._db_identity:
+                    raise ClockRollbackError("Clock database was replaced")
+                with sqlite3.connect(self._db_path, timeout=2.0) as connection:
+                    connection.execute("PRAGMA synchronous=FULL")
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        """CREATE TABLE IF NOT EXISTS kernel_clock_checkpoint (
+                            kernel_id TEXT PRIMARY KEY,
+                            last_ms INTEGER NOT NULL
+                        )"""
+                    )
+                    row = connection.execute(
+                        "SELECT last_ms FROM kernel_clock_checkpoint WHERE kernel_id=?",
+                        (self._kernel_id,),
+                    ).fetchone()
+                    if row is not None:
+                        previous = row[0]
+                        if type(previous) is not int or previous < 0 or now < previous:
+                            raise ClockRollbackError("Persistent UTC clock rolled backwards")
+                    else:
+                        previous = None
+                    if previous is None:
+                        connection.execute(
+                            "INSERT INTO kernel_clock_checkpoint VALUES (?, ?)",
+                            (self._kernel_id, now),
+                        )
+                    elif now > previous:
+                        connection.execute(
+                            "UPDATE kernel_clock_checkpoint SET last_ms=? WHERE kernel_id=?",
+                            (now, self._kernel_id),
+                        )
+            except Exception as exc:
+                self._failed = True
+                raise ClockRollbackError(
+                    "Persistent UTC clock cannot validate local time state"
+                ) from exc
+            return now
 
 
 def create_clock(initial_ms: int = 0) -> VirtualClock:
