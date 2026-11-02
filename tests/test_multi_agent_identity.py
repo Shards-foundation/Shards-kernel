@@ -180,9 +180,9 @@ def test_invalid_agent_enrolment_rejected(tmp_path, variant):
     elif variant == "dot_actor":
         raw["agents"][0]["actor"] = "agent.alpha"
     elif variant == "invalid_digest":
-        raw["agents"][0]["token_scrypt"] = "not-a-digest"
+        raw["agents"][0]["token_scrypt"] = secrets.token_urlsafe(4)
     elif variant == "raw_secret":
-        raw["agents"][0]["token"] = "forbidden"
+        raw["agents"][0]["token"] = secrets.token_urlsafe(48)
     elif variant == "unknown_tool":
         raw["agents"][0]["allowed_tools"] = ["echo", "shell"]
     elif variant == "duplicate_tool":
