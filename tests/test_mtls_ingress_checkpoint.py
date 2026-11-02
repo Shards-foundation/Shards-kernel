@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import os
 import sqlite3
 import time
@@ -116,7 +115,8 @@ def test_runtime_database_replacement_corruption_and_permissions_fail_closed(tmp
     _, _, _, config, path = _versioned(tmp_path)
     server = MTLSIngressServer(config)
     server._verify_policy_checkpoint()
-    path.unlink()
+    original = path.with_suffix(".previous")
+    path.rename(original)  # Preserve old inode so reuse cannot hide replacement.
     with sqlite3.connect(path):
         pass
     os.chmod(path, 0o600)
