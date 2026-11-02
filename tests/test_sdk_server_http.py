@@ -173,3 +173,30 @@ def test_health_reports_unhealthy_after_kernel_halt(live_server):
     status, after = request_json(base + "/health", token=None)
     assert status == 503
     assert after == {"status": "unhealthy"}
+
+
+def test_signed_operator_http_policy_expiry_denies_submit_and_health():
+    clocked = boot_strict_kernel("policy-expiry-test")
+    clocked.config.clock.set(900)
+    server = KernelServer(
+        clocked, port=0, api_key=TEST_KEY,
+        allow_test_clock=True, policy_expires_at_ms=1000,
+    )
+    server.start(blocking=False)
+    try:
+        base = "http://127.0.0.1:" + str(server._server.server_address[1])
+        status, health = request_json(base + "/health", token=None)
+        assert status == 200
+        clocked.config.clock.advance(101)
+        status, health = request_json(base + "/health", token=None)
+        assert status == 503
+        assert health["status"] == "unhealthy"
+        status, result = request_json(base + "/submit", "POST", {
+            "request_id": "after-expiry",
+            "actor": "test-actor",
+            "intent": "do not run",
+        }, token=TEST_KEY)
+        assert status == 503
+        assert "expired" in result["error"]
+    finally:
+        server.stop()

@@ -6,6 +6,78 @@ strictly allowlisted tools, pinned Ed25519 public keys and a SQLite audit
 ledger. It rejects all configurations containing private signing material,
 unknown fields, unsafe tool names, remote bind addresses or HMAC keys.
 
+## Signed operator policy required by default
+
+Operator service startup now **requires an Ed25519-signed policy envelope**,
+verified using a separate trust anchor supplied by
+`SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX`. This public key is pinned by the
+operator outside the signed document; the policy is never allowed to declare
+its own verification key. Missing/incorrect anchors, tampering, expiry,
+schema changes, unknown configuration fields, duplicate JSON keys and
+signed-policy revision rollback cause a nonzero startup exit.
+
+The **trusted signing process**, separate from the operator service and all
+agent clients, uses `shards_kernel.issuer.sign_operator_policy`. This helper
+accepts an already provisioned `cryptography` Ed25519 private key obtained
+through the operator's existing KMS or offline custody controls. Never
+create, store, log or expose that private key on the service host.
+
+Signing-side Python illustration (in the independent trusted environment):
+
+```python
+import json
+from shards_kernel.issuer import sign_operator_policy
+
+# config is a carefully reviewed v1 operator configuration (public data only).
+# signing_key is an Ed25519PrivateKey held ONLY in the trusted issuer process.
+policy = sign_operator_policy(
+    config, signing_key, revision=1,
+    issued_at_ms=operator_time_ms,
+    expires_at_ms=operator_time_ms + 24 * 3600 * 1000,
+)
+# Publish 'policy' through an integrity-protected operator delivery mechanism.
+print(json.dumps(policy))
+```
+
+The resulting file has exactly these fields:
+`schema="shards.operator-policy.v1"`, `revision`, `issued_at_ms`,
+`expires_at_ms`, `config`, and `signature_hex`. The signed message is
+`SHARDS-OPERATOR-POLICY-V1` followed by a zero byte and compact,
+UTF-8, alphabetically sorted JSON of the first five fields. Signatures use
+Ed25519, not the agent's Ed25519 **permit** key. Use distinct issuer and
+operator-policy keys, held by separate authorities where practicable.
+
+At service startup, use a protected operator environment:
+
+```bash
+export SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX="<64-character pinned PUBLIC key>"
+# SHARDS_KERNEL_API_KEY must be injected securely by the operator's secret manager.
+shards-kernel serve --config /absolute/path/to/signed-operator-policy.json
+```
+
+The service checks a real UTC clock at startup and for each authenticated
+route; after `expires_at_ms`, it returns HTTP 503 and `/health` becomes
+unhealthy. A local SQLite `operator_policy_checkpoint` records the
+highest accepted revision and its signed digest for that kernel; older
+revisions or a changed document at the same revision cannot restart the
+service against that unchanged local database. An operator must increase
+the revision for each policy change. **This is not a tamper-proof or
+distributed anti-rollback anchor**: an attacker who deletes/replaces the
+entire SQLite database or controls host environment/trust keys may bypass
+the local revision record. External sealing, stable trusted time and key
+revocation remain release blockers.
+
+For backwards-compatible **development only**, an operator can explicitly run:
+
+```bash
+shards-kernel serve --config /absolute/path/to/unsigned-local.json --allow-unsigned-local
+```
+
+This bypass is limited to the same loopback-only built-in-tool runtime,
+and is **not appropriate for staging or production**. It exists so existing
+deterministic local tests remain usable; it must not be added to deployment
+manifests.
+
 ## Provisioning
 
 Install the package with its optional public-key verifier:
@@ -47,7 +119,7 @@ Inject it from a secret manager or equivalent protected operator session,
 never commit it to git or share it with an LLM. Then run:
 
 ```bash
-shards-kernel serve --config /absolute/path/to/service.json
+shards-kernel serve --config /absolute/path/to/signed-operator-policy.json
 ```
 
 The process listens only at `127.0.0.1:<configured port>`. It never
@@ -102,8 +174,9 @@ commands, wallets, external destinations, cron jobs, background workers,
 dynamic registry entries or policy-wide wildcard grants.
 
 **Unresolved blockers:**
-1. The operator JSON configuration is schema-validated but **not signed**;
-   filesystem and deployment provenance are not cryptographically attested.
+1. Operator policy is now signed by an out-of-process Ed25519 signer, but
+   the configured root of trust, host filesystem, and deployment provenance
+   are not cryptographically attested; unsigned local bypass remains possible.
 2. A single bearer token authenticates one local principal but cannot
    distinguish independent services/agents or operator halt authority;
    there is no TLS ingress, OAuth/OIDC, mTLS or remote identity.

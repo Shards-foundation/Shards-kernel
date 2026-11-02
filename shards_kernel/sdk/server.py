@@ -33,9 +33,24 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     kernel: Optional[BaseKernel] = None
     api_key: Optional[str] = None
     trusted_actor: Optional[str] = None  # Enforced for operator-managed services
+    policy_expires_at_ms: Optional[int] = None
     max_body_bytes: int = 1024 * 1024
 
+    def _policy_valid(self) -> bool:
+        if self.policy_expires_at_ms is None:
+            return True
+        try:
+            if self.kernel is None or self.kernel.config.clock.now_ms() > self.policy_expires_at_ms:
+                self._send_json(503, {"error": "Signed policy expired or unavailable"})
+                return False
+        except Exception:
+            self._send_json(503, {"error": "Signed policy expired or unavailable"})
+            return False
+        return True
+
     def _authorized(self) -> bool:
+        if not self._policy_valid():
+            return False
         if self.api_key and bearer_authorized(self.headers.get("Authorization"), self.api_key):
             return True
         self._send_json(401, {"error": "Unauthorized"})
@@ -114,7 +129,9 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         try:
             state = self.kernel.get_state()
             # A process is not healthy merely because its HTTP socket listens.
-            self.kernel.config.clock.now_ms()
+            now = self.kernel.config.clock.now_ms()
+            if self.policy_expires_at_ms is not None and now > self.policy_expires_at_ms:
+                raise RuntimeError("Signed policy expired")
             if state.value == "HALTED":
                 raise RuntimeError("Kernel is halted")
         except Exception:
@@ -222,6 +239,7 @@ class KernelServer:
         allow_remote_bind: bool = False,
         allow_test_clock: bool = False,
         trusted_actor: Optional[str] = None,
+        policy_expires_at_ms: Optional[int] = None,
     ):
         if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
             raise ValueError(
@@ -238,7 +256,12 @@ class KernelServer:
         ):
             raise ValueError("Trusted actor must be explicitly present in kernel policy")
         self.api_key = resolve_api_key(api_key)
+        if policy_expires_at_ms is not None and (
+            type(policy_expires_at_ms) is not int or policy_expires_at_ms < 0
+        ):
+            raise ValueError("Signed policy expiry must be a UTC millisecond integer")
         self.trusted_actor = trusted_actor
+        self.policy_expires_at_ms = policy_expires_at_ms
         self.kernel = kernel
         self.host = host
         self.port = port
@@ -255,6 +278,7 @@ class KernelServer:
         Handler.kernel = kernel
         Handler.api_key = self.api_key
         Handler.trusted_actor = self.trusted_actor
+        Handler.policy_expires_at_ms = self.policy_expires_at_ms
         return Handler
 
     def start(self, blocking: bool = True) -> None:

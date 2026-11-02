@@ -258,6 +258,6 @@ def test_live_http_single_identity_ed25519_and_sqlite_restart(tmp_path):
 def test_cli_cannot_start_with_invalid_operator_file(tmp_path, capsys):
     file = tmp_path / "bad.json"
     file.write_text("{}")
-    assert run_service(str(file)) == 2
+    assert run_service(str(file), allow_unsigned_local=True) == 2
     output = capsys.readouterr().out
     assert "refused startup" in output

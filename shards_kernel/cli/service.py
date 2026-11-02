@@ -209,7 +209,8 @@ def exclusive_local_audit_lock(audit_db: Path) -> Iterator[None]:
 
 
 def build_operator_server(
-    config: OperatorServiceConfig, *, api_key: str | None = None
+    config: OperatorServiceConfig, *, api_key: str | None = None,
+    policy_expires_at_ms: int | None = None,
 ) -> KernelServer:
     """Create a service kernel; no arbitrary tools or HMAC private secrets."""
     key = resolve_api_key(api_key)
@@ -235,16 +236,39 @@ def build_operator_server(
         port=config.port,
         api_key=key,
         trusted_actor=config.actor,
+        policy_expires_at_ms=policy_expires_at_ms,
     )
 
 
-def run_service(config_path: str) -> int:
-    """Block until interrupted; redact exceptions and do not bypass checks."""
+def run_service(config_path: str, *, allow_unsigned_local: bool = False) -> int:
+    """Run a signed policy by default; unsigned is an explicit local-only opt-in."""
     try:
-        config = load_operator_config(config_path)
+        if allow_unsigned_local:
+            config = load_operator_config(config_path)
+            signed = None
+        else:
+            from shards_kernel.cli.signed_policy import load_signed_policy
+            # Trust root comes from the operator environment, NEVER from the
+            # signed document itself. The service has no signing private key.
+            trusted_key = os.environ.get("SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX", "")
+            signed = load_signed_policy(
+                config_path, trusted_public_key_hex=trusted_key,
+                current_time_ms=SystemClock().now_ms(),
+            )
+            config = signed.config
         with exclusive_local_audit_lock(config.audit_db):
-            server = build_operator_server(config)
-            print("Operator service: LOCAL LOOPBACK ONLY; NOT production-ready")
+            server = build_operator_server(
+                config,
+                policy_expires_at_ms=signed.expires_at_ms if signed else None,
+            )
+            if signed is not None:
+                from shards_kernel.cli.signed_policy import checkpoint_signed_policy
+
+                checkpoint_signed_policy(signed)
+            print(
+                "Operator service: LOCAL LOOPBACK ONLY; NOT production-ready"
+                + (" (UNSIGNED LOCAL DEVELOPMENT)" if allow_unsigned_local else " (SIGNED POLICY)")
+            )
             try:
                 server.start(blocking=True)
             except KeyboardInterrupt:
@@ -253,6 +277,6 @@ def run_service(config_path: str) -> int:
                 server.stop()
         return 0
     except Exception:
-        # Never leak signing material, filesystem details or bearer values.
+        # Never leak private key material, paths, or bearer values into stdout.
         print("Operator service refused startup or failed; inspect local diagnostic logs")
         return 2
