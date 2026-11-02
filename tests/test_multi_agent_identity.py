@@ -167,7 +167,7 @@ def test_two_agents_have_disjoint_credentials_and_scopes_with_replay(tmp_path):
 @pytest.mark.parametrize("variant", [
     "duplicate_actor", "duplicate_digest", "wildcard_actor",
     "invalid_digest", "raw_secret", "unknown_tool", "duplicate_tool",
-    "single_agent", "actor_v1_mixed", "unsupported_version",
+    "single_agent", "actor_v1_mixed", "unsupported_version", "dot_actor",
 ])
 def test_invalid_agent_enrolment_rejected(tmp_path, variant):
     raw, _issuer, _alice, _bob, _pepper = _setup(tmp_path)
@@ -177,6 +177,8 @@ def test_invalid_agent_enrolment_rejected(tmp_path, variant):
         raw["agents"][1]["token_scrypt"] = raw["agents"][0]["token_scrypt"]
     elif variant == "wildcard_actor":
         raw["agents"][0]["actor"] = "*"
+    elif variant == "dot_actor":
+        raw["agents"][0]["actor"] = "agent.alpha"
     elif variant == "invalid_digest":
         raw["agents"][0]["token_scrypt"] = "not-a-digest"
     elif variant == "raw_secret":
