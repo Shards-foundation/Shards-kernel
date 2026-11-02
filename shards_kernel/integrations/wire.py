@@ -78,7 +78,12 @@ def boot_service_kernel(kernel_id: str) -> StrictKernel:
 
 def permit_to_mapping(permit: PermitToken) -> dict[str, Any]:
     """Serialise a permit for an HTTP body."""
-    return {name: getattr(permit, name) for name in _PERMIT_FIELDS}
+    result = {name: getattr(permit, name) for name in _PERMIT_FIELDS}
+    if permit.version == 2:
+        result.update(
+            version=permit.version, algorithm=permit.algorithm, audience=permit.audience
+        )
+    return result
 
 
 def permit_from_mapping(data: dict[str, Any]) -> PermitToken:
@@ -87,6 +92,18 @@ def permit_from_mapping(data: dict[str, Any]) -> PermitToken:
     if missing:
         raise ValueError("permit is missing fields: " + ", ".join(missing))
     values = {name: data[name] for name in _PERMIT_FIELDS}
+    if data.get("version", 1) == 2:
+        if not all(field in data for field in ("algorithm", "audience")):
+            raise ValueError("v2 permit missing algorithm or audience")
+        values.update(
+            version=data["version"],
+            algorithm=data["algorithm"],
+            audience=data["audience"],
+        )
+    elif any(field in data for field in ("version", "algorithm", "audience")):
+        # Legacy v1 is accepted ONLY without conflicting v2 claims.
+        if data.get("version", 1) != 1 or data.get("algorithm", "HS256") != "HS256" or data.get("audience", ""):
+            raise ValueError("Invalid legacy permit version, algorithm or audience")
     denial_reasons = values.get("constraints")
     if denial_reasons is None:
         values["constraints"] = {}

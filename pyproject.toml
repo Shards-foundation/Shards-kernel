@@ -39,10 +39,12 @@ Changelog = "https://github.com/Shards-foundation/Shards-kernel/blob/main/CHANGE
 # Official MCP SDK v2 is optional and requires Python >=3.11.
 # The deterministic library remains standard-library-only on Python 3.9+.
 mcp = ["mcp>=2.2,<3; python_version >= '3.11'"]
+crypto = ["cryptography>=43,<51"]
 # Test and lint tools only. The installed runtime package has no dependencies.
 dev = [
     "pytest>=7",
     "pytest-cov>=4",
+    "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
     "hypothesis>=6",
     "ruff==0.17.2",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
