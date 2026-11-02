@@ -848,7 +848,7 @@ def test_authenticated_socket_idle_timeout_releases_worker(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("unfinished", [
     b"POST /sub",
-    b"POST /submit HTTP/1.1\\r\\nHost: local\\r\\nX-Slow: ",
+    b"POST /submit HTTP/1.1\r\nHost: local\r\nX-Slow: ",
 ])
 def test_aggregate_http_header_deadline_releases_tls_slot(
     tmp_path, monkeypatch, unfinished,
