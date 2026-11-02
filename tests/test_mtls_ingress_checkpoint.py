@@ -338,3 +338,107 @@ def test_checkpoint_connections_explicitly_close_on_success_and_failure(
     # cannot act as a substitute for explicit release of SQLite resources.
     assert len(created) >= 130
     assert all(connection.closed_explicitly for connection in created)
+
+
+def test_checkpoint_replacement_within_transactions_fails_and_rolls_back(
+    tmp_path, monkeypatch,
+):
+    """A replacement detected before commit must not advance signed trust."""
+    from shards_kernel.integrations import mtls_checkpoint as module
+
+    _, _, _, config, path = _versioned(tmp_path)
+    real_identity = module._identity
+    original = real_identity(path)
+    counter = [0]
+
+    def replaced_after_admission(source):
+        counter[0] += 1
+        return original if counter[0] == 1 else (original[0], original[1] + 1)
+
+    monkeypatch.setattr(module, "_identity", replaced_after_admission)
+    with pytest.raises(ValueError, match="changed during update"):
+        checkpoint_ingress_revision(
+            path, ingress_id=config.ingress_id, revision=2,
+            digest="b" * 64,
+        )
+    # The failed transaction must have been rolled back, not merely denied.
+    monkeypatch.setattr(module, "_identity", real_identity)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+            (config.ingress_id,),
+        ).fetchone() == (1,)
+
+    counter[0] = 0
+    monkeypatch.setattr(module, "_identity", replaced_after_admission)
+    with pytest.raises(ValueError, match="replaced"):
+        verify_ingress_checkpoint(
+            path, ingress_id=config.ingress_id,
+            revision=config.revision, digest=config.policy_digest,
+            identity=original,
+        )
+
+    virgin = tmp_path / "bootstrap-virgin.sqlite3"
+    with sqlite3.connect(virgin):
+        pass
+    virgin.chmod(0o600)
+    original = real_identity(virgin)
+    counter[0] = 0
+    with pytest.raises(ValueError, match="changed during bootstrap"):
+        bootstrap_ingress_checkpoint(
+            virgin, ingress_id=config.ingress_id,
+            revision=config.revision, digest=config.policy_digest,
+        )
+    monkeypatch.setattr(module, "_identity", real_identity)
+    with sqlite3.connect(virgin) as connection:
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name='ingress_policy_checkpoint'"
+        ).fetchone() is None
+
+
+def test_checkpoint_invalid_identity_wrong_owner_and_malformed_sqlite(
+    tmp_path, monkeypatch,
+):
+    """Reject malformed pinned authority even when the path is a regular file."""
+    from shards_kernel.integrations import mtls_checkpoint as module
+
+    _, _, _, config, path = _versioned(tmp_path)
+    with pytest.raises(ValueError, match="Invalid signed ingress revision identity"):
+        checkpoint_ingress_revision(
+            path, ingress_id=config.ingress_id, revision=True,
+            digest=config.policy_digest,
+        )
+    with pytest.raises(ValueError, match="Invalid signed ingress revision identity"):
+        checkpoint_ingress_revision(
+            path, ingress_id="not a valid actor", revision=1,
+            digest=config.policy_digest,
+        )
+
+    if hasattr(os, "getuid"):
+        monkeypatch.setattr(module.os, "getuid", lambda: os.stat(path).st_uid + 1)
+        with pytest.raises(ValueError, match="serving user"):
+            checkpoint_ingress_revision(
+                path, ingress_id=config.ingress_id, revision=1,
+                digest=config.policy_digest,
+            )
+        monkeypatch.undo()
+
+    malformed = tmp_path / "malformed.sqlite3"
+    malformed.write_bytes(b"invalid sqlite database bytes")
+    malformed.chmod(0o600)
+    with pytest.raises(ValueError, match="unavailable"):
+        bootstrap_ingress_checkpoint(
+            malformed, ingress_id=config.ingress_id,
+            revision=1, digest="a" * 64,
+        )
+    with pytest.raises(ValueError, match="unavailable"):
+        checkpoint_ingress_revision(
+            malformed, ingress_id=config.ingress_id,
+            revision=1, digest="a" * 64,
+        )
+    with pytest.raises(ValueError, match="unavailable"):
+        verify_ingress_checkpoint(
+            malformed, ingress_id=config.ingress_id,
+            revision=1, digest="a" * 64,
+            identity=module._identity(malformed),
+        )
