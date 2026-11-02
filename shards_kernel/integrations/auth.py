@@ -44,7 +44,7 @@ class AgentIdentity:
 def resolve_agent_pepper(pepper: str | None = None) -> bytes:
     """Require a separately provisioned secret for per-agent KDF salts."""
     value = pepper if pepper is not None else os.environ.get("SHARDS_KERNEL_AGENT_AUTH_PEPPER")
-    if not isinstance(value, str) or len(value) < 32 or value != value.strip():
+    if not isinstance(value, str) or not 32 <= len(value) <= 512 or value != value.strip():
         raise ValueError("Operator must provision a separate 32+ character agent authentication pepper")
     return value.encode("utf-8")
 
@@ -63,9 +63,14 @@ def agent_token_kdf(token: str, pepper: bytes) -> str:
         or any(c.isspace() for c in secret)
     ):
         raise ValueError("Token must include a nonempty actor and high-entropy secret")
-    salt = hmac.new(
-        pepper, b"SHARDS-AGENT-TOKEN-KDF-V2\x00" + actor.encode("ascii"), hashlib.sha256
-    ).digest()
+    # scrypt is itself a memory-hard KDF: use a domain-separated,
+    # actor-specific secret salt without a preliminary fast password hash.
+    salt = (
+        b"SHARDS-AGENT-TOKEN-SCRYPT-V2\\x00"
+        + len(pepper).to_bytes(2, "big")
+        + pepper
+        + actor.encode("ascii")
+    )
     return hashlib.scrypt(
         token.encode("ascii"), salt=salt, n=2**14, r=8, p=1, dklen=32
     ).hex()
