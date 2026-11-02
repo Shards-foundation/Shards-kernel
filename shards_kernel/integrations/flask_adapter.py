@@ -18,7 +18,7 @@ except ImportError:
 from shards_kernel._version import __version__
 from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
-    boot_strict_kernel,
+    boot_service_kernel,
     evidence_to_mapping,
     policy_to_mapping,
     receipt_to_mapping,
@@ -52,7 +52,7 @@ def create_flask_app(
 
     # Create kernel if not provided
     if kernel is None:
-        kernel = boot_strict_kernel(kernel_id)
+        kernel = boot_service_kernel(kernel_id)
         if policy is not None:
             kernel.set_policy(policy)
 
