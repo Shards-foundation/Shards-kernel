@@ -67,6 +67,10 @@ def main() -> int:
         "--config", required=True,
         help="Absolute or relative path to strict public-key-only service JSON configuration",
     )
+    serve_parser.add_argument(
+        "--allow-unsigned-local", action="store_true",
+        help="Explicit UNSIGNED local development opt-in; never use for deployed services",
+    )
 
     args = parser.parse_args()
 
@@ -91,7 +95,7 @@ def main() -> int:
     elif args.command == "serve":
         from shards_kernel.cli.service import run_service
 
-        return run_service(args.config)
+        return run_service(args.config, allow_unsigned_local=args.allow_unsigned_local)
 
     return 0
 
