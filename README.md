@@ -147,6 +147,22 @@ Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
 For existing users migrating from the old `kernels` Python import path, see [the package migration guide](docs/PACKAGE_MIGRATION.md).
 
+## Reproducible offline permit demonstration
+
+Verify the complete local deny → approved execution → replay/expiry/revocation
+denial → verified audit restoration sequence using an ephemeral Ed25519 issuer:
+
+```bash
+python -m pip install -e ".[crypto]"
+shards-kernel demo
+shards-kernel demo --json
+```
+
+This demonstration executes only the built-in `echo` tool. It uses an isolated
+test clock and an in-memory evidence bundle; it is **not a live gateway,
+trusted issuer deployment, or evidence of production readiness**. See
+[offline acceptance demo](docs/operations/OFFLINE_PERMIT_DEMO.md).
+
 ## Operator readiness checks
 
 The `shards-kernel doctor` CLI is a **preflight inspection**, not a
