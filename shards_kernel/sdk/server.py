@@ -13,7 +13,13 @@ import threading
 
 from shards_kernel._version import __version__
 from shards_kernel.common.types import VirtualClock
-from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
+from shards_kernel.integrations.auth import (
+    AgentIdentity,
+    bearer_authorized,
+    identify_agent,
+    resolve_agent_pepper,
+    resolve_api_key,
+)
 from shards_kernel.integrations.wire import (
     boot_service_kernel,
     evidence_to_mapping,
@@ -32,7 +38,9 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     # Class-level kernel reference (set by server)
     kernel: Optional[BaseKernel] = None
     api_key: Optional[str] = None
-    trusted_actor: Optional[str] = None  # Enforced for operator-managed services
+    trusted_actor: Optional[str] = None  # Legacy single-principal operator service
+    agent_identities: tuple[AgentIdentity, ...] = ()
+    agent_auth_pepper: bytes = b""
     policy_expires_at_ms: Optional[int] = None
     max_body_bytes: int = 1024 * 1024
 
@@ -51,7 +59,18 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     def _authorized(self) -> bool:
         if not self._policy_valid():
             return False
-        if self.api_key and bearer_authorized(self.headers.get("Authorization"), self.api_key):
+        if self.path == "/submit" and self.agent_identities:
+            # In multi-agent mode the operator token cannot impersonate agents.
+            principal = identify_agent(
+                self.headers.get("Authorization"), self.agent_identities,
+                self.agent_auth_pepper,
+            )
+            if principal is not None:
+                self._authenticated_agent = principal
+                return True
+        elif self.api_key and bearer_authorized(
+            self.headers.get("Authorization"), self.api_key
+        ):
             return True
         self._send_json(401, {"error": "Unauthorized"})
         return False
@@ -178,9 +197,20 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
 
         try:
             data = self._read_json()
-            # A caller may not claim an arbitrary principal when the service
-            # API key is bound to one operator-configured local agent.
-            if self.trusted_actor is not None and data.get("actor") != self.trusted_actor:
+            # Identity is derived from the credential, never the actor string.
+            principal = getattr(self, "_authenticated_agent", None)
+            if self.agent_identities:
+                if principal is None or data.get("actor") != principal.actor:
+                    self._send_json(403, {"error": "Caller identity does not match service principal"})
+                    return
+                requested_tool = data.get("tool_call")
+                if (
+                    not isinstance(requested_tool, dict)
+                    or requested_tool.get("name") not in principal.allowed_tools
+                ):
+                    self._send_json(403, {"error": "Tool not authorised for agent principal"})
+                    return
+            elif self.trusted_actor is not None and data.get("actor") != self.trusted_actor:
                 self._send_json(403, {"error": "Caller identity does not match service principal"})
                 return
 
@@ -217,6 +247,42 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         pass  # Suppress default logging
 
 
+def _validate_registered_principals(
+    kernel: BaseKernel,
+    *,
+    trusted_actor: Optional[str],
+    agent_identities: tuple[AgentIdentity, ...],
+    operator_secret: str,
+    agent_auth_pepper: bytes,
+) -> None:
+    """Reject privilege overlap, implicit actor identity and credential reuse."""
+    if trusted_actor is not None and (
+        not isinstance(trusted_actor, str)
+        or not trusted_actor
+        or "*" in trusted_actor
+        or trusted_actor not in kernel.policy.allowed_actors
+    ):
+        raise ValueError("Trusted actor must be explicitly present in kernel policy")
+    if not agent_identities:
+        return
+    if trusted_actor is not None:
+        raise ValueError("Multi-agent and single-agent authentication cannot be combined")
+    if any(
+        identity.actor not in kernel.policy.allowed_actors
+        or not identity.allowed_tools.issubset(kernel.policy.allowed_tools)
+        for identity in agent_identities
+    ):
+        raise ValueError("Agent identities exceed strict kernel policy")
+    if len({identity.actor for identity in agent_identities}) != len(agent_identities):
+        raise ValueError("Duplicate agent principals")
+    if len({identity.token_scrypt for identity in agent_identities}) != len(agent_identities):
+        raise ValueError("Duplicate agent credentials")
+    if identify_agent(
+        "Bearer " + operator_secret, agent_identities, agent_auth_pepper
+    ) is not None:
+        raise ValueError("Operator and agent credentials must not be shared")
+
+
 class KernelServer:
     """
     HTTP server for Shards-Kernel.
@@ -239,6 +305,8 @@ class KernelServer:
         allow_remote_bind: bool = False,
         allow_test_clock: bool = False,
         trusted_actor: Optional[str] = None,
+        agent_identities: tuple[AgentIdentity, ...] = (),
+        agent_auth_pepper: str | None = None,
         policy_expires_at_ms: Optional[int] = None,
     ):
         if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
@@ -248,19 +316,21 @@ class KernelServer:
             )
         if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
             raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
-        if trusted_actor is not None and (
-            not isinstance(trusted_actor, str)
-            or not trusted_actor
-            or "*" in trusted_actor
-            or trusted_actor not in kernel.policy.allowed_actors
-        ):
-            raise ValueError("Trusted actor must be explicitly present in kernel policy")
         self.api_key = resolve_api_key(api_key)
+        self.agent_auth_pepper = (
+            resolve_agent_pepper(agent_auth_pepper) if agent_identities else b""
+        )
+        _validate_registered_principals(
+            kernel, trusted_actor=trusted_actor,
+            agent_identities=agent_identities, operator_secret=self.api_key,
+            agent_auth_pepper=self.agent_auth_pepper,
+        )
         if policy_expires_at_ms is not None and (
             type(policy_expires_at_ms) is not int or policy_expires_at_ms < 0
         ):
             raise ValueError("Signed policy expiry must be a UTC millisecond integer")
         self.trusted_actor = trusted_actor
+        self.agent_identities = tuple(agent_identities)
         self.policy_expires_at_ms = policy_expires_at_ms
         self.kernel = kernel
         self.host = host
@@ -278,6 +348,8 @@ class KernelServer:
         Handler.kernel = kernel
         Handler.api_key = self.api_key
         Handler.trusted_actor = self.trusted_actor
+        Handler.agent_identities = self.agent_identities
+        Handler.agent_auth_pepper = self.agent_auth_pepper
         Handler.policy_expires_at_ms = self.policy_expires_at_ms
         return Handler
 
