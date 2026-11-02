@@ -1,6 +1,7 @@
 """Regression tests for truthful, secret-redacted operator diagnostics."""
 
 import json
+import secrets
 import sys
 
 from shards_kernel.__main__ import main
@@ -32,7 +33,7 @@ def test_service_preflight_fails_loudly_with_missing_credentials(capsys, monkeyp
 
 
 def test_secret_never_appears_in_any_human_or_json_output(capsys, monkeypatch):
-    secret = "super-secret-example-not-for-logs-0123456789"
+    secret = secrets.token_urlsafe(36)  # Ephemeral test credential; never committed.
     monkeypatch.setenv("SHARDS_KERNEL_API_KEY", secret)
     for output_json in (False, True):
         assert run_doctor("service", json_output=output_json) == 2
