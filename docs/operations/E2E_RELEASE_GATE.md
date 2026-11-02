@@ -94,3 +94,18 @@ allowlist on disk.
 **Production gate remains CLOSED** until the deployed staging evidence and
 independent security sign-off exist. A green local E2E workflow is not a
 production authorisation.
+
+
+## Negative-path probe process isolation
+
+The release-gate's own failure-mode regression tests use a separate Python
+interpreter launched with the Python `multiprocessing` **spawn** context.
+The child receives a reviewed, synthetic pytest node identifier over a
+structured pipe and calls the actual gate entrypoint. No shell, dynamic
+`python -c` program, interpolated command or untrusted executable path is
+constructed. The parent collects the child's real exit status and bounded
+stdout/stderr, terminates any probe exceeding 25 seconds, and closes IPC
+handles. This preserves real-process evidence for missing, skipped, xfailed,
+xpassed, failed and successful scenario variants without creating a command
+injection surface in the test harness. It does not permit downstream code
+execution beyond the explicitly synthesised test fixture.
