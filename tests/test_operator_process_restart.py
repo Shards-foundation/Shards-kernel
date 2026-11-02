@@ -15,7 +15,6 @@ import urllib.request
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from shards_kernel.cli.service import run_service
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_v2_permit
 from shards_kernel.permits import PermitBuilder
@@ -35,9 +34,19 @@ def _request(url, method="GET", payload=None, bearer=None):
         return error.code, json.loads(error.read())
 
 
+def _run_cli(config_path):
+    """Enter through the installed command parser in a fresh interpreter."""
+    import sys
+
+    from shards_kernel.__main__ import main
+
+    sys.argv = ["shards-kernel", "serve", "--config", str(config_path)]
+    raise SystemExit(main())
+
+
 def _launch(config_path, base):
     ctx = multiprocessing.get_context("spawn")
-    process = ctx.Process(target=run_service, args=(str(config_path),))
+    process = ctx.Process(target=_run_cli, args=(str(config_path),))
     process.start()
     for _ in range(100):
         if not process.is_alive():
