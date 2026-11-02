@@ -57,3 +57,29 @@ def test_doctor_cli_reports_json_and_status_code(capsys, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["shards-kernel", "doctor", "--profile", "service", "--json"])
     assert main() == 2
     assert json.loads(capsys.readouterr().out)["assessment"] == "NOT_READY"
+
+
+def test_doctor_rejects_unknown_profile():
+    import pytest
+
+    with pytest.raises(ValueError, match="profile"):
+        diagnose("production-certified", environ={})
+
+
+def test_doctor_clock_rollback_fails_closed_even_for_library(monkeypatch):
+    from shards_kernel.cli import doctor
+
+    class BackwardsClock:
+        def __init__(self):
+            self.calls = 0
+
+        def now_ms(self):
+            self.calls += 1
+            return 1_000 if self.calls == 1 else 999
+
+    monkeypatch.setattr(doctor, "SystemClock", BackwardsClock)
+    result = doctor.diagnose("library", environ={})
+    checks = {check["id"]: check for check in result["checks"]}
+    assert checks["clock_primitive"]["status"] == "BLOCKED"
+    assert result["ready"] is False
+    assert result["assessment"] == "NOT_READY"
