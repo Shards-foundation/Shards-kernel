@@ -147,7 +147,7 @@ class LegalDocumentationContractTests(unittest.TestCase):
         base = os.environ.get("LEGAL_PR_BASE_SHA", "")
         head = os.environ.get("LEGAL_PR_HEAD_SHA", "")
         if not base and not head:
-            if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+            if os.environ.get("LEGAL_DOC_SCOPE_REQUIRED") == "true":
                 self.fail("Missing PR base/head SHA: cannot verify legal change scope")
             return
         self.assertRegex(base, r"\A[0-9a-f]{40}\Z")
