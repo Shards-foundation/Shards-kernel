@@ -128,8 +128,10 @@ but is **not pinned**. The test proves:
   the short expiry and pinned root do not provide external anti-rollback.
 - The reference ingress now admits at most 32 concurrent TLS connections,
   performs TLS handshakes in bounded worker threads (3-second handshake
-  timeout), applies a 3-second socket-read timeout, and enforces an 8-second
-  aggregate request-body deadline. Excess connections are closed before
+  timeout), applies a 3-second socket-read timeout, and enforces separate
+  8-second monotonic aggregate deadlines for HTTP request-line/header parsing
+  **and** request-body receipt. Each blocked byte read is bounded by the
+  remaining deadline, so slow clients cannot reset the budget indefinitely. Excess connections are closed before
   HTTP handling. These are **local resource bounds**, not a substitute for
   network-edge connection controls, a DDoS service or independently measured
   throughput under attack.
