@@ -173,7 +173,7 @@ def test_detects_replaced_source_during_backup(tmp_path, monkeypatch):
     def swapping(path):
         calls[0] += 1
         identity = original(path)
-        return identity if calls[0] == 1 else (identity[0], identity[1] + 1)
+        return identity if calls[0] <= 2 else (identity[0], identity[1] + 1)
 
     monkeypatch.setattr(module, "_source_identity", swapping)
     _must_reject(database, "SOURCE_CHANGED_DURING_SNAPSHOT")
