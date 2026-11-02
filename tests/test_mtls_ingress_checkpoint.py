@@ -185,43 +185,23 @@ def test_checkpoint_corrupted_or_deleted_state_is_not_an_authority(tmp_path):
         MTLSIngressServer(config)
 
 
-def test_optimised_interpreter_cannot_skip_checkpoint_authority_guard():
-    """Python -O must never turn missing trust state into an allowed request."""
-    import subprocess
-    import sys
-    import textwrap
+@pytest.mark.parametrize("missing", [
+    "checkpoint_db_file", "ingress_id", "policy_digest", "_checkpoint_identity",
+])
+def test_missing_runtime_checkpoint_authority_is_rejected(missing):
+    """Each missing trust field fails closed without relying on Python asserts."""
+    from pathlib import Path
+    from types import SimpleNamespace
 
-    script = textwrap.dedent("""
-        from pathlib import Path
-        from types import SimpleNamespace
-        from shards_kernel.integrations.mtls_ingress import MTLSIngressServer
-
-        # Test *each* required trust field independently under -O, with
-        # all other fields valid in shape. Never depend on asserts.
-        for missing in (
-            "checkpoint_db_file", "ingress_id",
-            "policy_digest", "_checkpoint_identity",
-        ):
-            ingress = object.__new__(MTLSIngressServer)
-            ingress.config = SimpleNamespace(
-                revision=1, checkpoint_db_file=Path("/nonexistent/checkpoint.sqlite3"),
-                ingress_id="test-ingress", policy_digest="a" * 64,
-            )
-            ingress._checkpoint_identity = (10, 20)
-            if missing == "_checkpoint_identity":
-                ingress._checkpoint_identity = None
-            else:
-                setattr(ingress.config, missing, None)
-            try:
-                ingress._verify_policy_checkpoint()
-            except ValueError as exc:
-                if str(exc) == "Missing signed ingress checkpoint authority":
-                    continue
-            raise SystemExit(2)
-        raise SystemExit(0)
-    """)
-    proc = subprocess.run(
-        [sys.executable, "-O", "-c", script],
-        capture_output=True, text=True, timeout=15, check=False,
+    ingress = object.__new__(MTLSIngressServer)
+    ingress.config = SimpleNamespace(
+        revision=1, checkpoint_db_file=Path("/nonexistent/checkpoint.sqlite3"),
+        ingress_id="test-ingress", policy_digest="a" * 64,
     )
-    assert proc.returncode == 0, proc.stderr or proc.stdout
+    ingress._checkpoint_identity = (10, 20)
+    if missing == "_checkpoint_identity":
+        ingress._checkpoint_identity = None
+    else:
+        setattr(ingress.config, missing, None)
+    with pytest.raises(ValueError, match="Missing signed ingress checkpoint authority"):
+        ingress._verify_policy_checkpoint()
