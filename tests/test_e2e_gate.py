@@ -152,3 +152,8 @@ def test_ci_quality_matrix_is_structurally_blocked_by_e2e_failure():
     # Either would make a red E2E step ineffective at preventing quality work.
     assert not re.search(r"(?m)^\s*continue-on-error:\s*true\s*$", e2e_job)
     assert not re.search(r"(?m)^\s*if:\s*always\(\)\s*$", quality_job)
+    # CI once reported a <90% pytest-cov result as a successful quality job.
+    # An independent coverage CLI step must enforce the numeric threshold.
+    assert "python -m coverage report --fail-under=90" in quality_job
+    assert "--cov=scripts.ci.run_e2e_gate" in quality_job
+    assert "sys.version_info >= (3, 11)" in quality_job
