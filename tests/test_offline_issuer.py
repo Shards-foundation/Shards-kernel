@@ -113,12 +113,14 @@ def test_no_approval_and_wrong_key_or_issuer_cannot_sign():
     ("action", "add"),
     ("params", {"text": "unapproved"}),
     ("nonce", "a" * 32),
-    ("valid_until_ms", 0),
+    ("valid_until_ms", "__shorter_validity__"),
     ("key_id", "some-key"),
 ])
 def test_approval_cannot_be_reused_for_modified_draft(field, value):
     draft, now = draft_for_now()
     approver, issuer, approval = approved_pair(draft, now)
+    if value == "__shorter_validity__":
+        value = now + 30_000  # Still valid, but differs from approved exact scope.
     modified = replace(draft, **{field: value})
     with pytest.raises(ValueError):
         sign(modified, approval, issuer, approver, now)
