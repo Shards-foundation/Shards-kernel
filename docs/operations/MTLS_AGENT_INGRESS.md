@@ -62,8 +62,45 @@ install -m 0600 /dev/null /secure/ingress/ingress-checkpoint.sqlite3
 ```
 
 The path must be absolute, a regular non-symlink file, owned by the service
-user, and inaccessible to group/other users. Keep the **same file** across
-restarts and policy rotations; preserve it in backups. The v2 service
+user, and inaccessible to group/other users. **Creating the empty file is not
+enough to activate ingress.** The trusted host operator must initialise it
+**once, out of band**, after verifying the operator-signed v2 policy:
+
+```bash
+# Run as the same service user that owns the private checkpoint file.
+export SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX='<independently-pinned-public-key-hex>'
+python - /absolute/path/signed-ingress.json <<'PY'
+import os
+import sys
+from shards_kernel.common.time import SystemClock
+from shards_kernel.integrations.mtls_ingress import load_ingress_policy
+from shards_kernel.integrations.mtls_checkpoint import bootstrap_ingress_checkpoint
+
+config = load_ingress_policy(
+    sys.argv[1],
+    pinned_public_key_hex=os.environ["SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX"],
+    now_ms=SystemClock().now_ms(),
+)
+if not (config.revision and config.checkpoint_db_file
+        and config.ingress_id and config.policy_digest):
+    raise SystemExit("Refusing to bootstrap legacy or incomplete ingress policy")
+bootstrap_ingress_checkpoint(
+    config.checkpoint_db_file,
+    ingress_id=config.ingress_id,
+    revision=config.revision,
+    digest=config.policy_digest,
+)
+PY
+```
+
+Do not run this bootstrapping operation during ingress startup or as part
+of automated recovery. Once the checkpoint is enrolled, subsequent starts
+**require the existing table and signed ingress identity**: missing tables
+or rows, damaged databases and unexpected file replacements fail closed.
+An administrator must investigate a missing checkpoint and obtain
+independently verifiable recovery authority; restoring an old database
+alone is not proof of authorisation. Keep the **same file** across restarts
+and policy rotations; preserve it in protected backups. The v2 service
 transactionally remembers the highest accepted signed revision and digest.
 A lower revision, a different signed config at the same revision, a missing
 checkpoint or replacement of the file while the process runs fails closed.
@@ -149,8 +186,9 @@ but is **not pinned**. The test proves:
   operator's own secret infrastructure. CRL/OCSP, automated certificate
   renewal, post-compromise trust-anchor rotation and secrets vaulting are
   not implemented; operator certificate pin removal/re-signing is manual.
-- Signed v2 policy adds an explicit monotonic revision and local SQLite
-  checkpoint. This is **not externally anchored**: a privileged actor who
+- Signed v2 policy adds an explicit monotonic revision, deliberate one-time
+  trusted-operator bootstrap and local SQLite checkpoint. Service startup
+  never implicitly enrols an empty/deleted database. This is **not externally anchored**: a privileged actor who
   restores an old policy and its old checkpoint database together can evade
   local rollback detection. A trusted external anti-rollback anchor and
   safe recovery/rotation operations remain P0 work. The runtime's checkpoint
