@@ -10,7 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  e2e:
+    name: Mandatory local E2E release gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install E2E dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,crypto,mcp]"
+
+      - name: Run strict multi-process E2E acceptance gate
+        run: python scripts/ci/run_e2e_gate.py
+
   quality:
+    needs: e2e
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -40,15 +62,39 @@ jobs:
         run: ruff check . --select E,F --ignore E501
 
       - name: Run tests with coverage
-        run: >
-          pytest
-          --cov=shards_kernel
-          --cov=implementations
-          --cov-branch
-          --cov-report=term-missing
-          --cov-report=xml
-          --cov-report=json:coverage.json
-          --cov-fail-under=90
+        shell: bash
+        run: |
+          set -euo pipefail
+          coverage_args=(--cov=shards_kernel --cov=implementations)
+          # The runner is intentionally unsupported on 3.9/3.10. Include its
+          # measured coverage only where negative-path subprocess tests run.
+          if python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+            coverage_args+=(--cov=scripts.ci.run_e2e_gate)
+          fi
+          pytest "${coverage_args[@]}" \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=json:coverage.json \
+            --cov-fail-under=90
+
+      - name: Enforce exact measured coverage threshold independently
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import sys
+
+          with open("coverage.json", encoding="utf-8") as report:
+              percent = float(json.load(report)["totals"]["percent_covered"])
+          print(f"Unrounded branch-aware coverage: {percent:.6f}%")
+          if not math.isfinite(percent) or percent < 90.0:
+              print("CI hard failure: measured coverage below 90%", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Verify ingress trust guards under optimised Python
+        run: python -O scripts/ci/verify_optimised_ingress_checkpoint.py
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
