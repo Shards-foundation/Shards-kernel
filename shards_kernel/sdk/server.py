@@ -111,11 +111,21 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"status": "unhealthy", "error": "No kernel"})
             return
 
+        try:
+            state = self.kernel.get_state()
+            # A process is not healthy merely because its HTTP socket listens.
+            self.kernel.config.clock.now_ms()
+            if state.value == "HALTED":
+                raise RuntimeError("Kernel is halted")
+        except Exception:
+            self._send_json(503, {"status": "unhealthy"})
+            return
+
         self._send_json(
             200,
             {
                 "status": "healthy",
-                "kernel_state": self.kernel.get_state().value,
+                "kernel_state": state.value,
             },
         )
 
