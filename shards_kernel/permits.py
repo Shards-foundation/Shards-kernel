@@ -377,7 +377,7 @@ def verify_signature(
                 raise ValueError("Invalid Ed25519 signature length")
             Ed25519PublicKey.from_public_bytes(record.public_key).verify(
                 signature,
-                b"SHARDS-PERMIT-ED25519-V2\\x00" + canonical_permit_bytes(permit),
+                b"SHARDS-PERMIT-ED25519-V2\x00" + canonical_permit_bytes(permit),
             )
         except (InvalidSignature, ValueError):
             return PermitVerificationResult(Decision.DENY, ["SIGNATURE_INVALID"])
