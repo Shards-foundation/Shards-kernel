@@ -723,3 +723,51 @@ def test_policy_expiring_during_body_parse_denies_forward(tmp_path, monkeypatch)
         assert response["error"] == "Signed ingress policy expired"
     finally:
         ingress.stop()
+
+
+def test_slow_body_has_total_deadline_not_just_socket_timeout(tmp_path, monkeypatch):
+    """A client trickling bytes must not occupy a worker indefinitely."""
+    import threading
+    import shards_kernel.integrations.mtls_ingress as ingress_module
+
+    monkeypatch.setattr(ingress_module, "_BODY_DEADLINE_SECONDS", 0.05)
+    monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 1.0)
+    started = threading.Event()
+    original = ingress_module._IngressHandler._governed_body
+
+    def signal_body_read(self, actor):
+        started.set()
+        return original(self, actor)
+
+    monkeypatch.setattr(ingress_module._IngressHandler, "_governed_body", signal_body_read)
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    connection = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["alpha"][0]), str(setup["files"]["alpha"][1])
+        )
+        connection = http.client.HTTPSConnection(
+            "127.0.0.1", setup["ingress_port"], context=context, timeout=3,
+        )
+        body = json.dumps(
+            _body("agent-alpha", "body-deadline", "echo", {"text": "x"})
+        ).encode()
+        connection.putrequest("POST", "/submit")
+        connection.putheader("Authorization", "Bearer " + setup["alpha"])
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders()
+        connection.send(body[:1])
+        assert started.wait(timeout=2)
+        time.sleep(0.15)  # Deliberately exceed aggregate deadline, not idle timeout.
+        connection.send(body[1:])
+        response = connection.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read())["error"] == "Invalid governed request"
+    finally:
+        if connection is not None:
+            connection.close()
+        ingress.stop()
