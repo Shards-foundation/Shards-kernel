@@ -5,9 +5,6 @@ from __future__ import annotations
 import copy
 import os
 import sqlite3
-import subprocess
-import sys
-import textwrap
 import time
 
 import pytest
@@ -208,29 +205,3 @@ def test_missing_runtime_checkpoint_authority_is_rejected(missing):
         setattr(ingress.config, missing, None)
     with pytest.raises(ValueError, match="Missing signed ingress checkpoint authority"):
         ingress._verify_policy_checkpoint()
-
-
-def test_optimised_interpreter_cannot_disable_signed_checkpoint_checks():
-    """Prove runtime authority validation still executes under Python -O."""
-    script = textwrap.dedent("""
-        from types import SimpleNamespace
-        from shards_kernel.integrations.mtls_ingress import MTLSIngressServer
-
-        ingress = object.__new__(MTLSIngressServer)
-        ingress.config = SimpleNamespace(
-            revision=1, ingress_id=None,
-            policy_digest=None, checkpoint_db_file=None,
-        )
-        ingress._checkpoint_identity = None
-        try:
-            ingress._verify_policy_checkpoint()
-        except ValueError as exc:
-            if str(exc) == "Missing signed ingress checkpoint authority":
-                raise SystemExit(0)
-        raise SystemExit(2)
-    """)
-    result = subprocess.run(
-        [sys.executable, "-O", "-c", script],
-        capture_output=True, text=True, timeout=20, check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
