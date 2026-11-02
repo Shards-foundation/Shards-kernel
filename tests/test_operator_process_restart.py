@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import secrets
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -18,6 +19,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_v2_permit
 from shards_kernel.permits import PermitBuilder
+
+
+def _unused_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
 
 
 def _request(url, method="GET", payload=None, bearer=None):
@@ -102,8 +109,9 @@ def _payload(request_id, permit, actor="only-local-agent"):
 
 
 def test_real_cli_service_process_restart_prevents_ed25519_replay(
-    tmp_path, monkeypatch, unused_tcp_port
+    tmp_path, monkeypatch
 ):
+    port = _unused_port()
     private_key = Ed25519PrivateKey.generate()
     config_path = tmp_path / "operator.json"
     config_path.write_text(json.dumps({
@@ -118,11 +126,11 @@ def test_real_cli_service_process_restart_prevents_ed25519_replay(
             "revoked": False,
         }],
         "audit_db": str(tmp_path / "operator.sqlite3"),
-        "port": unused_tcp_port,
+        "port": port,
     }))
     bearer = secrets.token_urlsafe(40)
     monkeypatch.setenv("SHARDS_KERNEL_API_KEY", bearer)
-    base = "http://127.0.0.1:" + str(unused_tcp_port)
+    base = "http://127.0.0.1:" + str(port)
     permit = _permit(private_key)
 
     process = _launch(config_path, base)
