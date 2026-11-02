@@ -92,11 +92,11 @@ Where applicable, individuals may request access to their personal information, 
 
 Requests concerning information held by a separately deployed kernel should be directed to its **operator/controller**, because the project maintainers may not possess those records. Requests about GitHub or PyPI accounts or platform logs may also need to be directed to those providers.
 
-For publisher-held information, use the confirmed privacy-contact channel. We may need reasonable identity verification before disclosing or changing personal information. We will respond within the periods required by applicable data protection law.
+For publisher-held information, use the confirmed privacy-contact channel. We may need reasonable identity verification before disclosing or changing personal information. **Subject access requests are separate from data-protection complaints:** under current UK guidance, an access request normally requires a response **within one month**, subject to permitted pauses, extensions and exceptions. Other rights requests have their own applicable requirements.
 
 ## 9. Complaints and regulator
 
-You may raise a personal-data complaint with the responsible organisation. Under UK data protection complaint requirements, the organisation must offer a way to complain, **acknowledge receipt within 30 days**, investigate appropriately, keep the complainant informed and provide an outcome without undue delay.
+You may raise a personal-data complaint with the responsible organisation. Under current UK data-protection complaint requirements, the organisation must offer a way to complain and **acknowledge receipt of the complaint within 30 days**, investigate appropriately, keep the complainant informed and provide an outcome without undue delay. **This 30-day complaint acknowledgement is a statutory obligation, not a substitute for the separate one-month subject-access response deadline in section 8.** See the [ICO complaint acknowledgement guidance](https://ico.org.uk/for-organisations/how-to-deal-with-data-protection-complaints/what-do-we-do-when-we-receive-a-complaint/).
 
 You can also raise concerns with the UK **Information Commissioner's Office (ICO)** at https://ico.org.uk/make-a-complaint/ . You do not lose any statutory complaint or judicial rights by contacting the project first.
 
