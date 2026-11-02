@@ -2,7 +2,10 @@
 
 import hashlib
 import json
+import multiprocessing
+import os
 import secrets
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -14,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from shards_kernel.cli.service import build_operator_server, parse_operator_config
 from shards_kernel.integrations.auth import AgentIdentity, identify_agent
 from shards_kernel.integrations.wire import permit_to_mapping
-from shards_kernel.issuer import sign_v2_permit
+from shards_kernel.issuer import sign_operator_policy, sign_v2_permit
 from shards_kernel.permits import PermitBuilder
 
 
@@ -203,3 +206,119 @@ def test_principal_resolution_does_not_accept_tokens_with_whitespace_or_truncati
         assert identify_agent(header, principals) is None
     assert all(isinstance(p, AgentIdentity) for p in principals)
     assert all(p.token_sha256 not in (alice_token, bob_token) for p in principals)
+
+
+def test_operator_and_agent_secret_collision_is_rejected(tmp_path):
+    raw, _issuer, alice_token, _bob_token = _setup(tmp_path)
+    with pytest.raises(ValueError, match="credentials must not be shared"):
+        build_operator_server(parse_operator_config(raw), api_key=alice_token)
+
+
+def _operator_process(config_file):
+    import sys
+
+    from shards_kernel.__main__ import main
+
+    sys.argv = ["shards-kernel", "serve", "--config", str(config_file)]
+    raise SystemExit(main())
+
+
+def _free_loopback_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _start_signed_service(config_file, url):
+    process = multiprocessing.get_context("spawn").Process(
+        target=_operator_process, args=(str(config_file),)
+    )
+    process.start()
+    for _ in range(100):
+        if not process.is_alive():
+            raise AssertionError("Signed v2 operator did not start")
+        try:
+            status, health = _http(url + "/health")
+            if status == 200 and health["status"] == "healthy":
+                return process
+        except OSError:
+            pass
+        time.sleep(0.1)
+    _kill(process)
+    raise AssertionError("Signed v2 operator was not healthy")
+
+
+def _kill(process):
+    if process.is_alive():
+        process.terminate()
+    process.join(timeout=8)
+    if process.is_alive():
+        process.kill()
+        process.join(timeout=8)
+    assert not process.is_alive()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Operator uses POSIX single-writer lock")
+def test_signed_two_agent_cli_survives_restart_and_preserves_separation(
+    tmp_path, monkeypatch
+):
+    raw, permit_issuer, alice_token, bob_token = _setup(tmp_path)
+    raw["port"] = _free_loopback_port()
+    policy_issuer = Ed25519PrivateKey.generate()
+    now = int(time.time() * 1000)
+    signed = sign_operator_policy(
+        raw, policy_issuer, revision=1,
+        issued_at_ms=now - 20_000, expires_at_ms=now + 600_000,
+    )
+    path = tmp_path / "two-agent-policy.json"
+    path.write_text(json.dumps(signed))
+    operator_secret = secrets.token_urlsafe(40)
+    monkeypatch.setenv("SHARDS_KERNEL_API_KEY", operator_secret)
+    monkeypatch.setenv(
+        "SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX",
+        policy_issuer.public_key().public_bytes_raw().hex(),
+    )
+    base = "http://127.0.0.1:" + str(raw["port"])
+    permit_a = _permit(permit_issuer, "agent-alice", "echo", {"text": "alice-only"})
+    permit_b = _permit(permit_issuer, "agent-bob", "add", {"a": 2, "b": 3})
+    first = _start_signed_service(path, base)
+    try:
+        status, receipt_a = _http(
+            base + "/submit", "POST", token=alice_token,
+            data=_payload("agent-alice", "echo", {"text": "alice-only"}, "a1", permit_a),
+        )
+        assert status == 200 and receipt_a["decision"] == "ALLOW"
+        status, receipt_b = _http(
+            base + "/submit", "POST", token=bob_token,
+            data=_payload("agent-bob", "add", {"a": 2, "b": 3}, "b1", permit_b),
+        )
+        assert status == 200 and receipt_b["decision"] == "ALLOW"
+        assert receipt_b["result"] == 5
+        status, evidence = _http(base + "/evidence", token=operator_secret)
+        assert status == 200 and evidence["entry_count"] >= 4
+        status, _ = _http(base + "/evidence", token=alice_token)
+        assert status == 401
+    finally:
+        _kill(first)
+
+    second = _start_signed_service(path, base)
+    try:
+        status, recovered = _http(base + "/evidence", token=operator_secret)
+        assert status == 200 and recovered["root_hash"] == evidence["root_hash"]
+        for actor, action, params, permit, token in (
+            ("agent-alice", "echo", {"text": "alice-only"}, permit_a, alice_token),
+            ("agent-bob", "add", {"a": 2, "b": 3}, permit_b, bob_token),
+        ):
+            status, denied = _http(
+                base + "/submit", "POST", token=token,
+                data=_payload(actor, action, params, "replay-" + actor, permit),
+            )
+            assert status == 200 and denied["decision"] == "DENY"
+            assert "REPLAY_DETECTED" in denied["error"]
+        status, _ = _http(
+            base + "/submit", "POST", token=bob_token,
+            data=_payload("agent-alice", "echo", {"text": "alice-only"}, "spoof", permit_a),
+        )
+        assert status == 403
+    finally:
+        _kill(second)
