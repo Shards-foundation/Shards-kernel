@@ -10,7 +10,9 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
+from contextlib import closing, contextmanager
 from pathlib import Path
+from typing import Iterator
 
 
 def _identity(path: Path) -> tuple[int, int]:
@@ -43,9 +45,20 @@ def _check_inputs(
     return _identity(path)
 
 
-def _connect_existing(path: Path) -> sqlite3.Connection:
-    """Use SQLite URI mode=rw: a race must not create a missing trust DB."""
-    return sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=2.0)
+@contextmanager
+def _connect_existing(path: Path) -> Iterator[sqlite3.Connection]:
+    """Own the entire SQLite connection lifetime, including exceptional exits.
+
+    SQLite's connection context manager *only* commits/rolls back; it does
+    not close the descriptor. Wrap it with closing() to prevent TLS ingress
+    requests from exhausting file descriptors under bounded RLIMIT_NOFILE.
+    mode=rw ensures missing trust databases are never silently created.
+    """
+    with closing(
+        sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=2.0)
+    ) as connection:
+        with connection:
+            yield connection
 
 
 def bootstrap_ingress_checkpoint(
