@@ -29,7 +29,8 @@ from shards_kernel.integrations.mtls_checkpoint import (
     checkpoint_ingress_revision, verify_ingress_checkpoint,
 )
 
-_DOMAIN = b"SHARDS-MTLS-INGRESS-V1\x00"
+_DOMAIN_V1 = b"SHARDS-MTLS-INGRESS-V1\x00"
+_DOMAIN_V2 = b"SHARDS-MTLS-INGRESS-V2\x00"
 _MAX_CONFIG_BYTES = 96 * 1024
 _MAX_BODY_BYTES = 64 * 1024
 _MAX_RESPONSE_BYTES = 64 * 1024
@@ -93,12 +94,14 @@ def canonical_ingress_policy(envelope: dict[str, Any]) -> bytes:
     schema = envelope["schema"]
     if schema == "shards.mtls-ingress.v2":
         names = ("schema", "revision", "issued_at_ms", "expires_at_ms", "config")
+        domain = _DOMAIN_V2
     elif schema == "shards.mtls-ingress.v1":
         names = ("schema", "issued_at_ms", "expires_at_ms", "config")
+        domain = _DOMAIN_V1
     else:
         raise ValueError("Unrecognised ingress protocol")
     fields = {key: envelope[key] for key in names}
-    return _DOMAIN + json.dumps(
+    return domain + json.dumps(
         fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
@@ -540,11 +543,15 @@ class MTLSIngressServer:
         if config.revision:
             if not (config.checkpoint_db_file and config.ingress_id and config.policy_digest):
                 raise ValueError("Versioned ingress policy missing checkpoint identity")
+            # Validate against the enrolled checkpoint WITHOUT ratcheting
+            # its revision. TLS configuration and listener bind may still
+            # fail; only a successfully bound listener can activate a policy.
             self._checkpoint_identity = checkpoint_ingress_revision(
                 config.checkpoint_db_file,
                 ingress_id=config.ingress_id,
                 revision=config.revision,
                 digest=config.policy_digest,
+                activate=False,
             )
         self._clock = SystemClock()
         self._context = _tls_context(config)
@@ -575,18 +582,39 @@ class MTLSIngressServer:
             )
 
     def start(self, *, blocking: bool = True) -> None:
+        if self._server is not None:
+            raise RuntimeError("mTLS ingress already started")
+        # The constructor binds the socket immediately. No checkpoint may
+        # advance if another process holds the port or TLS setup failed.
         server = _BoundedTLSServer(
             (self.config.listen_host, self.config.listen_port),
             _make_handler(self.config, self._clock, self._verify_policy_checkpoint),
             self._context,
         )
-        self._server = server
-        if blocking:
-            server.serve_forever()
-        else:
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            self._thread = thread
-            thread.start()
+        try:
+            if self.config.revision:
+                checkpoint = self.config.checkpoint_db_file
+                ingress_id = self.config.ingress_id
+                digest = self.config.policy_digest
+                if checkpoint is None or ingress_id is None or digest is None:
+                    raise ValueError("Missing signed ingress checkpoint authority")
+                activated_identity = checkpoint_ingress_revision(
+                    checkpoint, ingress_id=ingress_id,
+                    revision=self.config.revision, digest=digest,
+                )
+                if activated_identity != self._checkpoint_identity:
+                    raise ValueError("Ingress checkpoint database changed before binding")
+            self._server = server
+            if blocking:
+                server.serve_forever()
+            else:
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                self._thread = thread
+                thread.start()
+        except BaseException:
+            server.server_close()
+            self._server = None
+            raise
 
     def stop(self) -> None:
         if self._server is not None:
