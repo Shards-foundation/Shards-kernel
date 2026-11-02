@@ -183,3 +183,32 @@ def test_checkpoint_corrupted_or_deleted_state_is_not_an_authority(tmp_path):
     path.write_bytes(b"bad database")
     with pytest.raises(ValueError, match="unavailable"):
         MTLSIngressServer(config)
+
+
+def test_optimised_interpreter_cannot_skip_checkpoint_authority_guard():
+    """Python -O must never turn missing trust state into an allowed request."""
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        from types import SimpleNamespace
+        from shards_kernel.integrations.mtls_ingress import MTLSIngressServer
+        ingress = object.__new__(MTLSIngressServer)
+        ingress.config = SimpleNamespace(
+            revision=1, checkpoint_db_file=None,
+            ingress_id=None, policy_digest=None,
+        )
+        ingress._checkpoint_identity = None
+        try:
+            ingress._verify_policy_checkpoint()
+        except ValueError as exc:
+            if str(exc) == "Missing signed ingress checkpoint authority":
+                raise SystemExit(0)
+        raise SystemExit(2)
+    """)
+    proc = subprocess.run(
+        [sys.executable, "-O", "-c", script],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
