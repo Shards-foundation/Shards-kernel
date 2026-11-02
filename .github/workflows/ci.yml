@@ -62,16 +62,24 @@ jobs:
         run: ruff check . --select E,F --ignore E501
 
       - name: Run tests with coverage
-        run: >
-          pytest
-          --cov=shards_kernel
-          --cov=implementations
-          --cov=scripts.ci.run_e2e_gate
-          --cov-branch
-          --cov-report=term-missing
-          --cov-report=xml
-          --cov-report=json:coverage.json
-          --cov-fail-under=90
+        shell: bash
+        run: |
+          set -euo pipefail
+          coverage_args=(--cov=shards_kernel --cov=implementations)
+          # The runner is intentionally unsupported on 3.9/3.10. Include its
+          # measured coverage only where negative-path subprocess tests run.
+          if python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+            coverage_args+=(--cov=scripts.ci.run_e2e_gate)
+          fi
+          pytest "${coverage_args[@]}" \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=json:coverage.json \
+            --cov-fail-under=90
+
+      - name: Enforce measured coverage threshold independently
+        run: python -m coverage report --fail-under=90
 
       - name: Governance branch coverage
         run: python scripts/ci/check_governance_coverage.py coverage.json
