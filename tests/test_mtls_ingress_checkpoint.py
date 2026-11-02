@@ -573,3 +573,38 @@ def test_checkpoint_preflight_is_read_only_and_blocks_untrusted_activation(tmp_p
             "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
             (config.ingress_id,),
         ).fetchone() == (1,)
+
+
+def test_checkpoint_preflight_cannot_write_or_accept_ambiguous_activation(tmp_path):
+    """Only explicit bool activation may modify a trusted revision checkpoint."""
+    _, _, _, config, path = _versioned(tmp_path)
+    identity = checkpoint_ingress_revision(
+        path, ingress_id=config.ingress_id, revision=3,
+        digest="c" * 64, activate=False,
+    )
+    assert identity == (path.stat().st_dev, path.stat().st_ino)
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT revision FROM ingress_policy_checkpoint WHERE ingress_id=?",
+            (config.ingress_id,),
+        ).fetchone() == (1,)
+    with pytest.raises(ValueError, match="boolean"):
+        checkpoint_ingress_revision(
+            path, ingress_id=config.ingress_id, revision=3,
+            digest="c" * 64, activate=1,
+        )
+
+
+def test_listener_rejects_duplicate_start_and_still_releases_port(tmp_path):
+    """A second start cannot replace a running authenticated listener."""
+    _, _, _, config, _ = _versioned(tmp_path)
+    server = MTLSIngressServer(config)
+    server.start(blocking=False)
+    try:
+        with pytest.raises(RuntimeError, match="already started"):
+            server.start(blocking=False)
+    finally:
+        server.stop()
+    # Reuse after explicit stop proves the initial socket was released.
+    server.start(blocking=False)
+    server.stop()
