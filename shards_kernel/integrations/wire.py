@@ -19,6 +19,8 @@ from shards_kernel.common.types import (
     ToolCall,
     VirtualClock,
 )
+from shards_kernel.common.time import SystemClock
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 from shards_kernel.permits import PermitToken
 from shards_kernel.variants.base import BaseKernel
 from shards_kernel.variants.strict_kernel import StrictKernel
@@ -52,6 +54,25 @@ def boot_strict_kernel(kernel_id: str) -> StrictKernel:
             clock=VirtualClock(0),
         )
     )
+    return kernel
+
+
+def boot_service_kernel(kernel_id: str) -> StrictKernel:
+    """Boot a real-time service kernel with an explicit deny-all policy.
+
+    Keyring and a scoped jurisdiction policy must be configured by the
+    trusted operator before any tool can execute. Never use VirtualClock for
+    service permit expiry checks.
+    """
+    kernel = StrictKernel()
+    kernel.boot(
+        KernelConfig(
+            kernel_id=kernel_id,
+            variant="strict",
+            clock=SystemClock(),
+        )
+    )
+    kernel.set_policy(JurisdictionPolicy.strict())
     return kernel
 
 
