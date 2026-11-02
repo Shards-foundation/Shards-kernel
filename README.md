@@ -446,6 +446,16 @@ SemVer with strict interpretation:
 
 ---
 
+## Legal / Privacy (Review Drafts)
+
+- [Terms of Service and Conditions of Use](TERMS_OF_SERVICE.md) — distinguishes the existing MIT software licence from optional project-operated support and community activities.
+- [Privacy Policy](PRIVACY_POLICY.md) — explains local operator-controlled audit data versus information voluntarily shared with project maintainers.
+- [Legal adoption checklist](docs/legal/ADOPTION_CHECKLIST.md) — outstanding corporate identity, processing/retention and independent legal-review requirements.
+
+**These documents are drafts and have not been formally adopted.** The [MIT licence](LICENSE) continues to govern your rights to use and redistribute the software. The current package is not a hosted Shards MCP Gateway or trading service.
+
+---
+
 ## Contributing / Security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
