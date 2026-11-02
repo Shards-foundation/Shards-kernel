@@ -364,6 +364,10 @@ class _IngressHandler(BaseHTTPRequestHandler):
         if result is None:
             return
         body, payload = result
+        # A policy can expire during a slow (but bounded) body upload.
+        # Do not forward under authority that expired after admission.
+        if not self._policy_safe():
+            return
         self._submit_to_operator(body, payload, bearer)
 
     # BaseHTTPRequestHandler requires the parameter name 'format' in its API.
