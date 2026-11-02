@@ -501,16 +501,25 @@ class MTLSIngressServer:
 
     def _verify_policy_checkpoint(self) -> None:
         if self.config.revision:
-            assert self.config.checkpoint_db_file is not None
-            assert self.config.ingress_id is not None
-            assert self.config.policy_digest is not None
-            assert self._checkpoint_identity is not None
+            # Never use asserts for runtime trust checks. Python -O removes
+            # assertions and would silently bypass these authority guards.
+            checkpoint = self.config.checkpoint_db_file
+            ingress_id = self.config.ingress_id
+            digest = self.config.policy_digest
+            identity = self._checkpoint_identity
+            if (
+                checkpoint is None
+                or ingress_id is None
+                or digest is None
+                or identity is None
+            ):
+                raise ValueError("Missing signed ingress checkpoint authority")
             verify_ingress_checkpoint(
-                self.config.checkpoint_db_file,
-                ingress_id=self.config.ingress_id,
+                checkpoint,
+                ingress_id=ingress_id,
                 revision=self.config.revision,
-                digest=self.config.policy_digest,
-                identity=self._checkpoint_identity,
+                digest=digest,
+                identity=identity,
             )
 
     def start(self, *, blocking: bool = True) -> None:
