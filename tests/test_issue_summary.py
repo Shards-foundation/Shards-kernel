@@ -1,11 +1,7 @@
 """Tests for deterministic issue intake without remote AI dependencies."""
 
 import json
-import subprocess
-import sys
-from pathlib import Path
-
-from scripts.ci.issue_summary import summarize_issue
+from scripts.ci.issue_summary import main, summarize_issue
 
 
 def test_issue_summary_is_bounded_and_marks_untrusted_input_as_unreviewed():
@@ -41,22 +37,20 @@ def test_issue_summary_falls_back_when_missing_or_invalid():
     assert "Unspecified" in summarize_issue({"issue": []})
 
 
-def test_issue_summary_cli_reads_event_file_as_data(tmp_path):
+def test_issue_summary_cli_reads_event_file_as_data(tmp_path, monkeypatch):
     payload = {"issue": {"title": "P2: Add docs", "body": "# Docs\nUpdate guide"}}
     event_path = tmp_path / "event.json"
     output = tmp_path / "result.md"
     event_path.write_text(json.dumps(payload), encoding="utf-8")
-    script = Path(__file__).resolve().parents[1] / "scripts" / "ci" / "issue_summary.py"
-    subprocess.run(
+    monkeypatch.setattr(
+        "sys.argv",
         [
-            sys.executable,
-            str(script),
+            "issue_summary.py",
             "--event",
             str(event_path),
             "--output",
             str(output),
         ],
-        check=True,
-        timeout=5,
     )
+    assert main() == 0
     assert "Update guide" in output.read_text(encoding="utf-8")
