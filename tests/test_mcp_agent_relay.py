@@ -282,3 +282,58 @@ def test_relay_does_not_transmit_oversize_or_unserializable_parameters():
         )
         assert result.is_error
         assert token not in result.content[0].text
+
+@pytest.mark.skipif(os.name != "posix", reason="Operator SQLite audit lock is POSIX-only")
+def test_two_mcp_clients_execute_concurrently_with_isolated_authority(tmp_path, monkeypatch):
+    """Real stdio clients race independent signed one-shot permits over one operator."""
+    config, signed_policy, issuer, token_alpha, token_beta = _fixture(tmp_path, monkeypatch)
+    base = "http://127.0.0.1:" + str(config["port"])
+    alpha_call = {
+        "name": "echo",
+        "arguments": {"text": "concurrent-alpha"},
+        "permit": _sign_permit(
+            issuer, "agent-alpha", "echo", {"text": "concurrent-alpha"}
+        ),
+    }
+    beta_call = {
+        "name": "add",
+        "arguments": {"a": 11, "b": 31},
+        "permit": _sign_permit(issuer, "agent-beta", "add", {"a": 11, "b": 31}),
+    }
+
+    async def exercise():
+        async with Client(_client(config["port"], token_alpha)) as alpha:
+            async with Client(_client(config["port"], token_beta)) as beta:
+                # Separate relay processes and independent bearer credentials.
+                first_a, first_b = await asyncio.gather(
+                    alpha.call_tool("governed_execute", alpha_call),
+                    beta.call_tool("governed_execute", beta_call),
+                )
+                assert not first_a.is_error
+                assert not first_b.is_error
+                assert _result(first_a)["result"] == "concurrent-alpha"
+                assert _result(first_b)["result"] == 42
+
+                # Replay must still be consumed even when the two operations
+                # were submitted concurrently through independent relays.
+                replay_a, replay_b = await asyncio.gather(
+                    alpha.call_tool("governed_execute", alpha_call),
+                    beta.call_tool("governed_execute", beta_call),
+                )
+                for response in (replay_a, replay_b):
+                    assert response.is_error
+                    assert _result(response)["decision"] == "DENY"
+
+                # Cross-agent signed permits cannot be borrowed.
+                borrowed_a, borrowed_b = await asyncio.gather(
+                    alpha.call_tool("governed_execute", beta_call),
+                    beta.call_tool("governed_execute", alpha_call),
+                )
+                assert borrowed_a.is_error
+                assert borrowed_b.is_error
+
+    proc = _start_service(signed_policy, base)
+    try:
+        asyncio.run(exercise())
+    finally:
+        _stop(proc)
