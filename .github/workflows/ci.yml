@@ -66,6 +66,7 @@ jobs:
           pytest
           --cov=shards_kernel
           --cov=implementations
+          --cov=scripts.ci.run_e2e_gate
           --cov-branch
           --cov-report=term-missing
           --cov-report=xml
