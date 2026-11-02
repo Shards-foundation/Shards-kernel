@@ -47,7 +47,7 @@ def _run_cli(config_path):
 
     from shards_kernel.__main__ import main
 
-    sys.argv = ["shards-kernel", "serve", "--config", str(config_path)]
+    sys.argv = ["shards-kernel", "serve", "--config", str(config_path), "--allow-unsigned-local"]
     raise SystemExit(main())
 
 
