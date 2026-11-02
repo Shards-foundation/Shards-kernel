@@ -348,7 +348,8 @@ class _IngressHandler(BaseHTTPRequestHandler):
         body, payload = result
         self._submit_to_operator(body, payload, bearer)
 
-    def log_message(self, format: str, *args: Any) -> None:
+    # BaseHTTPRequestHandler requires the parameter name 'format' in its API.
+    def log_message(self, format: str, *args: Any) -> None:  # pylint: disable=redefined-builtin
         """Never log request paths, bearer material or payloads."""
         return
 
