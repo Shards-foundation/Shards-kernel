@@ -277,207 +277,97 @@ pip install pytest pytest-cov black isort mypy ruff
 
 ---
 
-## 6. Production Setup
+## 6. Reference Single-Host HTTP Service (not production certified)
 
-**Required before starting any HTTP adapter:** provide
-`SHARDS_KERNEL_API_KEY` from a secrets manager (minimum 32 characters;
-generate with `python -c 'import secrets; print(secrets.token_urlsafe(48))'`).
-The default listener is loopback-only and the reference server is **not**
-a production public ingress. See
-[HTTP API authentication](../operations/HTTP_API_AUTH.md).
+**Scope:** This example demonstrates a local, loopback-only HTTP control interface.
+It is *not* a production MCP Gateway, does not include durable evidence by
+default, and must not be exposed to the public internet. The service requires
+a transport bearer credential; an authenticated request still requires a
+valid execution permit and policy decision before executing any tool.
 
+Before using this example, install the checked-out repository and a virtual
+environment under `/opt/shards_kernel`. Do not install the unrelated
+`kernels` PyPI distribution.
 
-### 6.1 System Service
+### 6.1 Prepare a dedicated service identity and secret
 
-Create `/etc/systemd/system/shards_kernel.service`:
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin kernels
+sudo install -d -m 0700 -o root -g root /etc/shards_kernel
+sudo python3 -c 'import secrets; from pathlib import Path; p=Path("/etc/shards_kernel/shards-kernel.env"); p.write_text("SHARDS_KERNEL_API_KEY=" + secrets.token_urlsafe(48) + "\\n"); p.chmod(0o600)'
+```
+
+If the service account already exists, skip `useradd`. In a managed
+deployment, inject the secret through a secret manager rather than generating
+it locally. Do not print or commit the credential.
+
+### 6.2 Install the service unit
+
+Create `/etc/systemd/system/shards-kernel.service`:
 
 ```ini
 [Unit]
-Description=Shards-Kernel Control Plane
+Description=Shards-Kernel local reference HTTP service
 After=network.target
 
 [Service]
 Type=simple
 User=kernels
 Group=kernels
-WorkingDirectory=/opt/kernels
-Environment=KERNELS_LOG_LEVEL=INFO
+WorkingDirectory=/opt/shards_kernel
+EnvironmentFile=/etc/shards_kernel/shards-kernel.env
 ExecStart=/opt/shards_kernel/venv/bin/python -m shards_kernel.sdk.server
-Restart=always
+Restart=on-failure
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+The service needs the package installed in the specified virtual environment.
+The default HTTP listener is `127.0.0.1:8080`. A reverse proxy must supply
+TLS and additional network- and operator-level controls before any remote
+use. For an independently hardened ingress, deploy and test it separately.
+
 ```bash
-# Enable and start service
 sudo systemctl daemon-reload
-sudo systemctl enable kernels
-sudo systemctl start kernels
-sudo systemctl status kernels
+sudo systemctl enable --now shards-kernel.service
+sudo systemctl status shards-kernel.service
+curl --fail http://127.0.0.1:8080/health
 ```
 
-### 6.2 Directory Structure
+To authenticate a local operator, retrieve credentials through the approved
+secret-management process and send `Authorization: Bearer <credential>`.
+Review [HTTP authentication](../operations/HTTP_API_AUTH.md) for limitations.
 
-```
-/opt/shards_kernel/
-├── venv/                 # Virtual environment
-├── config/
-│   └── shards_kernel.yaml      # Configuration
-├── evidence/             # Evidence storage
-├── logs/                 # Log files
-└── scripts/              # Operational scripts
-```
+**Audit persistence:** by default this example does not configure a durable
+SQLite ledger, so a process restart may lose in-memory evidence. Do not use it
+for production decision records. Implement and test restart recovery, protected
+storage, off-host backups and restore before approval.
 
-### 6.3 Permissions
+## 7. Containers and Kubernetes — not supported for production rollout
 
-```bash
-# Create user
-sudo useradd -r -s /bin/false kernels
+The old Docker/Compose/Kubernetes examples have been removed because they
+presented **non-operational configurations**:
 
-# Set ownership
-sudo chown -R kernels:kernels /opt/kernels
+- The old container command referred to a Python module that does not exist,
+  while the server binds to loopback and does not become remotely reachable
+  simply by publishing `8080`.
+- The Compose example supplied no API secret and published an unauthenticated
+  port on all host interfaces.
+- The Kubernetes example set three replicas without a shared ledger,
+  distributed nonce/permit consumption or coordination mechanism; it also
+  pointed at a nonexistent `/ready` endpoint.
 
-# Set permissions
-sudo chmod 750 /opt/kernels
-sudo chmod 700 /opt/shards_kernel/evidence
-sudo chmod 640 /opt/shards_kernel/config/shards_kernel.yaml
-```
-
-### 6.4 Log Rotation
-
-Create `/etc/logrotate.d/kernels`:
-
-```
-/opt/shards_kernel/logs/*.log {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 640 kernels kernels
-}
-```
-
----
-
-## 7. Container Setup
-
-### 7.1 Dockerfile
-
-```dockerfile
-FROM python:3.11-slim
-
-# Create non-root user
-RUN useradd -r -s /bin/false kernels
-
-# Set working directory
-WORKDIR /app
-
-# Copy source
-COPY . .
-
-# Install
-RUN pip install --no-cache-dir -e .
-
-# Switch to non-root user
-USER kernels
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "from shards_kernel import StrictKernel; k = StrictKernel('health'); print(k.state)"
-
-# Run
-CMD ["python", "-m", "shards_kernel.server"]
-```
-
-### 7.2 Docker Compose
-
-```yaml
-version: '3.8'
-
-services:
-  kernels:
-    build: .
-    container_name: kernels
-    restart: unless-stopped
-    environment:
-      - KERNELS_LOG_LEVEL=INFO
-    volumes:
-      - ./config:/app/config:ro
-      - kernels-evidence:/app/evidence
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import shards_kernel; print('ok')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-volumes:
-  kernels-evidence:
-```
-
-### 7.3 Kubernetes
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kernels
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: kernels
-  template:
-    metadata:
-      labels:
-        app: kernels
-    spec:
-      containers:
-      - name: kernels
-        image: kernels:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: KERNELS_LOG_LEVEL
-          value: "INFO"
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 30
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        volumeMounts:
-        - name: config
-          mountPath: /app/config
-          readOnly: true
-        - name: evidence
-          mountPath: /app/evidence
-      volumes:
-      - name: config
-        configMap:
-          name: kernels-config
-      - name: evidence
-        persistentVolumeClaim:
-          claimName: kernels-evidence
-```
+A production deployment manifest is **pending** until the gateway ingress,
+identity, distributed state, storage, health/readiness and recovery contracts
+are actually implemented and proven in staging. See production-readiness
+[issue #63](https://github.com/Shards-foundation/Shards-kernel/issues/63).
+Do not use a placeholder Kubernetes deployment to claim horizontal scaling.
 
 ---
 
