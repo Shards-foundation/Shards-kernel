@@ -166,6 +166,26 @@ effect reconciliation proof. The only permitted tool is a deterministic
 in-process `echo`; no distributed worker, externally committed transaction
 or multi-host nonce registry is involved.
 
+## Persistent time safety across process restarts
+
+The operator service now uses `PersistentSystemClock`, which wraps a real
+UTC millisecond system clock and **commits every accepted timestamp to SQLite**
+in a per-kernel `kernel_clock_checkpoint` table. A new process opening the
+same database will reject a wall-clock reading below the previously committed
+high-water mark. Database replacement, missing files, malformed state and
+SQLite failures also fail closed within the running process. It uses an
+exclusive SQLite write transaction for each timestamp read.
+
+This complements the existing `SystemClock` in-process rollback detection
+and the signed policy expiry check. It does not trust the system clock as a
+cryptographically authenticated time source. An attacker who can replace or
+rollback the **entire database while the service is stopped** may be able
+to erase both the replay ledger and clock floor; external signed/anchored
+checkpoints and trusted time are still mandatory for higher assurance.
+This design is **single-host only** and introduces synchronous disk-write
+latency on every clock read. Benchmarking must be completed before staging
+and no multi-replica deployment is supported.
+
 ## Deliberate scope restrictions
 
 The operator config format allows only exactly the built-in, deterministic,
