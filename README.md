@@ -147,6 +147,31 @@ Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
 For existing users migrating from the old `kernels` Python import path, see [the package migration guide](docs/PACKAGE_MIGRATION.md).
 
+## Agent-ready local MCP integration (first release scope)
+
+**An agent can use this kernel today without a separate Shards MCP Gateway.**
+The installable `shards-kernel mcp-call` command is a one-shot official
+MCP SDK v2 client for an enrolled agent; the existing `mcp-relay` command
+also supports stdio MCP hosts directly. A distinct signed v2 local operator,
+agent-scoped bearer and independently issued one-use permit are required.
+
+```bash
+# Python 3.11+; uses an existing signed local operator and issued permit.
+python -m pip install -e ".[crypto,mcp]"
+shards-kernel demo --json
+shards-kernel mcp-call --help
+# Following trusted operator/issuer provisioning, same-host agent:
+shards-kernel mcp-call --port 8765 --tool echo \
+  --arguments-json '{"text":"Hello from my agent"}' \
+  --permit-file /absolute/private/path/to/issued-echo-permit.json
+```
+
+See the [agent-first getting started guide](docs/AGENT_QUICKSTART.md) for
+the operator trust prerequisites, secret handling, MCP-host integration,
+expected responses and reproducible acceptance. This is **a usable local
+reference product**, not a deployed remote MCP Gateway, a trading executor
+or production certification. The latter are separately gated.
+
 ## Reproducible offline permit demonstration
 
 Verify the complete local deny → approved execution → replay/expiry/revocation
