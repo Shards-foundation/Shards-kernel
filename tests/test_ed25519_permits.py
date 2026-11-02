@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import pytest
 
-cryptography = pytest.importorskip("cryptography")
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from shards_kernel.common.types import Decision, KernelConfig, KernelRequest, ToolCall, VirtualClock
