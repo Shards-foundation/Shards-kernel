@@ -87,65 +87,49 @@ def canonical_ingress_policy(envelope: dict[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def verify_ingress_policy(
-    envelope: Any, *, pinned_public_key_hex: str, now_ms: int
-) -> SignedIngressConfig:
-    """Reject unsigned, expired, untrusted or ambiguous ingress configuration."""
+def _validate_envelope(record: Any, public_key_hex: str, now_ms: int) -> dict[str, Any]:
+    """Authenticate the envelope before reading any referenced TLS files."""
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-    record = _fields(envelope, {
+    obj = _fields(record, {
         "schema", "issued_at_ms", "expires_at_ms", "config", "signature_hex",
     })
-    if record["schema"] != "shards.mtls-ingress.v1":
+    if obj["schema"] != "shards.mtls-ingress.v1":
         raise ValueError("Unrecognised ingress protocol")
-    for key in ("issued_at_ms", "expires_at_ms"):
-        if type(record[key]) is not int or record[key] < 0:
-            raise ValueError("Ingress validity timestamps must be nonnegative integers")
+    issued, expires = obj["issued_at_ms"], obj["expires_at_ms"]
     if (
-        not 0 < record["expires_at_ms"] - record["issued_at_ms"] <= _MAX_POLICY_MS
-        or type(now_ms) is not int
-        or not record["issued_at_ms"] <= now_ms <= record["expires_at_ms"]
+        type(issued) is not int or type(expires) is not int
+        or issued < 0 or not 0 < expires - issued <= _MAX_POLICY_MS
+        or type(now_ms) is not int or not issued <= now_ms <= expires
     ):
         raise ValueError("Ingress policy expired, future-dated or too long")
     if (
-        not isinstance(pinned_public_key_hex, str)
-        or len(pinned_public_key_hex) != 64
-        or any(ch not in "0123456789abcdef" for ch in pinned_public_key_hex)
+        not isinstance(public_key_hex, str) or len(public_key_hex) != 64
+        or any(ch not in "0123456789abcdef" for ch in public_key_hex)
     ):
         raise ValueError("An independently pinned Ed25519 trust root is required")
-    signature = record["signature_hex"]
+    signature = obj["signature_hex"]
     if (
         not isinstance(signature, str) or len(signature) != 128
         or any(ch not in "0123456789abcdef" for ch in signature)
     ):
         raise ValueError("Malformed ingress policy signature")
     try:
-        Ed25519PublicKey.from_public_bytes(bytes.fromhex(pinned_public_key_hex)).verify(
-            bytes.fromhex(signature), canonical_ingress_policy(record)
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex)).verify(
+            bytes.fromhex(signature), canonical_ingress_policy(obj)
         )
     except (InvalidSignature, ValueError, TypeError) as exc:
         raise ValueError("Ingress policy signature invalid") from exc
+    return obj
 
-    raw = _fields(record["config"], {
-        "listen_host", "listen_port", "operator_port", "tls_cert_file",
-        "tls_key_file", "client_ca_file", "agents",
-    })
-    host = raw["listen_host"]
-    if not isinstance(host, str) or not host:
-        raise ValueError("Ingress host must be an IP address")
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError as exc:
-        raise ValueError("Ingress host must be a literal IPv4 address") from exc
-    if ip.version != 4 or ip.is_multicast or ip.is_unspecified and host != "0.0.0.0":
-        raise ValueError("Unsupported ingress network bind")
-    entries = raw["agents"]
-    if not isinstance(entries, list) or not 2 <= len(entries) <= 16:
+
+def _pinned_cert_actors(value: Any) -> dict[str, str]:
+    if not isinstance(value, list) or not 2 <= len(value) <= 16:
         raise ValueError("Ingress policy requires two to sixteen pinned agent certificates")
     fingerprints: dict[str, str] = {}
     actors: set[str] = set()
-    for entry in entries:
+    for entry in value:
         agent = _fields(entry, {"actor", "client_cert_sha256"})
         actor = _actor(agent["actor"])
         digest = agent["client_cert_sha256"]
@@ -158,14 +142,39 @@ def verify_ingress_policy(
             raise ValueError("Duplicated client certificate identity")
         fingerprints[digest] = actor
         actors.add(actor)
+    return fingerprints
 
+
+def _listen_ip(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("Ingress listener must be an explicit IPv4 address")
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise ValueError("Ingress listener must be an explicit IPv4 address") from exc
+    if address.version != 4 or address.is_multicast or address.is_unspecified:
+        raise ValueError("Wildcard, multicast and IPv6 listeners are not supported")
+    return value
+
+
+def verify_ingress_policy(
+    envelope: Any, *, pinned_public_key_hex: str, now_ms: int
+) -> SignedIngressConfig:
+    """Verify signature and exact TLS identity policy before network binding."""
+    obj = _validate_envelope(envelope, pinned_public_key_hex, now_ms)
+    raw = _fields(obj["config"], {
+        "listen_host", "listen_port", "operator_port", "tls_cert_file",
+        "tls_key_file", "client_ca_file", "agents",
+    })
     return SignedIngressConfig(
-        listen_host=host, listen_port=_port(raw["listen_port"]),
+        listen_host=_listen_ip(raw["listen_host"]),
+        listen_port=_port(raw["listen_port"]),
         operator_port=_port(raw["operator_port"]),
         tls_cert_file=_path(raw["tls_cert_file"]),
         tls_key_file=_path(raw["tls_key_file"]),
         client_ca_file=_path(raw["client_ca_file"]),
-        cert_actors=fingerprints, expires_at_ms=record["expires_at_ms"],
+        cert_actors=_pinned_cert_actors(raw["agents"]),
+        expires_at_ms=obj["expires_at_ms"],
     )
 
 
@@ -206,120 +215,151 @@ def _tls_context(config: SignedIngressConfig) -> ssl.SSLContext:
     return context
 
 
-def _make_handler(config: SignedIngressConfig, clock: SystemClock):
-    """Only signed-cert-mapped, authenticated agent submissions are forwarded."""
+class _IngressHandler(BaseHTTPRequestHandler):
+    """Per-connection client certificate and token binding before forwarding."""
 
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+    protocol_version = "HTTP/1.1"
+    config: SignedIngressConfig
+    clock: SystemClock
 
-        def _reply(self, code: int, data: dict[str, Any]) -> None:
-            body = json.dumps(data, separators=(",", ":")).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.wfile.write(body)
-            self.close_connection = True
+    def _reply(self, status: int, data: dict[str, Any]) -> None:
+        body = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
 
-        def do_GET(self) -> None:
-            self._reply(404, {"error": "Not found"})
+    def do_GET(self) -> None:
+        self._reply(404, {"error": "Not found"})
 
-        def do_OPTIONS(self) -> None:
-            self._reply(405, {"error": "Method not allowed"})
+    def do_OPTIONS(self) -> None:
+        self._reply(405, {"error": "Method not allowed"})
 
-        def do_POST(self) -> None:
-            if self.path != "/submit":
-                self._reply(404, {"error": "Not found"})
-                return
-            try:
-                if clock.now_ms() > config.expires_at_ms:
-                    self._reply(503, {"error": "Signed ingress policy expired"})
-                    return
-            except Exception:
-                self._reply(503, {"error": "Ingress clock unavailable"})
-                return
-            peer_cert = self.connection.getpeercert(binary_form=True)
-            if not peer_cert:
-                self._reply(403, {"error": "Missing authenticated client certificate"})
-                return
-            digest = hashlib.sha256(peer_cert).hexdigest()
-            actor = config.cert_actors.get(digest)
-            if actor is None:
-                self._reply(403, {"error": "Client certificate not enrolled"})
-                return
-            headers = self.headers.get_all("Authorization", [])
-            if len(headers) != 1 or not headers[0].startswith("Bearer "):
-                self._reply(401, {"error": "Missing agent credential"})
-                return
-            bearer = headers[0]
-            if not bearer.startswith("Bearer " + actor + "."):
-                self._reply(403, {"error": "Certificate and bearer principal mismatch"})
-                return
-            try:
-                length_raw = self.headers.get_all("Content-Length", [])
-                if len(length_raw) != 1:
-                    raise ValueError("Request length missing")
-                length = int(length_raw[0])
-                if length <= 0 or length > _MAX_BODY_BYTES:
-                    raise ValueError("Invalid request size")
-                data = self.rfile.read(length)
-                if len(data) != length:
-                    raise ValueError("Truncated body")
-                payload = json.loads(
-                    data.decode("utf-8"),
-                    object_pairs_hook=_unique_pairs,
-                    parse_constant=_reject_constant,
-                    parse_float=_reject_float,
-                )
-                if not isinstance(payload, dict) or payload.get("actor") != actor:
-                    self._reply(403, {"error": "Certificate and request principal mismatch"})
-                    return
-                call = payload.get("tool_call")
-                if (
-                    not isinstance(call, dict)
-                    or call.get("name") not in {"echo", "add"}
-                ):
-                    self._reply(403, {"error": "Tool not available at ingress"})
-                    return
-            except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
-                self._reply(400, {"error": "Invalid governed request"})
-                return
+    def _policy_safe(self) -> bool:
+        try:
+            if self.clock.now_ms() > self.config.expires_at_ms:
+                self._reply(503, {"error": "Signed ingress policy expired"})
+                return False
+        except Exception:
+            self._reply(503, {"error": "Ingress clock unavailable"})
+            return False
+        return True
 
-            conn = http.client.HTTPConnection(
-                "127.0.0.1", config.operator_port, timeout=3
+    def _authenticated_principal(self) -> tuple[str, str] | None:
+        leaf = self.connection.getpeercert(binary_form=True)
+        if not leaf:
+            self._reply(403, {"error": "Missing authenticated client certificate"})
+            return None
+        actor = self.config.cert_actors.get(hashlib.sha256(leaf).hexdigest())
+        if actor is None:
+            self._reply(403, {"error": "Client certificate not enrolled"})
+            return None
+        headers = self.headers.get_all("Authorization", [])
+        if len(headers) != 1 or not headers[0].startswith("Bearer "):
+            self._reply(401, {"error": "Missing agent credential"})
+            return None
+        bearer = headers[0]
+        if not bearer.startswith("Bearer " + actor + "."):
+            self._reply(403, {"error": "Certificate and bearer principal mismatch"})
+            return None
+        return actor, bearer
+
+    def _governed_body(self, actor: str) -> tuple[bytes, dict[str, Any]] | None:
+        try:
+            if self.headers.get_all("Transfer-Encoding", []):
+                raise ValueError("Transfer encoding not accepted")
+            length_headers = self.headers.get_all("Content-Length", [])
+            if len(length_headers) != 1:
+                raise ValueError("Request length missing")
+            length = int(length_headers[0])
+            if length <= 0 or length > _MAX_BODY_BYTES:
+                raise ValueError("Invalid request size")
+            if self.headers.get("Content-Type") != "application/json":
+                raise ValueError("JSON content type required")
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError("Truncated request")
+            payload = json.loads(
+                body.decode("utf-8"),
+                object_pairs_hook=_unique_pairs,
+                parse_constant=_reject_constant,
+                parse_float=_reject_float,
             )
-            try:
-                conn.request(
-                    "POST", "/submit", body=data,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": bearer,
-                    },
-                )
-                response = conn.getresponse()
-                result = response.read(_MAX_RESPONSE_BYTES + 1)
-                if len(result) > _MAX_RESPONSE_BYTES:
-                    raise ValueError("Oversized operator response")
-                if response.status not in {200, 401, 403, 400, 413, 503}:
-                    raise ValueError("Unexpected operator response")
-                response_json = json.loads(result.decode("utf-8"))
-                if not isinstance(response_json, dict):
-                    raise ValueError("Invalid operator response")
-                if response.status == 200 and response_json.get("request_id") != payload.get("request_id"):
-                    raise ValueError("Uncorrelated operator receipt")
-                self._reply(response.status, response_json)
-            except (OSError, ValueError, http.client.HTTPException, UnicodeError):
-                self._reply(502, {"error": "Local operator unavailable"})
-            finally:
-                conn.close()
+        except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+            self._reply(400, {"error": "Invalid governed request"})
+            return None
+        if not isinstance(payload, dict) or payload.get("actor") != actor:
+            self._reply(403, {"error": "Certificate and request principal mismatch"})
+            return None
+        call = payload.get("tool_call")
+        if not isinstance(call, dict) or call.get("name") not in {"echo", "add"}:
+            self._reply(403, {"error": "Tool not available at ingress"})
+            return None
+        return body, payload
 
-        def log_message(self, _format: str, *_args: Any) -> None:
-            """Never log request paths, bearer material or payloads."""
+    def _submit_to_operator(
+        self, body: bytes, payload: dict[str, Any], bearer: str
+    ) -> None:
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", self.config.operator_port, timeout=3
+        )
+        try:
+            conn.request(
+                "POST", "/submit", body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": bearer,
+                },
+            )
+            response = conn.getresponse()
+            data = response.read(_MAX_RESPONSE_BYTES + 1)
+            if len(data) > _MAX_RESPONSE_BYTES:
+                raise ValueError("Oversized operator response")
+            if response.status not in {200, 400, 401, 403, 413, 503}:
+                raise ValueError("Unexpected operator response")
+            receipt = json.loads(data.decode("utf-8"))
+            if not isinstance(receipt, dict):
+                raise ValueError("Invalid operator response")
+            if response.status == 200 and receipt.get("request_id") != payload.get("request_id"):
+                raise ValueError("Uncorrelated operator receipt")
+            self._reply(response.status, receipt)
+        except (OSError, ValueError, http.client.HTTPException, UnicodeError):
+            self._reply(502, {"error": "Local operator unavailable"})
+        finally:
+            conn.close()
+
+    def do_POST(self) -> None:
+        if self.path != "/submit":
+            self._reply(404, {"error": "Not found"})
             return
+        if not self._policy_safe():
+            return
+        principal = self._authenticated_principal()
+        if principal is None:
+            return
+        actor, bearer = principal
+        result = self._governed_body(actor)
+        if result is None:
+            return
+        body, payload = result
+        self._submit_to_operator(body, payload, bearer)
 
-    return Handler
+    def log_message(self, _format: str, *_args: Any) -> None:
+        """Never log request paths, bearer material or payloads."""
+        return
+
+
+def _make_handler(config: SignedIngressConfig, clock: SystemClock):
+    class BoundHandler(_IngressHandler):
+        pass
+
+    BoundHandler.config = config
+    BoundHandler.clock = clock
+    return BoundHandler
 
 
 class MTLSIngressServer:
