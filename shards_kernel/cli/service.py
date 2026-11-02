@@ -17,7 +17,7 @@ from typing import Any, Iterator
 from implementations.storage import SQLiteAuditStorage
 from shards_kernel.common.time import PersistentSystemClock, SystemClock
 from shards_kernel.common.types import KernelConfig
-from shards_kernel.integrations.auth import resolve_api_key
+from shards_kernel.integrations.auth import AgentIdentity, resolve_api_key
 from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 from shards_kernel.permits import PublicVerificationKey
 from shards_kernel.sdk.server import KernelServer
@@ -32,12 +32,13 @@ class OperatorServiceConfig:
     """Validated immutable operator input, never including credentials."""
 
     kernel_id: str
-    actor: str
+    actor: str | None
     tools: tuple[str, ...]
     public_keys: dict[str, PublicVerificationKey]
     audit_db: Path
     port: int
     version: int = 1
+    agents: tuple[AgentIdentity, ...] = ()
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -130,23 +131,60 @@ def _service_port(value: Any) -> int:
     return value
 
 
-def parse_operator_config(data: Any) -> OperatorServiceConfig:
-    """Validate exact v1 schema without ever interpreting code or secrets."""
-    data = _fields(
-        data,
-        {"version", "kernel_id", "actor", "tools", "issuer_keys", "audit_db", "port"},
-        "Operator",
-    )
-    if type(data["version"]) is not int or data["version"] != 1:
-        raise ValueError("Unsupported operator configuration version")
-    kernel_id = _identifier(data["kernel_id"], "kernel_id")
-    actor = _identifier(data["actor"], "actor")
+def _parse_agent_identities(
+    raw: Any, configured_tools: list[str]
+) -> tuple[AgentIdentity, ...]:
+    """Validate independently enrolled agents; no tokens or private keys in JSON."""
+    if not isinstance(raw, list) or not 2 <= len(raw) <= 16:
+        raise ValueError("v2 requires between two and sixteen independently enrolled agents")
+    actors: set[str] = set()
+    digests: set[str] = set()
+    identities: list[AgentIdentity] = []
+    for row in raw:
+        item = _fields(
+            row, {"actor", "token_sha256", "allowed_tools"}, "Agent identity"
+        )
+        actor = _identifier(item["actor"], "agent actor")
+        digest = item["token_sha256"]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+        ):
+            raise ValueError("agent token_sha256 must be exactly 64 lowercase hex characters")
+        if actor in actors or digest in digests:
+            raise ValueError("Agent actors and credential digests must be unique")
+        agent_tools = _validated_tools(item["allowed_tools"])
+        if not set(agent_tools).issubset(configured_tools):
+            raise ValueError("Agent tool scope cannot exceed configured tool allowlist")
+        actors.add(actor)
+        digests.add(digest)
+        identities.append(
+            AgentIdentity(actor=actor, token_sha256=digest, allowed_tools=frozenset(agent_tools))
+        )
+    return tuple(identities)
 
+
+def parse_operator_config(data: Any) -> OperatorServiceConfig:
+    """Validate v1 single-agent or v2 signed multi-agent operator schema."""
+    if not isinstance(data, dict) or type(data.get("version")) is not int:
+        raise ValueError("Operator version must be an integer")
+    version = data["version"]
+    common = {"version", "kernel_id", "tools", "issuer_keys", "audit_db", "port"}
+    if version == 1:
+        data = _fields(data, common | {"actor"}, "Operator v1")
+    elif version == 2:
+        data = _fields(data, common | {"agents"}, "Operator v2")
+    else:
+        raise ValueError("Unsupported operator configuration version")
+
+    kernel_id = _identifier(data["kernel_id"], "kernel_id")
     raw_tools = _validated_tools(data["tools"])
     keys = _parse_public_keys(data["issuer_keys"], kernel_id)
     audit_db = _audit_path(data["audit_db"])
     port = _service_port(data["port"])
-
+    actor = _identifier(data["actor"], "actor") if version == 1 else None
+    agents = _parse_agent_identities(data["agents"], raw_tools) if version == 2 else ()
     return OperatorServiceConfig(
         kernel_id=kernel_id,
         actor=actor,
@@ -154,6 +192,8 @@ def parse_operator_config(data: Any) -> OperatorServiceConfig:
         public_keys=keys,
         audit_db=audit_db,
         port=port,
+        version=version,
+        agents=agents,
     )
 
 
@@ -225,7 +265,8 @@ def build_operator_server(
     )
     kernel.set_policy(
         JurisdictionPolicy(
-            allowed_actors=frozenset({config.actor}),
+            allowed_actors=frozenset(a.actor for a in config.agents)
+            if config.version == 2 else frozenset({config.actor}),
             allowed_tools=frozenset(config.tools),
         )
     )
@@ -236,6 +277,7 @@ def build_operator_server(
         port=config.port,
         api_key=key,
         trusted_actor=config.actor,
+        agent_identities=config.agents,
         policy_expires_at_ms=policy_expires_at_ms,
     )
 
