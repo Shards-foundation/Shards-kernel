@@ -185,3 +185,28 @@ def test_ci_quality_matrix_is_structurally_blocked_by_e2e_failure():
     assert "sys.exit(1)" in quality_job
     assert "--cov=scripts.ci.run_e2e_gate" in quality_job
     assert "sys.version_info >= (3, 11)" in quality_job
+
+
+def test_tag_release_requires_strict_e2e_and_unrounded_coverage():
+    """Tagged releases cannot silently bypass stronger pull-request gates."""
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert 'tags:' in workflow
+    assert 'pip install -e ".[dev,crypto,mcp]"' in workflow
+    assert "python scripts/ci/run_e2e_gate.py" in workflow
+    assert workflow.index("Run strict multi-process E2E release gate") < workflow.index(
+        "Run tests with coverage"
+    )
+    assert "--cov=scripts.ci.run_e2e_gate" in workflow
+    assert "--cov-fail-under=90" in workflow
+    assert "--cov-fail-under=70" not in workflow
+    assert 'json.load(report)["totals"]["percent_covered"]' in workflow
+    assert "math.isfinite(percent)" in workflow
+    assert "percent < 90.0" in workflow
+    assert "sys.exit(1)" in workflow
+    assert "sha256sum -c SHA256SUMS" in workflow
+    assert "twine check dist/*.whl dist/*.tar.gz" in workflow
+    assert not re.search(r"(?m)^\\s*continue-on-error:\\s*true\\s*$", workflow)
+    # Publication requires a separate, explicit owner decision.
+    assert "PyPI publishing is intentionally disabled" in workflow
