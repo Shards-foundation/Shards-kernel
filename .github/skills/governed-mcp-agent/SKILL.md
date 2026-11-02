@@ -4,11 +4,11 @@ description: Connect a separately enrolled AI agent to Shards-Kernel's current o
 license: MIT
 ---
 
-# Governed local MCP agent
+# Shards-Kernel governed local MCP agent
 
 ## Scope
 
-This skill is for an **agent client**, not an operator, permit issuer, wallet signer or Shards MCP Gateway. The currently supported transport is the official MCP SDK v2 **stdio process** to `127.0.0.1:<signed-operator-port>/submit`. The operator owns authentication, signed-policy checks, permit verification, execution and durable audit. Only harmless built-in `echo` and `add` are available.
+This skill is for an **agent client**, not an operator, permit issuer, wallet signer or Shards MCP Gateway. It is not a production remote-MCP deployment or a substitute for independently provisioned credentials. The currently supported transport is the official MCP SDK v2 **stdio process** to `127.0.0.1:<signed-operator-port>/submit`. The operator owns authentication, signed-policy checks, permit verification, execution and durable audit. Only harmless built-in `echo` and `add` are available.
 
 Never upgrade an agent to operator authority. Never create or disclose credentials to satisfy a test.
 
