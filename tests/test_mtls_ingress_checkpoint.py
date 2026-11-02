@@ -279,3 +279,62 @@ def test_fresh_private_db_refuses_ingress_until_explicit_bootstrap(tmp_path):
             db, ingress_id=signed_config.ingress_id,
             revision=signed_config.revision, digest=signed_config.policy_digest,
         )
+
+
+def test_checkpoint_connections_explicitly_close_on_success_and_failure(
+    tmp_path, monkeypatch,
+):
+    """No SQLite descriptors may leak across TLS request policy checks.
+
+    Hold every created connection alive to prevent Python's refcounting or GC
+    from disguising an omitted close(). This proves explicit close on all
+    three checkpoint operations, including exceptions inside transactions.
+    """
+    from shards_kernel.integrations import mtls_checkpoint as checkpoint_module
+
+    _, _, _, config, path = _versioned(tmp_path)
+    created = []
+    connect = sqlite3.connect
+
+    class TrackedConnection(sqlite3.Connection):
+        closed_explicitly = False
+
+        def close(self):
+            self.closed_explicitly = True
+            return super().close()
+
+    def track_connect(*args, **kwargs):
+        connection = connect(*args, factory=TrackedConnection, **kwargs)
+        created.append(connection)
+        return connection
+
+    monkeypatch.setattr(checkpoint_module.sqlite3, "connect", track_connect)
+    server = MTLSIngressServer(config)
+
+    for _ in range(125):
+        server._verify_policy_checkpoint()
+
+    # A bootstrap attempt against enrolled state must rollback and close.
+    with pytest.raises(ValueError, match="already initialised"):
+        bootstrap_ingress_checkpoint(
+            path, ingress_id=config.ingress_id,
+            revision=config.revision, digest=config.policy_digest,
+        )
+
+    # Revision rollback and signed digest substitution must also close.
+    checkpoint_ingress_revision(
+        path, ingress_id=config.ingress_id,
+        revision=2, digest="a" * 64,
+    )
+    with pytest.raises(ValueError, match="rollback"):
+        checkpoint_ingress_revision(
+            path, ingress_id=config.ingress_id,
+            revision=1, digest=config.policy_digest,
+        )
+    with pytest.raises(ValueError, match="no longer matches"):
+        server._verify_policy_checkpoint()
+
+    # Retain live Python references to every connection; garbage collection
+    # cannot act as a substitute for explicit release of SQLite resources.
+    assert len(created) >= 130
+    assert all(connection.closed_explicitly for connection in created)
