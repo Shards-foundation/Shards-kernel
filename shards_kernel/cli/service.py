@@ -145,6 +145,8 @@ def _parse_agent_identities(
             row, {"actor", "token_scrypt", "allowed_tools"}, "Agent identity"
         )
         actor = _identifier(item["actor"], "agent actor")
+        if "." in actor:
+            raise ValueError("Multi-agent actor labels cannot contain the token separator")
         digest = item["token_scrypt"]
         if (
             not isinstance(digest, str)
