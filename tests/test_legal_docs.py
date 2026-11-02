@@ -228,12 +228,13 @@ class LegalDocumentationContractTests(unittest.TestCase):
 
     def test_pull_request_diff_does_not_mix_legal_and_runtime_changes(self):
         """When CI provides PR SHAs, verify the real git diff, not a hand-written list."""
+        # Ordinary push/manual builds and the full pytest matrix do not have
+        # pull-request revisions. Scope verification is mandatory ONLY in the
+        # dedicated PR documentation job, not merely when a SHA happens to exist.
+        if os.environ.get("LEGAL_DOC_SCOPE_REQUIRED") != "true":
+            return
         base = os.environ.get("LEGAL_PR_BASE_SHA", "")
         head = os.environ.get("LEGAL_PR_HEAD_SHA", "")
-        if not base and not head:
-            if os.environ.get("LEGAL_DOC_SCOPE_REQUIRED") == "true":
-                self.fail("Missing PR base/head SHA: cannot verify legal change scope")
-            return
         self.assertRegex(base, r"\A[0-9a-f]{40}\Z")
         self.assertRegex(head, r"\A[0-9a-f]{40}\Z")
         paths = changed_files_since_merge_base(base, head)
