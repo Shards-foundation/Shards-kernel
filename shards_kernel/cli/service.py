@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from implementations.storage import SQLiteAuditStorage
-from shards_kernel.common.time import SystemClock
+from shards_kernel.common.time import PersistentSystemClock, SystemClock
 from shards_kernel.common.types import KernelConfig
 from shards_kernel.integrations.auth import resolve_api_key
 from shards_kernel.jurisdiction.policy import JurisdictionPolicy
@@ -220,7 +220,7 @@ def build_operator_server(
         KernelConfig(
             kernel_id=config.kernel_id,
             variant="strict",
-            clock=SystemClock(),
+            clock=PersistentSystemClock(str(config.audit_db), config.kernel_id),
         )
     )
     kernel.set_policy(
