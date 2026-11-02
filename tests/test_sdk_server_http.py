@@ -15,7 +15,7 @@ TEST_KEY = "shards-test-http-key-32-characters-long-0001"
 @pytest.fixture
 def live_server():
     kernel = boot_strict_kernel("sdk-server-test")
-    server = KernelServer(kernel, port=0, api_key=TEST_KEY)
+    server = KernelServer(kernel, port=0, api_key=TEST_KEY, allow_test_clock=True)
     server.start(blocking=False)
     port = server._server.server_address[1]
     try:
