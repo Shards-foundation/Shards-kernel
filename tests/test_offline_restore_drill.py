@@ -186,3 +186,37 @@ def test_cli_outputs_bounded_json_and_never_leaks_audit_details(tmp_path, capsys
     failure = json.loads(capsys.readouterr().out)
     assert failure == {"status": "REJECTED", "reason": "EXTERNAL_ROOT_MISMATCH"}
     assert str(database) not in json.dumps(failure)
+
+
+def test_persistent_clock_blocks_replaced_audit_db_and_stays_failed(tmp_path):
+    """A valid-looking replacement DB cannot fool a running time high-water mark."""
+    from shards_kernel.common.time import ClockRollbackError, PersistentSystemClock
+
+    database, _ = _audit(tmp_path)
+    clock = PersistentSystemClock(
+        str(database), "restore-example", source_ns=lambda: 2_000_000_000
+    )
+    assert clock.now_ms() == 2_000
+    prior = tmp_path / "prior.sqlite3"
+    database.rename(prior)
+    SQLiteAuditStorage(str(database)).bind_kernel("restore-example", "strict")
+    with pytest.raises(ClockRollbackError):
+        clock.now_ms()
+    with pytest.raises(ClockRollbackError, match="declared unsafe"):
+        clock.now_ms()
+
+
+def test_persistent_clock_rejects_symlinked_database_replacement(tmp_path):
+    """Symlink restoration cannot silently substitute for the enrolled inode."""
+    from shards_kernel.common.time import ClockRollbackError, PersistentSystemClock
+
+    database, _ = _audit(tmp_path)
+    clock = PersistentSystemClock(
+        str(database), "restore-example", source_ns=lambda: 2_000_000_000
+    )
+    assert clock.now_ms() == 2_000
+    relocated = tmp_path / "relocated.sqlite3"
+    database.rename(relocated)
+    database.symlink_to(relocated)
+    with pytest.raises(ClockRollbackError):
+        clock.now_ms()
