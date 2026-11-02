@@ -39,7 +39,11 @@ cloud or GitHub permissions merely because an agent possesses them.
 | Security | Signed policy/permit, constrained agent tools, PRs #85/#86 transport work | Independent approval, protected keys/KMS or equivalent, rotation & revocation drill, identity isolation, signed anti-rollback external checkpoint, hostile-user security assessment |
 | Deployment | Installable CLI and loopback operator reference | Tagged image, SBOM/provenance, distinct staging/prod secrets, persistent worker host, repeatable service supervision, controlled upgrade and rollback |
 | Operations | Local SQLite restart tests and offline read-only restore rehearsal (this PR) | Encrypted/off-host backups, immutable external root reference, restored process replay proof, RPO/RTO drill, on-call/incident response and actual rollback |
-| Release process | Code quality/CI and local E2E PR #88 (not merged as of 2 Nov) | Branch protection + required CI/E2E checks, reviewer independence, recorded go/no-go decision |
+
+**Cross-cutting release process:** Code quality/CI and local E2E PR #88
+remain subject to branch protection, independently approved required checks
+and a recorded go/no-go decision. This is an enforcement requirement across
+the **nine** workstreams, not a tenth product component.
 
 **Acceptance rule:** any missing P0 artifact is `NOT_VERIFIED`, not a waived
 success. **Trading/wallet signing remains outside this release.**
@@ -76,7 +80,12 @@ separately administered authority. The script only compares values; it
 **cannot authenticate the trustworthiness** of the supplied anchors.
 
 The drill:
-1. Rejects non-regular/symlink/relative sources and source inode replacement.
+1. Requires Linux/POSIX no-follow file opening, an operator-owned **private
+   0700 source directory** and operator-owned **0600 SQLite source file**.
+   Acquires and retains a no-follow source descriptor, rechecks the opened
+   inode before/after SQLite's pathname-based backup, and rejects a file or
+   symlink swap. This boundary excludes hostile processes sharing the
+   operator UID; use an isolated operator OS account.
 2. Uses SQLite's online backup protocol, including committed WAL records, to
    create a private **temporary** restore copy. Nothing is restored over the
    original database and no write-capable source connection is opened.
@@ -84,9 +93,11 @@ The drill:
    the real hash-chained `AuditLedger`, checks a minimum entry count and
    reports the recovered root.
 4. Rejects malformed history, root mismatch, insufficient checkpoint revision
-   and outstanding `intent` audit events without subsequent `outcome`.
-   Such events require operator reconciliation; they do not prove whether a
-   downstream external side effect occurred.
+   and outstanding `intent` audit events. An intent is considered paired
+   only by an immediately adjacent, **successful, permit-correlated tool
+   outcome**. A later denial or retry with the same request ID cannot close
+   the original attempt. Failed effects remain ambiguous and require
+   independent operator/provider reconciliation.
 5. Returns **bounded, credential-free JSON** and cleans the temporary copy.
 
 The result `LOCAL_RESTORE_VERIFIED` proves *only* a consistent disposable
