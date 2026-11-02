@@ -104,3 +104,36 @@ def test_all_http_app_factories_require_an_api_key(monkeypatch):
         create_flask_app(kernel_id="no-auth-flask")
     with pytest.raises(ValueError, match="API key"):
         create_fastapi_app(kernel_id="no-auth-fastapi")
+
+
+def test_flask_no_store_headers_are_consistent():
+    pytest.importorskip("flask")
+    from shards_kernel.integrations.flask_adapter import create_flask_app
+
+    client = create_flask_app(kernel_id="flask-cache-test", api_key=TEST_KEY).test_client()
+    for method, path, headers in (
+        ("GET", "/health", {}),
+        ("GET", "/status", {}),
+        ("GET", "/status", AUTH_HEADER),
+        ("POST", "/halt", {}),
+    ):
+        response = client.open(path, method=method, headers=headers)
+        assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_fastapi_no_store_headers_are_consistent():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
+
+    app = create_fastapi_app(kernel_id="fastapi-cache-test", api_key=TEST_KEY)
+    with TestClient(app) as client:
+        for method, path, headers in (
+            ("GET", "/health", {}),
+            ("GET", "/status", {}),
+            ("GET", "/status", AUTH_HEADER),
+            ("POST", "/halt", {}),
+        ):
+            response = client.request(method, path, headers=headers)
+            assert response.headers["Cache-Control"] == "no-store"
