@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import stat
 import sys
@@ -28,6 +29,24 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise ValueError("Duplicate JSON key")
         result[key] = value
     return result
+
+
+def _strict_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Non-finite JSON numbers are forbidden")
+    return number
+
+
+def _reject_constant(_value: str) -> None:
+    raise ValueError("Non-finite JSON constants are forbidden")
+
+
+def _json_object(raw: str) -> Any:
+    return json.loads(
+        raw, object_pairs_hook=_unique_pairs,
+        parse_float=_strict_float, parse_constant=_reject_constant,
+    )
 
 
 def _read_private_permit(path: Path) -> dict[str, Any]:
@@ -52,7 +71,7 @@ def _read_private_permit(path: Path) -> dict[str, Any]:
             raise ValueError("Permit file too large")
     finally:
         os.close(fd)
-    permit = json.loads(content.decode("utf-8"), object_pairs_hook=_unique_pairs)
+    permit = _json_object(content.decode("utf-8"))
     if not isinstance(permit, dict) or not permit:
         raise ValueError("Signed permit must be a nonempty JSON object")
     return permit
@@ -61,7 +80,7 @@ def _read_private_permit(path: Path) -> dict[str, Any]:
 def _arguments(tool: str, raw: str) -> dict[str, Any]:
     if tool not in _TOOLS:
         raise ValueError("Only the built-in echo/add tools are supported")
-    value = json.loads(raw, object_pairs_hook=_unique_pairs)
+    value = _json_object(raw)
     if not isinstance(value, dict):
         raise ValueError("Arguments must be a JSON object")
     if tool == "echo" and (set(value) != {"text"} or not isinstance(value["text"], str)):
@@ -97,7 +116,7 @@ async def _invoke(
         raw_response = reply.content[0].text
         if len(raw_response.encode("utf-8")) > _MAX_RESPONSE_BYTES:
             raise ValueError("Oversized MCP tool response")
-        result = json.loads(raw_response, object_pairs_hook=_unique_pairs)
+        result = _json_object(raw_response)
         if not isinstance(result, dict):
             raise ValueError("Invalid MCP receipt")
         if not reply.is_error and result.get("decision") == "ALLOW":
