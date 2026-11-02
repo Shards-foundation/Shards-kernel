@@ -5,10 +5,12 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import http.client
+import io
 import json
 import secrets
 import socket
 import ssl
+import threading
 import time
 
 import pytest
@@ -22,9 +24,7 @@ from shards_kernel.cli.service import (
 )
 from shards_kernel.cli.signed_policy import verify_signed_policy
 from shards_kernel.integrations.auth import agent_token_kdf
-from shards_kernel.integrations.mtls_ingress import (
-    MTLSIngressServer, load_ingress_policy, run_mtls_ingress, verify_ingress_policy,
-)
+from shards_kernel.integrations import mtls_ingress as ingress_module
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_mtls_ingress_policy, sign_operator_policy, sign_v2_permit
 from shards_kernel.permits import PermitBuilder
@@ -203,7 +203,7 @@ def _setup(tmp_path):
         expires_at_ms=now + 600_000,
     )
     pinned = ingress_key.public_key().public_bytes_raw().hex()
-    config = verify_ingress_policy(
+    config = ingress_module.verify_ingress_policy(
         signed_ingress, pinned_public_key_hex=pinned, now_ms=now,
     )
     return {
@@ -224,7 +224,7 @@ def test_real_mutual_tls_agent_cert_and_bearer_and_permit_separation(tmp_path):
             agent_pepper=setup["pepper"],
             policy_expires_at_ms=operator.expires_at_ms,
         )
-        ingress = MTLSIngressServer(setup["config"])
+        ingress = ingress_module.MTLSIngressServer(setup["config"])
         server.start(blocking=False)
         ingress.start(blocking=False)
         try:
@@ -306,11 +306,11 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
     now = int(time.time() * 1000)
     path = tmp_path / "policy.json"
     path.write_text(json.dumps(signed))
-    assert load_ingress_policy(
+    assert ingress_module.load_ingress_policy(
         str(path), pinned_public_key_hex=pinned, now_ms=now
     ) == data["config"]
-    assert run_mtls_ingress(str(path)) == 2  # Trust root missing by default.
-    assert verify_ingress_policy(
+    assert ingress_module.run_mtls_ingress(str(path)) == 2  # Trust root missing by default.
+    assert ingress_module.verify_ingress_policy(
         signed, pinned_public_key_hex=pinned, now_ms=now,
     ).listen_host == "127.0.0.1"
     for field, value in (
@@ -322,18 +322,18 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
         changed = copy.deepcopy(signed)
         changed["config"][field] = value
         with pytest.raises(ValueError):
-            verify_ingress_policy(
+            ingress_module.verify_ingress_policy(
                 changed, pinned_public_key_hex=pinned, now_ms=now,
             )
     other = ed25519.Ed25519PrivateKey.generate()
     with pytest.raises(ValueError, match="signature"):
-        verify_ingress_policy(
+        ingress_module.verify_ingress_policy(
             signed,
             pinned_public_key_hex=other.public_key().public_bytes_raw().hex(),
             now_ms=now,
         )
     with pytest.raises(ValueError, match="expired"):
-        verify_ingress_policy(
+        ingress_module.verify_ingress_policy(
             signed, pinned_public_key_hex=pinned, now_ms=now + 720_000,
         )
     changed = copy.deepcopy(signed)
@@ -342,11 +342,11 @@ def test_unsigned_modified_and_expired_ingress_policy_fails_closed(tmp_path):
         changed["config"], data["ingress_key"],
         issued_at_ms=now - 10_000, expires_at_ms=now + 60_000,
     )
-    remote = verify_ingress_policy(
+    remote = ingress_module.verify_ingress_policy(
         resig, pinned_public_key_hex=pinned, now_ms=now,
     )
     with pytest.raises(ValueError, match="explicit"):
-        MTLSIngressServer(remote)
+        ingress_module.MTLSIngressServer(remote)
 
 
 def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
@@ -359,7 +359,7 @@ def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
     ):
         path.write_text(text)
         with pytest.raises(ValueError, match=pattern):
-            load_ingress_policy(
+            ingress_module.load_ingress_policy(
                 str(path), pinned_public_key_hex=data["pinned"],
                 now_ms=int(time.time() * 1000),
             )
@@ -367,7 +367,7 @@ def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
     symlink = tmp_path / "symlink.json"
     symlink.symlink_to(path)
     with pytest.raises(ValueError, match="invalid"):
-        load_ingress_policy(
+        ingress_module.load_ingress_policy(
             str(symlink), pinned_public_key_hex=data["pinned"],
             now_ms=int(time.time() * 1000),
         )
@@ -388,7 +388,7 @@ def test_signed_ingress_policy_validation_rejects_ambiguous_network_and_identity
             issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
         )
         with pytest.raises(ValueError):
-            verify_ingress_policy(
+            ingress_module.verify_ingress_policy(
                 signed, pinned_public_key_hex=setup["pinned"], now_ms=now
             )
 
@@ -425,14 +425,14 @@ def test_ingress_envelope_schema_clock_and_signature_fail_closed(tmp_path):
     ):
         forged = dict(signed, **change)
         with pytest.raises(ValueError):
-            verify_ingress_policy(forged, pinned_public_key_hex=pinned, now_ms=now)
+            ingress_module.verify_ingress_policy(forged, pinned_public_key_hex=pinned, now_ms=now)
     for root in ("", "0", "g" * 64):
         with pytest.raises(ValueError):
-            verify_ingress_policy(
+            ingress_module.verify_ingress_policy(
                 signed, pinned_public_key_hex=root, now_ms=now
             )
     with pytest.raises(ValueError, match="expired"):
-        verify_ingress_policy(signed, pinned_public_key_hex=pinned, now_ms=now - 120_000)
+        ingress_module.verify_ingress_policy(signed, pinned_public_key_hex=pinned, now_ms=now - 120_000)
     for start, end in (
         (now, now + 25 * 60 * 60 * 1000),
         (-1, now + 10_000),
@@ -452,7 +452,7 @@ def test_ingress_envelope_schema_clock_and_signature_fail_closed(tmp_path):
 def test_runtime_expiry_invalid_body_privileged_path_and_downstream_outage(tmp_path, monkeypatch):
     """TLS handshake and policy are valid, but unauthorised payloads never run."""
     setup = _setup(tmp_path)
-    ingress = MTLSIngressServer(setup["config"])
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
     ingress.start(blocking=False)
     try:
         port, ca = setup["ingress_port"], setup["files"]["ca"]
@@ -526,7 +526,6 @@ def test_cli_ingress_valid_signed_policy_runs_and_stops_without_leaking(tmp_path
     signed_path.write_text(json.dumps(setup["policy"]))
     monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
     calls = []
-    import shards_kernel.integrations.mtls_ingress as module
 
     class FakeIngress:
         def __init__(self, config, *, allow_remote_listen=False):
@@ -538,8 +537,8 @@ def test_cli_ingress_valid_signed_policy_runs_and_stops_without_leaking(tmp_path
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(module, "MTLSIngressServer", FakeIngress)
-    assert run_mtls_ingress(str(signed_path)) == 0
+    monkeypatch.setattr(ingress_module, "MTLSIngressServer", FakeIngress)
+    assert ingress_module.run_mtls_ingress(str(signed_path)) == 0
     assert calls == ["start", "stop"]
 
 
@@ -549,7 +548,7 @@ def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
     path = tmp_path / "big-policy.json"
     path.write_bytes(b" " * (96 * 1024 + 1))
     with pytest.raises(ValueError, match="too large"):
-        load_ingress_policy(
+        ingress_module.load_ingress_policy(
             str(path), pinned_public_key_hex=setup["pinned"], now_ms=now
         )
     signed_config = copy.deepcopy(setup["policy"]["config"])
@@ -561,7 +560,7 @@ def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
         issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
     )
     with pytest.raises(ValueError, match="regular"):
-        verify_ingress_policy(
+        ingress_module.verify_ingress_policy(
             signed, pinned_public_key_hex=setup["pinned"], now_ms=now
         )
 
@@ -603,15 +602,14 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
         raw, setup["ingress_key"],
         issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
     )
-    config = verify_ingress_policy(
+    config = ingress_module.verify_ingress_policy(
         signed, pinned_public_key_hex=setup["pinned"], now_ms=now,
     )
     with pytest.raises(ValueError, match="explicit"):
-        MTLSIngressServer(config)
-    ingress = MTLSIngressServer(config, allow_remote_listen=True)
+        ingress_module.MTLSIngressServer(config)
+    ingress = ingress_module.MTLSIngressServer(config, allow_remote_listen=True)
     assert ingress.config.listen_host == "192.0.2.99"
 
-    import shards_kernel.integrations.mtls_ingress as module
     monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
     path = tmp_path / "signed-policy.json"
     path.write_text(json.dumps(setup["policy"]))
@@ -626,8 +624,8 @@ def test_explicit_remote_ip_flag_and_keyboard_interrupt_cleanup(tmp_path, monkey
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(module, "MTLSIngressServer", Interrupted)
-    assert run_mtls_ingress(str(path)) == 0
+    monkeypatch.setattr(ingress_module, "MTLSIngressServer", Interrupted)
+    assert ingress_module.run_mtls_ingress(str(path)) == 0
     assert calls == ["start", "stop"]
 
 
@@ -639,6 +637,443 @@ def test_corrupt_ingress_json_is_rejected_before_tls_or_operator_start(tmp_path)
     for bytes_ in (b"{invalid-json", b"\xff\xfe\x00"):
         path.write_bytes(bytes_)
         with pytest.raises(ValueError, match="Invalid ingress policy JSON"):
-            load_ingress_policy(
+            ingress_module.load_ingress_policy(
                 str(path), pinned_public_key_hex=setup["pinned"], now_ms=now,
             )
+
+
+def test_unfinished_tls_handshake_cannot_block_valid_client(tmp_path):
+    """A raw TCP peer must not block accept() before an enrolled TLS agent."""
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    stalled = None
+    try:
+        stalled = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        # Keep the unauthenticated connection open without a TLS ClientHello.
+        started = time.monotonic()
+        status, response = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "live-while-stalled", "echo", {"text": "x"}),
+        )
+        # The backend is intentionally absent: a prompt gateway 502 proves
+        # TLS and forwarding proceeded despite the stalled connection.
+        assert status == 502 and response["error"] == "Local operator unavailable"
+        assert time.monotonic() - started < 2.9
+    finally:
+        if stalled is not None:
+            stalled.close()
+        ingress.stop()
+
+
+def test_exhausted_tls_worker_capacity_rejects_and_recovers(tmp_path, monkeypatch):
+    """An adversary cannot create unbounded threads with incomplete handshakes."""
+
+    monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 2)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    stalled = []
+    try:
+        for _ in range(2):
+            stalled.append(socket.create_connection(
+                ("127.0.0.1", setup["ingress_port"]), timeout=2,
+            ))
+        # The two accepted sockets are occupying the only handshake slots.
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 0
+
+        # At capacity, a new connection must fail closed rather than spawn
+        # a third worker or become a privileged unauthenticated request.
+        with pytest.raises((OSError, ssl.SSLError, http.client.HTTPException)):
+            _https(
+                setup["ingress_port"], setup["files"]["ca"],
+                setup["files"]["alpha"], bearer=setup["alpha"],
+                payload=_body("agent-alpha", "over-capacity", "echo", {"text": "x"}),
+            )
+        # Recovery is part of the admission contract, not just rejection.
+        for connection in stalled:
+            connection.close()
+        stalled.clear()
+        deadline = time.monotonic() + 3
+        while ingress._server._slots._value != 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 2
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "recovered-capacity", "echo", {"text": "x"}),
+        )
+        assert status == 502  # Missing backend; TLS admission recovered.
+    finally:
+        for connection in stalled:
+            connection.close()
+        ingress.stop()
+
+
+def test_policy_expiring_during_body_parse_denies_forward(tmp_path, monkeypatch):
+    """Authority must still be live at execution, not just at admission."""
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    try:
+        expiry = setup["config"].expires_at_ms
+        samples = iter((expiry - 1, expiry + 1))
+        monkeypatch.setattr(ingress._clock, "now_ms", lambda: next(samples))
+        status, response = _https(
+            setup["ingress_port"], setup["files"]["ca"], setup["files"]["alpha"],
+            bearer=setup["alpha"],
+            payload=_body("agent-alpha", "expiry-race", "echo", {"text": "x"}),
+        )
+        assert status == 503
+        assert response["error"] == "Signed ingress policy expired"
+    finally:
+        ingress.stop()
+
+
+def test_slow_body_has_total_deadline_not_just_socket_timeout(tmp_path, monkeypatch):
+    """A client trickling bytes must not occupy a worker indefinitely."""
+    import threading
+
+    monkeypatch.setattr(ingress_module, "_BODY_DEADLINE_SECONDS", 0.05)
+    monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 1.0)
+    started = threading.Event()
+    original = ingress_module._IngressHandler._governed_body
+
+    def signal_body_read(self, actor):
+        started.set()
+        return original(self, actor)
+
+    monkeypatch.setattr(ingress_module._IngressHandler, "_governed_body", signal_body_read)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    connection = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["alpha"][0]), str(setup["files"]["alpha"][1])
+        )
+        connection = http.client.HTTPSConnection(
+            "127.0.0.1", setup["ingress_port"], context=context, timeout=3,
+        )
+        body = json.dumps(
+            _body("agent-alpha", "body-deadline", "echo", {"text": "x"})
+        ).encode()
+        connection.putrequest("POST", "/submit")
+        connection.putheader("Authorization", "Bearer " + setup["alpha"])
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders()
+        connection.send(body[:1])
+        assert started.wait(timeout=2)
+        # No more bytes arrive. A strictly bounded read must terminate
+        # promptly without waiting for the longer socket idle timeout.
+        started_at = time.monotonic()
+        response = connection.getresponse()
+        elapsed = time.monotonic() - started_at
+        assert response.status == 400
+        assert json.loads(response.read())["error"] == "Invalid governed request"
+        assert elapsed < 0.8
+    finally:
+        if connection is not None:
+            connection.close()
+        ingress.stop()
+
+
+def test_tls_handshake_times_out_and_releases_capacity(tmp_path, monkeypatch):
+    """Half-open pre-authentication TLS sockets cannot hold slots indefinitely."""
+    from shards_kernel.integrations import mtls_ingress as module
+
+    monkeypatch.setattr(ingress_module, "_HANDSHAKE_TIMEOUT_SECONDS", 0.15)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    stalled = None
+    try:
+        assert ingress._server.request_queue_size == 16
+        stalled = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        stalled.settimeout(2)
+        assert stalled.recv(1) == b""  # Server drops incomplete handshake.
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != module._MAX_CONCURRENT_CONNECTIONS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == module._MAX_CONCURRENT_CONNECTIONS
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "handshake-timeout-recovery", "echo", {"text": "x"}),
+        )
+        assert status == 502  # Valid TLS accepted; backend remains absent.
+    finally:
+        if stalled is not None:
+            stalled.close()
+        ingress.stop()
+
+
+def test_authenticated_socket_idle_timeout_releases_worker(tmp_path, monkeypatch):
+    """An authenticated TLS peer cannot stall HTTP header parsing indefinitely."""
+    from shards_kernel.integrations import mtls_ingress as module
+
+    monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 0.15)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    tls_sock = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["alpha"][0]), str(setup["files"]["alpha"][1])
+        )
+        raw = socket.create_connection(("127.0.0.1", setup["ingress_port"]), timeout=2)
+        tls_sock = context.wrap_socket(raw, server_hostname="127.0.0.1")
+        tls_sock.settimeout(2)
+        tls_sock.sendall(b"POST /submit HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n")
+        # No HTTP header terminator: server must release worker on idle timeout.
+        assert tls_sock.recv(1) == b""
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != module._MAX_CONCURRENT_CONNECTIONS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == module._MAX_CONCURRENT_CONNECTIONS
+    finally:
+        if tls_sock is not None:
+            tls_sock.close()
+        ingress.stop()
+
+
+@pytest.mark.parametrize("unfinished", [
+    b"POST /sub",
+    b"POST /submit HTTP/1.1\r\nHost: local\r\nX-Slow: ",
+])
+def test_aggregate_http_header_deadline_releases_tls_slot(
+    tmp_path, monkeypatch, unfinished,
+):
+    """Slow request-line/header bytes cannot extend the absolute admission slot."""
+    monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 1)
+    monkeypatch.setattr(ingress_module, "_HEADER_DEADLINE_SECONDS", 0.35)
+    monkeypatch.setattr(ingress_module, "_REQUEST_TIMEOUT_SECONDS", 1.5)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    peer = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["unlisted"][0]),
+            str(setup["files"]["unlisted"][1]),
+        )
+        raw = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
+        peer.settimeout(2)
+        started = time.monotonic()
+        peer.sendall(unfinished)
+        # The peer has a CA-valid but *unpinned* certificate. Request-header
+        # parsing must end before actor pin and bearer checks are reached.
+        for _ in range(2):
+            time.sleep(0.08)
+            try:
+                peer.sendall(b"x")
+            except OSError:
+                break
+        try:
+            remaining = peer.recv(1)
+        except (OSError, ssl.SSLError):
+            remaining = b""
+        elapsed = time.monotonic() - started
+        assert remaining == b""
+        assert elapsed < 1.2
+
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 1
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "header-deadline-recovery", "echo", {"text": "ok"}),
+        )
+        assert status == 502  # TLS accepted again; backend is intentionally absent.
+    finally:
+        if peer is not None:
+            peer.close()
+        ingress.stop()
+
+def test_header_stream_enforces_cumulative_byte_budget(tmp_path, monkeypatch):
+    """Separately valid lines cannot exceed the combined header-byte budget."""
+    monkeypatch.setattr(ingress_module, "_MAX_HEADER_BYTES", 8)
+    stream = io.BytesIO(b"A: 1\r\nB: 2\r\n")
+
+    class TimeoutSocket:
+        def settimeout(self, _seconds):
+            pass
+
+    reader = ingress_module._DeadlineHeaderStream(
+        stream, TimeoutSocket(), time.monotonic() + 2,
+    )
+    assert reader.readline() == b"A: 1\r\n"
+    with pytest.raises(TimeoutError, match="header byte budget"):
+        reader.readline()
+
+
+def test_live_tls_header_byte_budget_recovers_slot(tmp_path, monkeypatch):
+    """A valid-CA peer cannot retain a TLS slot using oversized total headers."""
+    monkeypatch.setattr(ingress_module, "_MAX_HEADER_BYTES", 1024)
+    monkeypatch.setattr(ingress_module, "_MAX_CONCURRENT_CONNECTIONS", 1)
+    setup = _setup(tmp_path)
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    peer = None
+    try:
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["unlisted"][0]),
+            str(setup["files"]["unlisted"][1]),
+        )
+        raw = socket.create_connection(
+            ("127.0.0.1", setup["ingress_port"]), timeout=2,
+        )
+        peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
+        peer.settimeout(2)
+        oversized = (
+            b"POST /submit HTTP/1.1\r\nHost: local\r\n"
+            + b"X-Oversized: " + b"x" * 1100 + b"\r\n\r\n"
+        )
+        try:
+            peer.sendall(oversized)
+            result = peer.recv(4096)
+            assert b"200 OK" not in result
+        except (OSError, ssl.SSLError, http.client.HTTPException):
+            pass  # An early close is valid fail-closed rejection.
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 1
+        status, _ = _https(
+            setup["ingress_port"], setup["files"]["ca"],
+            setup["files"]["alpha"], bearer=setup["alpha"],
+            payload=_body("agent-alpha", "after-header-cap", "echo", {"text": "ok"}),
+        )
+        assert status == 502  # No local operator is running in this test.
+    finally:
+        if peer is not None:
+            peer.close()
+        ingress.stop()
+
+
+def test_preaccepted_tls_connection_cannot_forward_after_stop(
+    tmp_path, monkeypatch,
+):
+    """An accepted but unauthenticated socket has no authority after stop()."""
+    setup = _setup(tmp_path)
+    forwarded = threading.Event()
+
+    def record_forward(self, body, payload, bearer):
+        forwarded.set()
+        self._reply(200, {"request_id": payload["request_id"], "decision": "ALLOW"})
+
+    monkeypatch.setattr(
+        ingress_module._IngressHandler, "_submit_to_operator", record_forward,
+    )
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    raw = socket.create_connection(
+        ("127.0.0.1", setup["ingress_port"]), timeout=2,
+    )
+    try:
+        deadline = time.monotonic() + 2
+        while ingress._server._slots._value != 31 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ingress._server._slots._value == 31
+        ingress.stop()
+        context = ssl.create_default_context(cafile=str(setup["files"]["ca"]))
+        context.load_cert_chain(
+            str(setup["files"]["alpha"][0]),
+            str(setup["files"]["alpha"][1]),
+        )
+        try:
+            peer = context.wrap_socket(raw, server_hostname="127.0.0.1")
+            peer.settimeout(2)
+            body = json.dumps(_body(
+                "agent-alpha", "post-stop", "echo", {"text": "never"},
+                _permit(setup["issuer"], "agent-alpha", "echo", {"text": "never"}),
+            )).encode("utf-8")
+            request = (
+                b"POST /submit HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Authorization: Bearer " + setup["alpha"].encode() + b"\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n"
+                + body
+            )
+            peer.sendall(request)
+            response = peer.recv(4096)
+            assert b"200 OK" not in response
+            peer.close()
+        except (OSError, ssl.SSLError, http.client.HTTPException):
+            pass  # Closing pre-accepted connections is also a safe outcome.
+        assert not forwarded.is_set()
+    finally:
+        raw.close()
+        ingress.stop()
+
+
+def test_stop_drains_inflight_operator_dispatch(tmp_path, monkeypatch):
+    """stop() must not return while an authorised dispatch is still underway."""
+    setup = _setup(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    responses = []
+    errors = []
+
+    def blocked_forward(self, body, payload, bearer):
+        entered.set()
+        if not release.wait(8):
+            raise TimeoutError("test dispatch was not released")
+        self._reply(200, {"request_id": payload["request_id"], "decision": "ALLOW"})
+
+    monkeypatch.setattr(
+        ingress_module._IngressHandler, "_submit_to_operator", blocked_forward,
+    )
+    ingress = ingress_module.MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+
+    def client_request():
+        try:
+            responses.append(_https(
+                setup["ingress_port"], setup["files"]["ca"],
+                setup["files"]["alpha"], bearer=setup["alpha"],
+                payload=_body(
+                    "agent-alpha", "inflight-stop", "echo", {"text": "ok"},
+                    _permit(setup["issuer"], "agent-alpha", "echo", {"text": "ok"}),
+                ),
+            ))
+        except Exception as exc:
+            errors.append(exc)
+
+    client = threading.Thread(target=client_request, daemon=True)
+    stopper = threading.Thread(target=ingress.stop, daemon=True)
+    try:
+        client.start()
+        assert entered.wait(4), "expected an active operator dispatch"
+        stopper.start()
+        time.sleep(0.15)
+        assert stopper.is_alive(), "stop() returned before dispatch drained"
+    finally:
+        release.set()
+        client.join(timeout=5)
+        if stopper.ident is not None:
+            stopper.join(timeout=5)
+        ingress.stop()
+    assert not stopper.is_alive()
+    assert not client.is_alive()
+    assert not errors
+    assert responses[0][0] == 200

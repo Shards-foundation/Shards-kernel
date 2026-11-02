@@ -17,6 +17,7 @@ import json
 import os
 import ssl
 import threading
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,8 +29,14 @@ from shards_kernel.common.time import SystemClock
 _DOMAIN = b"SHARDS-MTLS-INGRESS-V1\x00"
 _MAX_CONFIG_BYTES = 96 * 1024
 _MAX_BODY_BYTES = 64 * 1024
+_MAX_HEADER_BYTES = 16 * 1024
 _MAX_RESPONSE_BYTES = 64 * 1024
 _MAX_POLICY_MS = 24 * 60 * 60 * 1000
+_MAX_CONCURRENT_CONNECTIONS = 32
+_HANDSHAKE_TIMEOUT_SECONDS = 3.0
+_REQUEST_TIMEOUT_SECONDS = 3.0
+_HEADER_DEADLINE_SECONDS = 8.0
+_BODY_DEADLINE_SECONDS = 8.0
 
 
 @dataclass(frozen=True)
@@ -215,12 +222,67 @@ def _tls_context(config: SignedIngressConfig) -> ssl.SSLContext:
     return context
 
 
+class _DeadlineHeaderStream:
+    """Constrain all request-line/header byte reads to one monotonic deadline.
+
+    A socket idle timeout is insufficient against a client sending one byte
+    just before each timeout. Avoid BufferedReader.readline(), which may
+    perform multiple blocking reads inside one call.
+    """
+
+    def __init__(self, stream: Any, connection: ssl.SSLSocket, deadline: float):
+        self._stream = stream
+        self._connection = connection
+        self._deadline = deadline
+        self._bytes_read = 0
+
+    def readline(self, limit: int = -1) -> bytes:
+        limit = 65537 if limit < 0 else min(limit, 65537)
+        data = bytearray()
+        while len(data) < limit:
+            if self._bytes_read >= _MAX_HEADER_BYTES:
+                raise TimeoutError("HTTP aggregate header byte budget exceeded")
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP header deadline exceeded")
+            self._connection.settimeout(min(_REQUEST_TIMEOUT_SECONDS, remaining))
+            char = self._stream.read1(1)
+            if not char:
+                break
+            data.extend(char)
+            self._bytes_read += len(char)
+            if char == b"\n":
+                break
+        return bytes(data)
+
+
 class _IngressHandler(BaseHTTPRequestHandler):
     """Per-connection client certificate and token binding before forwarding."""
 
     protocol_version = "HTTP/1.1"
     config: SignedIngressConfig
     clock: SystemClock
+
+    def handle_one_request(self) -> None:
+        """Apply an absolute deadline before parsing any HTTP bytes."""
+        self._unwrapped_rfile = self.rfile
+        self.rfile = _DeadlineHeaderStream(
+            self._unwrapped_rfile, self.connection,
+            time.monotonic() + _HEADER_DEADLINE_SECONDS,
+        )
+        try:
+            super().handle_one_request()
+        finally:
+            self.rfile = self._unwrapped_rfile
+            self.connection.settimeout(_REQUEST_TIMEOUT_SECONDS)
+
+    def parse_request(self) -> bool:
+        """Restore the normal reader only once all headers have been parsed."""
+        try:
+            return super().parse_request()
+        finally:
+            self.rfile = self._unwrapped_rfile
+            self.connection.settimeout(_REQUEST_TIMEOUT_SECONDS)
 
     def _reply(self, status: int, data: dict[str, Any]) -> None:
         body = json.dumps(data, separators=(",", ":")).encode("utf-8")
@@ -280,16 +342,39 @@ class _IngressHandler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid request size")
             if self.headers.get("Content-Type") != "application/json":
                 raise ValueError("JSON content type required")
-            body = self.rfile.read(length)
-            if len(body) != length:
-                raise ValueError("Truncated request")
+            # Socket read timeouts alone do not stop a slow client that sends
+            # one byte just before each timeout. Bound the whole body transfer.
+            deadline = time.monotonic() + _BODY_DEADLINE_SECONDS
+            chunks: list[bytes] = []
+            received = 0
+            previous_timeout = self.connection.gettimeout()
+            try:
+                while received < length:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ValueError("Request body deadline exceeded")
+                    # Every blocking read is limited by the *remaining*
+                    # total deadline, not merely the idle socket timeout.
+                    self.connection.settimeout(
+                        min(_REQUEST_TIMEOUT_SECONDS, remaining)
+                    )
+                    chunk = self.rfile.read1(min(8192, length - received))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    received += len(chunk)
+            finally:
+                self.connection.settimeout(previous_timeout)
+            if received != length or time.monotonic() >= deadline:
+                raise ValueError("Truncated or timed-out request")
+            body = b"".join(chunks)
             payload = json.loads(
                 body.decode("utf-8"),
                 object_pairs_hook=_unique_pairs,
                 parse_constant=_reject_constant,
                 parse_float=_reject_float,
             )
-        except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError, UnicodeError, json.JSONDecodeError):
             self._reply(400, {"error": "Invalid governed request"})
             return None
         if not isinstance(payload, dict) or payload.get("actor") != actor:
@@ -346,7 +431,17 @@ class _IngressHandler(BaseHTTPRequestHandler):
         if result is None:
             return
         body, payload = result
-        self._submit_to_operator(body, payload, bearer)
+        # Shutdown admission and operator dispatch share one synchronised gate:
+        # a pre-accepted TLS worker must never forward after ingress stops.
+        if not self.server.begin_forward():
+            self._reply(503, {"error": "Ingress stopping"})
+            return
+        try:
+            # Authority can expire while receiving a bounded request body.
+            if self._policy_safe():
+                self._submit_to_operator(body, payload, bearer)
+        finally:
+            self.server.end_forward()
 
     # BaseHTTPRequestHandler requires the parameter name 'format' in its API.
     def log_message(self, format: str, *args: Any) -> None:  # pylint: disable=redefined-builtin
@@ -363,6 +458,75 @@ def _make_handler(config: SignedIngressConfig, clock: SystemClock):
     return BoundHandler
 
 
+class _BoundedTLSServer(ThreadingHTTPServer):
+    """Bound slow client handshakes without blocking the accept loop.
+
+    TLS must be negotiated in a worker, *not* by wrapping the listening
+    socket: an unauthenticated TCP client can otherwise stall accept().
+    Admission is deliberately bounded. Rejected connections receive no
+    HTTP response because they have not authenticated with TLS.
+    """
+
+    daemon_threads = True
+    request_queue_size = 16
+
+    def __init__(self, address: tuple[str, int], handler: type, context: ssl.SSLContext):
+        self._tls_context = context
+        self._slots = threading.BoundedSemaphore(_MAX_CONCURRENT_CONNECTIONS)
+        self._forwarding = threading.Condition()
+        self._stopping = False
+        self._inflight_forwards = 0
+        super().__init__(address, handler)
+
+    def begin_forward(self) -> bool:
+        """Atomically reject new dispatch once shutdown starts."""
+        with self._forwarding:
+            if self._stopping:
+                return False
+            self._inflight_forwards += 1
+            return True
+
+    def end_forward(self) -> None:
+        with self._forwarding:
+            self._inflight_forwards -= 1
+            self._forwarding.notify_all()
+
+    def disable_forwarding(self) -> None:
+        with self._forwarding:
+            self._stopping = True
+
+    def await_forwards(self) -> None:
+        """Do not report shutdown complete while a dispatch is in progress."""
+        with self._forwarding:
+            while self._inflight_forwards:
+                self._forwarding.wait()
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            self.shutdown_request(request)
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            try:
+                request.settimeout(_HANDSHAKE_TIMEOUT_SECONDS)
+                authenticated = self._tls_context.wrap_socket(request, server_side=True)
+            except OSError:
+                # Invalid, incomplete and timed-out handshakes are not HTTP requests.
+                self.shutdown_request(request)
+                return
+            authenticated.settimeout(_REQUEST_TIMEOUT_SECONDS)
+            super().process_request_thread(authenticated, client_address)
+        finally:
+            self._slots.release()
+
+
 class MTLSIngressServer:
     """Isolated HTTPS/mTLS ingress. Never launches or signs for the kernel."""
 
@@ -374,16 +538,15 @@ class MTLSIngressServer:
         self.config = config
         self._clock = SystemClock()
         self._context = _tls_context(config)
-        self._server: ThreadingHTTPServer | None = None
+        self._server: _BoundedTLSServer | None = None
         self._thread: threading.Thread | None = None
 
     def start(self, *, blocking: bool = True) -> None:
-        server = ThreadingHTTPServer(
+        server = _BoundedTLSServer(
             (self.config.listen_host, self.config.listen_port),
             _make_handler(self.config, self._clock),
+            self._context,
         )
-        server.daemon_threads = True
-        server.socket = self._context.wrap_socket(server.socket, server_side=True)
         self._server = server
         if blocking:
             server.serve_forever()
@@ -394,8 +557,13 @@ class MTLSIngressServer:
 
     def stop(self) -> None:
         if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
+            server = self._server
+            # Revoke dispatch before closing the listener. Accepted sockets
+            # can still finish TLS, but may no longer call the operator.
+            server.disable_forwarding()
+            server.shutdown()
+            server.server_close()
+            server.await_forwards()
             self._server = None
         if self._thread is not None:
             self._thread.join(timeout=5)
