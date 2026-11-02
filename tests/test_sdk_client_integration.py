@@ -16,7 +16,7 @@ TEST_KEY = "shards-test-http-key-32-characters-long-0001"
 
 
 def test_sync_client_round_trip_against_local_server():
-    server = KernelServer(boot_strict_kernel("sync-client-test"), port=0, api_key=TEST_KEY)
+    server = KernelServer(boot_strict_kernel("sync-client-test"), port=0, api_key=TEST_KEY, allow_test_clock=True)
     server.start(blocking=False)
     url = f"http://127.0.0.1:{server._server.server_address[1]}"
     try:
@@ -42,7 +42,7 @@ def test_sync_client_round_trip_against_local_server():
 
 
 def test_async_client_round_trip_against_local_server():
-    server = KernelServer(boot_strict_kernel("async-client-test"), port=0, api_key=TEST_KEY)
+    server = KernelServer(boot_strict_kernel("async-client-test"), port=0, api_key=TEST_KEY, allow_test_clock=True)
     server.start(blocking=False)
     url = f"http://127.0.0.1:{server._server.server_address[1]}"
 

@@ -17,9 +17,10 @@ try:
 except ImportError:
     HAS_FASTAPI = False
 
+from shards_kernel.common.types import VirtualClock
 from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
-    boot_strict_kernel,
+    boot_service_kernel,
     evidence_to_mapping,
     policy_to_mapping,
     receipt_to_mapping,
@@ -88,6 +89,7 @@ def create_fastapi_app(
     version: str = "0.1.0",
     cors_origins: Optional[List[str]] = None,
     api_key: Optional[str] = None,
+    allow_test_clock: bool = False,
 ) -> "FastAPI":
     """
     Create a FastAPI app for the kernel.
@@ -109,9 +111,12 @@ def create_fastapi_app(
 
     # Create kernel if not provided
     if kernel is None:
-        kernel = boot_strict_kernel(kernel_id)
+        kernel = boot_service_kernel(kernel_id)
         if policy is not None:
             kernel.set_policy(policy)
+
+    if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
+        raise ValueError("Frozen VirtualClock is not safe for service permit expiry")
 
     # Create app
     app = FastAPI(

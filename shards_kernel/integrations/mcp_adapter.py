@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable
 
 from shards_kernel.common.types import KernelRequest, ToolCall, Decision
-from shards_kernel.integrations.wire import boot_strict_kernel, evidence_to_mapping
+from shards_kernel.integrations.wire import boot_service_kernel, evidence_to_mapping
 from shards_kernel.permits import PermitToken
 from shards_kernel.variants.base import BaseKernel
 from shards_kernel.jurisdiction.policy import JurisdictionPolicy
@@ -320,7 +320,7 @@ def create_mcp_adapter(
     Returns:
         Configured MCP adapter
     """
-    kernel = boot_strict_kernel(kernel_id)
+    kernel = boot_service_kernel(kernel_id)
     if policy is not None:
         kernel.set_policy(policy)
     return MCPAdapter(kernel, actor)

@@ -15,7 +15,7 @@ TEST_KEY = "shards-test-http-key-32-characters-long-0001"
 @pytest.fixture
 def live_server():
     kernel = boot_strict_kernel("sdk-server-test")
-    server = KernelServer(kernel, port=0, api_key=TEST_KEY)
+    server = KernelServer(kernel, port=0, api_key=TEST_KEY, allow_test_clock=True)
     server.start(blocking=False)
     port = server._server.server_address[1]
     try:
@@ -110,11 +110,11 @@ def test_http_server_cannot_start_without_strong_key(monkeypatch):
     monkeypatch.delenv("SHARDS_KERNEL_API_KEY", raising=False)
     kernel = boot_strict_kernel("http-no-auth-test")
     with pytest.raises(ValueError, match="API key"):
-        KernelServer(kernel, port=0)
+        KernelServer(kernel, port=0, allow_test_clock=True)
     with pytest.raises(ValueError, match="API key"):
-        KernelServer(kernel, port=0, api_key="short")
+        KernelServer(kernel, port=0, api_key="short", allow_test_clock=True)
     with pytest.raises(ValueError, match="Remote HTTP binding"):
-        KernelServer(kernel, host="0.0.0.0", port=0, api_key=TEST_KEY)  # nosec B104: test asserts this bind is refused
+        KernelServer(kernel, host="0.0.0.0", port=0, api_key=TEST_KEY, allow_test_clock=True)  # nosec B104: test asserts this bind is refused
 
 
 def test_http_server_no_wildcard_cors(live_server):

@@ -12,9 +12,10 @@ from typing import Any, Dict, Optional, Type
 import threading
 
 from shards_kernel._version import __version__
+from shards_kernel.common.types import VirtualClock
 from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
-    boot_strict_kernel,
+    boot_service_kernel,
     evidence_to_mapping,
     policy_to_mapping,
     receipt_to_mapping,
@@ -203,7 +204,13 @@ class KernelServer:
         *,
         api_key: Optional[str] = None,
         allow_remote_bind: bool = False,
+        allow_test_clock: bool = False,
     ):
+        if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
+            raise ValueError(
+                "Frozen VirtualClock cannot be used for HTTP permit expiry; "
+                "use a real SystemClock or explicitly allow_test_clock=True for tests"
+            )
         if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
             raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
         self.api_key = resolve_api_key(api_key)
@@ -276,7 +283,7 @@ def run_server(
         port: Port to listen on
         policy: Jurisdiction policy (uses default if not specified)
     """
-    kernel = boot_strict_kernel(kernel_id)
+    kernel = boot_service_kernel(kernel_id)
     if policy is not None:
         kernel.set_policy(policy)
     server = KernelServer(
