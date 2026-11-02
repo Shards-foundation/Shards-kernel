@@ -16,6 +16,15 @@ from shards_kernel.integrations.mcp_adapter import MCPAdapter, MCPToolCall
 from shards_kernel.integrations.wire import permit_from_mapping
 from shards_kernel.variants.base import BaseKernel
 
+try:
+    # These must be global: MCP SDK evaluates annotations with inspect.signature.
+    from mcp.server import MCPServer
+    from mcp.types import CallToolResult, TextContent
+except ImportError:  # Optional extra; the base kernel supports Python 3.9+.
+    MCPServer = None
+    CallToolResult = None
+    TextContent = None
+
 
 def create_official_mcp_server(
     kernel: BaseKernel,
@@ -29,13 +38,10 @@ def create_official_mcp_server(
     The incoming `permit` is a signed, narrowly scoped capability; this
     function does not issue permits or derive identity from the tool payload.
     """
-    try:
-        from mcp.server import MCPServer
-        from mcp.types import CallToolResult, TextContent
-    except ImportError as exc:
+    if MCPServer is None:
         raise RuntimeError(
             "Official MCP SDK v2 is required: install shards-kernel[mcp] on Python 3.11+"
-        ) from exc
+        )
 
     if not isinstance(actor, str) or not actor.strip() or "*" in actor:
         raise ValueError("A concrete, trusted local actor identity is required")
