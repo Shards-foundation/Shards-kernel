@@ -1,6 +1,6 @@
 # Shards-Kernel — Terms of Service and Conditions of Use
 
-**Document status:** DRAFT — legal and publisher verification required before formal adoption  
+**Document status:** DRAFT — NOT ADOPTED; legal and publisher verification required before formal adoption  
 **Draft date:** 2 November 2026  
 **Applies to:** Shards-Kernel open-source project documentation, project-operated support and community interactions associated with the 0.1.x release line  
 **Publisher identified in the [MIT licence](LICENSE):** Shards Inc Ltd (corporate details to be verified)
