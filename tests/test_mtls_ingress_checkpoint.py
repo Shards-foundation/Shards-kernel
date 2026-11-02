@@ -192,20 +192,33 @@ def test_optimised_interpreter_cannot_skip_checkpoint_authority_guard():
     import textwrap
 
     script = textwrap.dedent("""
+        from pathlib import Path
         from types import SimpleNamespace
         from shards_kernel.integrations.mtls_ingress import MTLSIngressServer
-        ingress = object.__new__(MTLSIngressServer)
-        ingress.config = SimpleNamespace(
-            revision=1, checkpoint_db_file=None,
-            ingress_id=None, policy_digest=None,
-        )
-        ingress._checkpoint_identity = None
-        try:
-            ingress._verify_policy_checkpoint()
-        except ValueError as exc:
-            if str(exc) == "Missing signed ingress checkpoint authority":
-                raise SystemExit(0)
-        raise SystemExit(2)
+
+        # Test *each* required trust field independently under -O, with
+        # all other fields valid in shape. Never depend on asserts.
+        for missing in (
+            "checkpoint_db_file", "ingress_id",
+            "policy_digest", "_checkpoint_identity",
+        ):
+            ingress = object.__new__(MTLSIngressServer)
+            ingress.config = SimpleNamespace(
+                revision=1, checkpoint_db_file=Path("/nonexistent/checkpoint.sqlite3"),
+                ingress_id="test-ingress", policy_digest="a" * 64,
+            )
+            ingress._checkpoint_identity = (10, 20)
+            if missing == "_checkpoint_identity":
+                ingress._checkpoint_identity = None
+            else:
+                setattr(ingress.config, missing, None)
+            try:
+                ingress._verify_policy_checkpoint()
+            except ValueError as exc:
+                if str(exc) == "Missing signed ingress checkpoint authority":
+                    continue
+            raise SystemExit(2)
+        raise SystemExit(0)
     """)
     proc = subprocess.run(
         [sys.executable, "-O", "-c", script],
