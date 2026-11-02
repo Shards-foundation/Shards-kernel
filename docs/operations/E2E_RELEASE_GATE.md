@@ -42,6 +42,30 @@ replay, transaction reconciliation, wallets or financial operations.
 The existing full test suite and coverage matrix remain required. This gate
 is intentionally smaller and may not replace them.
 
+## Negative-path verification (Codacy review of PR #88)
+
+`tests/test_e2e_gate.py` is included in the standard Python-version CI matrix,
+and the release runner is explicitly included in branch-aware coverage
+(`--cov=scripts.ci.run_e2e_gate`). The tests launch isolated new Python
+interpreters with temporary, **synthetic** pytest scenarios to prove:
+
+- A real scenario passes, while a missing test, skip, expected failure,
+  unexpected pass under xfail, or ordinary assertion failure returns nonzero.
+- Linux / Python 3.11+ eligibility is enforced; unsupported host/runtime
+  exits before Pytest runs.
+- The runner's collection and reporting hooks reject missing or deselected
+  cases and do not count non-call or expected-failure reports as passes.
+- A static CI-graph contract asserts `quality` depends on `e2e`, and refuses
+  common bypass configurations (`continue-on-error: true` and
+  `if: always()`). This contract test **does not itself prove GitHub's
+  actual scheduler skips quality** on a failed upstream run; that must be
+  confirmed by a controlled failing CI run, and required-status checks in
+  branch protection must be independently configured.
+
+No generated E2E JUnit output or synthetic credentials are production
+evidence. The negative-path probes never modify the production scenario
+allowlist on disk.
+
 ## Separate acceptance gates still needed before production
 
 1. **Deployed staging:** actual external ingress and kernel processes on
