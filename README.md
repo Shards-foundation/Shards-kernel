@@ -177,6 +177,20 @@ It limits signed capabilities to single-execution, short-lived built-in
 [offline issuer guide](docs/operations/OFFLINE_ISSUER.md) for exact
 commands, approval steps, threats and limitations.
 
+## Two-agent identity boundary (local reference)
+
+A signed **operator config v2** can enroll 2–16 separate agents, each
+with a unique high-entropy bearer token and its own tool allowlist. The
+signed file stores only SHA-256 token digests, not raw bearer secrets.
+`POST /submit` binds each authenticated bearer to the exact actor and
+its permitted tool; a **separately signed Ed25519 permit is still
+mandatory**. The distinct operator bearer alone can access halt,
+evidence, status and policy endpoints; it cannot execute as an agent.
+
+This is **loopback only** and does not establish remote workload
+identity, OAuth/mTLS or distributed replay prevention. See the
+[two-agent local identity guide](docs/operations/TWO_AGENT_IDENTITY.md).
+
 ## Restricted local operator service
 
 A standalone, loopback-only HTTP reference service is available with pinned
