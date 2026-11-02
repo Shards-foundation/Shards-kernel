@@ -8,6 +8,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Added
 
+- Added `shards-kernel mcp-call`: one-shot official MCP v2 stdio client for an independently enrolled local agent, using an operator-issued private signed permit file; refuses arbitrary tools/destinations and treats every non-ALLOW receipt as a failure. The relay supplies only an agent-scoped bearer, never an operator or signing key.
+- Published a runnable [agent-first local quickstart](docs/AGENT_QUICKSTART.md) for the existing signed v2 operator and MCP relay, with local/deployed trust boundaries and actual error/exit contracts.
 - Optional SQLite-backed audit persistence for kernel variants, including commit-before-memory-advance, verified ledger recovery on boot, kernel/variant binding, WAL mode, and FULL synchronous commits.
 - Executable demos for minimal request handling, evidence verification, and persistent audit recovery; CI runs them across the supported Python matrix.
 - Release workflow now runs tests, governance coverage, demos, dependency and source security scans, clean-wheel verification, and publishes the exact verified distributions. Dependabot checks Python and GitHub Actions dependencies weekly.

@@ -80,6 +80,14 @@ def main() -> int:
         help="Loopback operator port (no remote URL or administrator token)",
     )
 
+    agent_parser = subparsers.add_parser(
+        "mcp-call", help="Call one signed-permit local MCP tool as an enrolled agent"
+    )
+    agent_parser.add_argument("--port", type=int, required=True)
+    agent_parser.add_argument("--tool", choices=["echo", "add"], required=True)
+    agent_parser.add_argument("--arguments-json", required=True)
+    agent_parser.add_argument("--permit-file", required=True)
+
     mtls_parser = subparsers.add_parser(
         "mtls-ingress", help="Run pinned-client-cert HTTPS ingress to local operator (pre-production)"
     )
@@ -141,6 +149,13 @@ def main() -> int:
         from shards_kernel.integrations.mcp_local_relay import run_local_mcp_agent_relay
 
         return run_local_mcp_agent_relay(args.port)
+    elif args.command == "mcp-call":
+        from shards_kernel.cli.mcp_call import main as call_agent
+        return call_agent([
+            "--port", str(args.port), "--tool", args.tool,
+            "--arguments-json", args.arguments_json,
+            "--permit-file", args.permit_file,
+        ])
     elif args.command == "mtls-ingress":
         from shards_kernel.integrations.mtls_ingress import run_mtls_ingress
 

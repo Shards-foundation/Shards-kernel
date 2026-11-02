@@ -1,0 +1,149 @@
+name: Publish Shards-Kernel v0.1.0
+
+# One-shot GitHub release for the reviewed initial local-agent product.
+# This file is first added by the final release PR and triggers only on that
+# merged push to main; later pushes do not run it unless this file changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-v0.1.0.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shards-kernel-v0.1.0-github-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish v0.1.0 GitHub release
+    if: github.repository == 'Shards-foundation/Shards-kernel'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact protected main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify release version
+        run: |
+          python - <<'PY'
+          from shards_kernel._version import __version__
+          if __version__ != "0.1.0":
+              raise SystemExit("Expected Shards-Kernel v0.1.0 release")
+          print("Release version: v" + __version__)
+          PY
+
+      - name: Install package and release tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,crypto,mcp]"
+          python -m pip install build twine pip-audit bandit
+
+      - name: Verify lint
+        run: ruff check . --select E,F --ignore E501
+
+      - name: Mandatory real-process local E2E gate
+        run: python scripts/ci/run_e2e_gate.py
+
+      - name: Verify complete branch-aware test coverage and governance
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest --cov=shards_kernel --cov=implementations \
+            --cov=scripts.ci.run_e2e_gate --cov-branch \
+            --cov-report=term-missing --cov-report=json:coverage.json \
+            --cov-fail-under=90
+          python - <<'PY'
+          import json
+          import math
+          with open("coverage.json", encoding="utf-8") as report:
+              coverage = float(json.load(report)["totals"]["percent_covered"])
+          if not math.isfinite(coverage) or coverage < 90.0:
+              raise SystemExit("Release failed the unrounded 90% coverage gate")
+          print(f"Unrounded release coverage: {coverage:.6f}%")
+          PY
+          python scripts/ci/check_governance_coverage.py coverage.json
+
+      - name: Smoke tests and documented demos
+        run: |
+          ./scripts/smoke.sh
+          python examples/01_minimal_request.py
+          python examples/02_verify_evidence.py
+          python examples/03_fail_closed_ambiguity.py
+          python examples/04_sqlite_persistent_ledger.py
+
+      - name: Audit declared dependencies and Python security
+        run: |
+          python -m pip check
+          pip-audit .
+          bandit -r shards_kernel implementations -ll
+
+      - name: Build and validate distribution artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m build
+          python scripts/ci/check_wheel_identity.py dist/*.whl
+          twine check dist/*.whl dist/*.tar.gz
+          (
+            cd dist
+            sha256sum ./*.whl ./*.tar.gz > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Verify installed wheel in a fresh virtual environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_venv="$RUNNER_TEMP/shards-kernel-release-wheel"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
+          (cd "$RUNNER_TEMP" && "$wheel_venv/bin/python" -c 'import shards_kernel; from shards_kernel.api import StrictKernel; print("Verified release wheel imports")')
+          "$wheel_venv/bin/shards-kernel" --help
+
+      - name: Publish GitHub Release with checksummed wheel and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Refusing to replace the already published v0.1.0 release" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin refs/tags/v0.1.0 >/dev/null 2>&1; then
+            echo "Refusing to replace the existing v0.1.0 tag" >&2
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          # Shards-Kernel v0.1.0
+
+          First versioned release of the deterministic, audited Python kernel.
+
+          - Python 3.9–3.12 core library; optional official MCP v2 local agent client on Python 3.11+.
+          - Locally governed agent actions, strict signed permits, replay protection and audit receipts.
+          - Release-gated real-process E2E coverage, dependency/security checks, offline SQLite restore rehearsal.
+          - Includes a verified Python wheel, source distribution and SHA256SUMS.
+
+          **Scope:** local agent integration and demonstration. This is not a deployed
+          remote MCP gateway, custodial wallet service, trading engine or production
+          certification. PyPI publication is intentionally not enabled.
+
+          Install the core package directly from the attached wheel, or download
+          the source archive. Read README.md and docs/AGENT_QUICKSTART.md for usage.
+          NOTES
+          gh release create v0.1.0 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Shards-Kernel v0.1.0" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            dist/*.whl dist/*.tar.gz dist/SHA256SUMS
