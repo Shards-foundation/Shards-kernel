@@ -1,7 +1,7 @@
 # Legal documentation — pre-adoption review checklist
 
 **Applies to:** [TERMS_OF_SERVICE.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/TERMS_OF_SERVICE.md) and [PRIVACY_POLICY.md](https://github.com/Shards-foundation/Shards-kernel/blob/main/PRIVACY_POLICY.md)  
-**Status:** draft documents only; NOT confirmed as adopted or legally complete.  
+**Status:** DRAFT — NOT ADOPTED; not confirmed as legally complete.  
 **Review date:** 2 November 2026
 
 These documents describe the **Shards-Kernel v0.1.x open-source Python library**. The project is not represented as a hosted gateway, wallet service, public agent marketplace or trading service. If those products launch, **do not silently reuse** this library-focused privacy notice or terms.

@@ -5,12 +5,20 @@ on:
     paths:
       - "docs/**"
       - "README.md"
+      - "TERMS_OF_SERVICE.md"
+      - "PRIVACY_POLICY.md"
+      - "LICENSE"
+      - "tests/test_legal_docs.py"
       - ".github/workflows/docs.yml"
   push:
     branches: [main, master]
     paths:
       - "docs/**"
       - "README.md"
+      - "TERMS_OF_SERVICE.md"
+      - "PRIVACY_POLICY.md"
+      - "LICENSE"
+      - "tests/test_legal_docs.py"
   workflow_dispatch:
 
 jobs:
@@ -19,11 +27,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
+
+      - name: Validate legal documentation contract and PR scope
+        env:
+          LEGAL_DOC_SCOPE_REQUIRED: ${{ github.event_name == 'pull_request' }}
+          LEGAL_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Checkout uses GitHub's PR merge commit, not untrusted PR head.
+          LEGAL_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.sha || '' }}
+        run: python -m unittest tests.test_legal_docs -v
 
       - name: Install docs dependencies
         run: |

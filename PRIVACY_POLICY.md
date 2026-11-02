@@ -1,6 +1,6 @@
 # Shards-Kernel — Privacy Policy
 
-**Document status:** DRAFT — data-flow and publisher verification required before formal adoption  
+**Document status:** DRAFT — NOT ADOPTED; data-flow and publisher verification required before formal adoption  
 **Draft date:** 2 November 2026  
 **Scope:** the public Shards-Kernel open-source project, related project-operated communications, and the local software behaviour documented for v0.1.x
 
