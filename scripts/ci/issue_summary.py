@@ -36,7 +36,7 @@ def summarize_issue(event: dict[str, Any]) -> str:
     candidate_lines = [
         line.strip(" -#*\t ")
         for line in raw.splitlines()
-        if line.strip() and not re.match(r"^\s*[-*]?\s*\[[ xX]\]", line)
+        if line.strip() and not re.match(r"^\s*(?:#{1,6}\s+|[-*]?\s*\[[ xX]\])", line)
     ]
     excerpt = next(
         (line for line in candidate_lines if line and not line.startswith("|")),
