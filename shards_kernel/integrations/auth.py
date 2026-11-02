@@ -6,8 +6,10 @@ replace execution permits, actor authorisation, or policy evaluation.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -28,3 +30,37 @@ def bearer_authorized(header: Optional[str], api_key: str) -> bool:
         return False
     supplied = header[len("Bearer ") :]
     return hmac.compare_digest(supplied, api_key)
+
+
+@dataclass(frozen=True)
+class AgentIdentity:
+    """Signed-config principal metadata; NEVER contains a bearer secret."""
+
+    actor: str
+    token_sha256: str
+    allowed_tools: frozenset[str]
+
+
+def identify_agent(
+    header: Optional[str], identities: tuple[AgentIdentity, ...]
+) -> AgentIdentity | None:
+    """Resolve a v2 loopback transport credential to one exact signed identity.
+
+    Token digests are compared in constant time. The raw bearer token is never
+    logged, stored in configuration, or used as a kernel signing key.
+    """
+    if not isinstance(header, str) or not header.startswith("Bearer "):
+        return None
+    token = header[len("Bearer ") :]
+    if (
+        not 32 <= len(token) <= 512
+        or not token.isascii()
+        or any(ch.isspace() for ch in token)
+    ):
+        return None
+    digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+    match: AgentIdentity | None = None
+    for identity in identities:
+        if hmac.compare_digest(digest, identity.token_sha256):
+            match = identity
+    return match
