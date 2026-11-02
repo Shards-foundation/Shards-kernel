@@ -71,32 +71,23 @@ def _identifier(value: Any, label: str) -> str:
     return value
 
 
-def parse_operator_config(data: Any) -> OperatorServiceConfig:
-    """Validate exact v1 schema without ever interpreting code or secrets."""
-    data = _fields(
-        data,
-        {"version", "kernel_id", "actor", "tools", "issuer_keys", "audit_db", "port"},
-        "Operator",
-    )
-    if type(data["version"]) is not int or data["version"] != 1:
-        raise ValueError("Unsupported operator configuration version")
-    kernel_id = _identifier(data["kernel_id"], "kernel_id")
-    actor = _identifier(data["actor"], "actor")
-
-    raw_tools = data["tools"]
+def _validated_tools(value: Any) -> list[str]:
     if (
-        not isinstance(raw_tools, list)
-        or not raw_tools
-        or any(not isinstance(t, str) or t not in _ALLOWED_TOOLS for t in raw_tools)
-        or len(set(raw_tools)) != len(raw_tools)
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(t, str) or t not in _ALLOWED_TOOLS for t in value)
+        or len(set(value)) != len(value)
     ):
         raise ValueError("tools must be a unique, nonempty allowlist of echo/add")
+    return value
 
-    raw_keys = data["issuer_keys"]
-    if not isinstance(raw_keys, list) or not raw_keys or len(raw_keys) > 16:
+
+def _parse_public_keys(value: Any, kernel_id: str) -> dict[str, PublicVerificationKey]:
+    """Pin key identity, issuer and intended kernel without any signing secrets."""
+    if not isinstance(value, list) or not value or len(value) > 16:
         raise ValueError("issuer_keys must be a nonempty list of at most 16 public keys")
     keys: dict[str, PublicVerificationKey] = {}
-    for item in raw_keys:
+    for item in value:
         key = _fields(item, {"key_id", "issuer", "public_key_hex", "revoked"}, "Issuer key")
         key_id = _identifier(key["key_id"], "key_id")
         issuer = _identifier(key["issuer"], "issuer")
@@ -119,18 +110,42 @@ def parse_operator_config(data: Any) -> OperatorServiceConfig:
         )
     if all(record.revoked for record in keys.values()):
         raise ValueError("At least one public issuer key must be active")
+    return keys
 
-    audit_db_raw = data["audit_db"]
-    if not isinstance(audit_db_raw, str) or not audit_db_raw or "\x00" in audit_db_raw:
+
+def _audit_path(value: Any) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
         raise ValueError("audit_db must be an absolute filesystem path")
-    audit_db = Path(audit_db_raw)
+    audit_db = Path(value)
     if not audit_db.is_absolute() or audit_db.name in {"", ".", ".."}:
         raise ValueError("audit_db must be an absolute filesystem path")
     if not audit_db.parent.is_dir() or audit_db.is_symlink() or audit_db.is_dir():
         raise ValueError("audit_db parent must exist; symlinks and directories are refused")
-    port = data["port"]
-    if type(port) is not int or not 1 <= port <= 65535:
+    return audit_db
+
+
+def _service_port(value: Any) -> int:
+    if type(value) is not int or not 1 <= value <= 65535:
         raise ValueError("port must be an integer between 1 and 65535")
+    return value
+
+
+def parse_operator_config(data: Any) -> OperatorServiceConfig:
+    """Validate exact v1 schema without ever interpreting code or secrets."""
+    data = _fields(
+        data,
+        {"version", "kernel_id", "actor", "tools", "issuer_keys", "audit_db", "port"},
+        "Operator",
+    )
+    if type(data["version"]) is not int or data["version"] != 1:
+        raise ValueError("Unsupported operator configuration version")
+    kernel_id = _identifier(data["kernel_id"], "kernel_id")
+    actor = _identifier(data["actor"], "actor")
+
+    raw_tools = _validated_tools(data["tools"])
+    keys = _parse_public_keys(data["issuer_keys"], kernel_id)
+    audit_db = _audit_path(data["audit_db"])
+    port = _service_port(data["port"])
 
     return OperatorServiceConfig(
         kernel_id=kernel_id,
