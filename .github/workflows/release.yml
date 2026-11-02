@@ -106,7 +106,7 @@ jobs:
         run: python scripts/ci/check_wheel_identity.py dist/*.whl
 
       - name: Verify package metadata
-        run: twine check dist/*
+        run: twine check dist/*.whl dist/*.tar.gz
 
       - name: Verify wheel in a clean environment
         shell: bash
