@@ -119,6 +119,18 @@ jobs:
           slug: Shards-foundation/Shards-kernel
           fail_ci_if_error: true
 
+      # Codecov skips patch checks for PRs which only change configuration files.
+      # This official CLI mode emits the required status only when Codecov itself
+      # confirms all changed files are non-coverable. Never use force here.
+      - name: Report non-coverable PR to Codecov
+        if: matrix.python-version == '3.12' && github.event_name == 'pull_request' && steps.codecov-token.outputs.available == 'true'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Shards-foundation/Shards-kernel
+          run_command: empty-upload
+          fail_ci_if_error: true
+
       - name: Smoke checks
         run: ./scripts/smoke.sh
 
