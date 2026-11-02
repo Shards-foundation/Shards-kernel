@@ -330,6 +330,43 @@ def sign_permit(permit: PermitToken, key: bytes, key_id: str) -> PermitToken:
     return replace(permit, signature=sig, key_id=key_id)
 
 
+def _verify_public_signature(
+    permit: PermitToken,
+    public_keys: dict[str, PublicVerificationKey],
+    expected_audience: str | None,
+) -> PermitVerificationResult:
+    """Verify an Ed25519 permit using pinned public material only."""
+        if permit.version != 2 or permit.algorithm != "Ed25519":
+            return PermitVerificationResult(Decision.DENY, ["ALGORITHM_NOT_ALLOWED"])
+        record = public_keys.get(permit.key_id)
+        if record is None:
+            return PermitVerificationResult(Decision.DENY, ["UNKNOWN_KEY_ID"])
+        if record.revoked:
+            return PermitVerificationResult(Decision.DENY, ["ISSUER_KEY_REVOKED"])
+        if permit.issuer != record.issuer:
+            return PermitVerificationResult(Decision.DENY, ["ISSUER_MISMATCH"])
+        if not expected_audience or permit.audience != expected_audience:
+            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
+        if record.audience != expected_audience:
+            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
+        if permit.permit_id != compute_permit_id(permit):
+            return PermitVerificationResult(Decision.DENY, ["PERMIT_ID_MISMATCH"])
+        try:
+            from cryptography.exceptions import InvalidSignature
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    
+            signature = bytes.fromhex(permit.signature)
+            if len(signature) != 64:
+                raise ValueError("Invalid Ed25519 signature length")
+            Ed25519PublicKey.from_public_bytes(record.public_key).verify(
+                signature,
+                b"SHARDS-PERMIT-ED25519-V2\x00" + canonical_permit_bytes(permit),
+            )
+        except (InvalidSignature, ValueError):
+            return PermitVerificationResult(Decision.DENY, ["SIGNATURE_INVALID"])
+        return PermitVerificationResult(Decision.ALLOW, [])
+    
+
 def verify_signature(
     permit: PermitToken,
     keyring: dict[str, bytes],
@@ -353,35 +390,7 @@ def verify_signature(
         PermitVerificationResult with ALLOW/DENY and reason codes
     """
     if public_keys is not None:
-        if permit.version != 2 or permit.algorithm != "Ed25519":
-            return PermitVerificationResult(Decision.DENY, ["ALGORITHM_NOT_ALLOWED"])
-        record = public_keys.get(permit.key_id)
-        if record is None:
-            return PermitVerificationResult(Decision.DENY, ["UNKNOWN_KEY_ID"])
-        if record.revoked:
-            return PermitVerificationResult(Decision.DENY, ["ISSUER_KEY_REVOKED"])
-        if permit.issuer != record.issuer:
-            return PermitVerificationResult(Decision.DENY, ["ISSUER_MISMATCH"])
-        if not expected_audience or permit.audience != expected_audience:
-            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
-        if record.audience != expected_audience:
-            return PermitVerificationResult(Decision.DENY, ["AUDIENCE_MISMATCH"])
-        if permit.permit_id != compute_permit_id(permit):
-            return PermitVerificationResult(Decision.DENY, ["PERMIT_ID_MISMATCH"])
-        try:
-            from cryptography.exceptions import InvalidSignature
-            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
-            signature = bytes.fromhex(permit.signature)
-            if len(signature) != 64:
-                raise ValueError("Invalid Ed25519 signature length")
-            Ed25519PublicKey.from_public_bytes(record.public_key).verify(
-                signature,
-                b"SHARDS-PERMIT-ED25519-V2\x00" + canonical_permit_bytes(permit),
-            )
-        except (InvalidSignature, ValueError):
-            return PermitVerificationResult(Decision.DENY, ["SIGNATURE_INVALID"])
-        return PermitVerificationResult(Decision.ALLOW, [])
+        return _verify_public_signature(permit, public_keys, expected_audience)
 
     # Legacy HMAC verification is only available when no public verifier
     # policy is configured. Never interpret an asymmetric signature as HMAC.
