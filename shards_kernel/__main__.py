@@ -80,6 +80,17 @@ def main() -> int:
         help="Loopback operator port (no remote URL or administrator token)",
     )
 
+    mtls_parser = subparsers.add_parser(
+        "mtls-ingress", help="Run pinned-client-cert HTTPS ingress to local operator (pre-production)"
+    )
+    mtls_parser.add_argument(
+        "--config", required=True, help="Ed25519-signed mTLS ingress policy JSON"
+    )
+    mtls_parser.add_argument(
+        "--allow-remote-listen", action="store_true",
+        help="Explicit opt-in to a non-loopback TLS listener (requires signed policy)",
+    )
+
     issuer_parser = subparsers.add_parser(
         "issuer", help="OFFLINE operator-only signing; private key via pre-opened FD"
     )
@@ -130,6 +141,12 @@ def main() -> int:
         from shards_kernel.integrations.mcp_local_relay import run_local_mcp_agent_relay
 
         return run_local_mcp_agent_relay(args.port)
+    elif args.command == "mtls-ingress":
+        from shards_kernel.integrations.mtls_ingress import run_mtls_ingress
+
+        return run_mtls_ingress(
+            args.config, allow_remote_listen=args.allow_remote_listen
+        )
 
     return 0
 
