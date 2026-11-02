@@ -60,6 +60,14 @@ def main() -> int:
     )
     demo_parser.add_argument("--json", action="store_true", help="Machine-readable results")
 
+    serve_parser = subparsers.add_parser(
+        "serve", help="Run the restricted local operator HTTP service (not production)"
+    )
+    serve_parser.add_argument(
+        "--config", required=True,
+        help="Absolute or relative path to strict public-key-only service JSON configuration",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -80,6 +88,10 @@ def main() -> int:
         from shards_kernel.cli.demo import run_demo
 
         return run_demo(json_output=args.json)
+    elif args.command == "serve":
+        from shards_kernel.cli.service import run_service
+
+        return run_service(args.config)
 
     return 0
 

@@ -163,6 +163,23 @@ test clock and an in-memory evidence bundle; it is **not a live gateway,
 trusted issuer deployment, or evidence of production readiness**. See
 [offline acceptance demo](docs/operations/OFFLINE_PERMIT_DEMO.md).
 
+## Restricted local operator service
+
+A standalone, loopback-only HTTP reference service is available with pinned
+**public-only Ed25519** issuer keys, real UTC clock, strictly allowlisted
+built-in tools, one locally authenticated actor and SQLite audit/replay recovery:
+
+```bash
+python -m pip install -e ".[crypto]"
+shards-kernel serve --config /absolute/path/to/operator.json
+```
+
+It will **refuse startup** without a valid operator JSON configuration and
+`SHARDS_KERNEL_API_KEY` set to a protected strong bearer credential. It
+cannot run financial tools or bind remote interfaces. See the
+[operator service guide](docs/operations/LOOPBACK_OPERATOR_SERVICE.md)
+for config fields, trust boundaries and unverified production requirements.
+
 ## Operator readiness checks
 
 The `shards-kernel doctor` CLI is a **preflight inspection**, not a

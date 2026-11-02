@@ -32,6 +32,7 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     # Class-level kernel reference (set by server)
     kernel: Optional[BaseKernel] = None
     api_key: Optional[str] = None
+    trusted_actor: Optional[str] = None  # Enforced for operator-managed services
     max_body_bytes: int = 1024 * 1024
 
     def _authorized(self) -> bool:
@@ -110,11 +111,21 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"status": "unhealthy", "error": "No kernel"})
             return
 
+        try:
+            state = self.kernel.get_state()
+            # A process is not healthy merely because its HTTP socket listens.
+            self.kernel.config.clock.now_ms()
+            if state.value == "HALTED":
+                raise RuntimeError("Kernel is halted")
+        except Exception:
+            self._send_json(503, {"status": "unhealthy"})
+            return
+
         self._send_json(
             200,
             {
                 "status": "healthy",
-                "kernel_state": self.kernel.get_state().value,
+                "kernel_state": state.value,
             },
         )
 
@@ -150,6 +161,11 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
 
         try:
             data = self._read_json()
+            # A caller may not claim an arbitrary principal when the service
+            # API key is bound to one operator-configured local agent.
+            if self.trusted_actor is not None and data.get("actor") != self.trusted_actor:
+                self._send_json(403, {"error": "Caller identity does not match service principal"})
+                return
 
             request, permit = request_from_mapping(self.kernel, data)
             receipt = self.kernel.submit(request, permit_token=permit)
@@ -205,6 +221,7 @@ class KernelServer:
         api_key: Optional[str] = None,
         allow_remote_bind: bool = False,
         allow_test_clock: bool = False,
+        trusted_actor: Optional[str] = None,
     ):
         if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
             raise ValueError(
@@ -213,7 +230,15 @@ class KernelServer:
             )
         if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
             raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
+        if trusted_actor is not None and (
+            not isinstance(trusted_actor, str)
+            or not trusted_actor
+            or "*" in trusted_actor
+            or trusted_actor not in kernel.policy.allowed_actors
+        ):
+            raise ValueError("Trusted actor must be explicitly present in kernel policy")
         self.api_key = resolve_api_key(api_key)
+        self.trusted_actor = trusted_actor
         self.kernel = kernel
         self.host = host
         self.port = port
@@ -229,6 +254,7 @@ class KernelServer:
 
         Handler.kernel = kernel
         Handler.api_key = self.api_key
+        Handler.trusted_actor = self.trusted_actor
         return Handler
 
     def start(self, blocking: bool = True) -> None:

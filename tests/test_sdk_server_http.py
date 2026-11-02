@@ -161,3 +161,15 @@ def test_http_server_no_store_for_authenticated_and_rejected_responses(live_serv
             response = exc
         with response:
             assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_health_reports_unhealthy_after_kernel_halt(live_server):
+    server, base = live_server
+    status, before = request_json(base + "/health", token=None)
+    assert status == 200
+    assert before["status"] == "healthy"
+    status, _result = request_json(base + "/halt", "POST", {}, token=TEST_KEY)
+    assert status == 200
+    status, after = request_json(base + "/health", token=None)
+    assert status == 503
+    assert after == {"status": "unhealthy"}
