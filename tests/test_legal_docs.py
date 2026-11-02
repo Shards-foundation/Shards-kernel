@@ -6,6 +6,7 @@ they are NOT a legal opinion, a data-flow audit or a GDPR certification.
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -42,10 +43,24 @@ def illegal_legal_pr_paths(changed_paths):
     return sorted(changes.difference(ALLOWED_WITH_LEGAL_CHANGES))
 
 
+def git_executable():
+    """Prefer a trusted system Git; never execute a git binary from this repo."""
+    system_git = Path("/usr/bin/git")
+    if system_git.is_file():
+        return str(system_git)
+    discovered = shutil.which("git")
+    if not discovered:
+        raise RuntimeError("Git executable is required for legal change-scope tests")
+    resolved = Path(discovered).resolve()
+    if resolved == ROOT or ROOT in resolved.parents:
+        raise RuntimeError("Refusing Git executable supplied by repository content")
+    return str(resolved)
+
+
 def changed_files_since_merge_base(base, head, root=ROOT):
     """List only PR-introduced changes, excluding unrelated base-branch commits."""
     changed = subprocess.check_output(
-        ["git", "diff", "--name-only", "-z", f"{base}...{head}"],
+        [git_executable(), "diff", "--name-only", "-z", f"{base}...{head}"],
         cwd=root,
     )
     return [os.fsdecode(p) for p in changed.split(b"\0") if p]
@@ -71,8 +86,10 @@ class LegalDocumentationContractTests(unittest.TestCase):
         for path in sorted(LEGAL_DOCUMENTS):
             with self.subTest(document=path):
                 text = read_document(path)
-                self.assertRegex(text[:550].lower(), r"\b(?:draft|review draft)\b")
-                self.assertIn("adopt", text.lower())
+                self.assertRegex(
+                    text[:550].lower(),
+                    r"\*\*(?:document status|status):\*\*[^\n]*\bdraft\b[^\n]*\bnot adopted\b",
+                )
         readme = read_document("README.md").lower()
         self.assertIn("these documents are drafts", readme)
         self.assertIn("have not been formally adopted", readme)
@@ -136,6 +153,27 @@ class LegalDocumentationContractTests(unittest.TestCase):
             [],
         )
 
+    def test_original_legal_policy_merge_contains_only_four_markdown_files(self):
+        """Verify PR #95's actual merged commit, not a hard-coded fake file list."""
+        if os.environ.get("LEGAL_DOC_SCOPE_REQUIRED") != "true":
+            return  # The Docs job checks real history; regular CI uses a shallow checkout.
+        original_merge = "e5cef4c9e85392662e38075cd8cb326799651102"
+        parent = subprocess.check_output(
+            [git_executable(), "rev-parse", original_merge + "^"],
+            cwd=ROOT,
+        ).decode().strip()
+        actual = changed_files_since_merge_base(parent, original_merge)
+        self.assertEqual(
+            set(actual),
+            {
+                "TERMS_OF_SERVICE.md",
+                "PRIVACY_POLICY.md",
+                "README.md",
+                "docs/legal/ADOPTION_CHECKLIST.md",
+            },
+            "PR #95 must not have modified runtime, telemetry, packaging or infra",
+        )
+
     def test_doc_only_change_scope_rejects_code_telemetry_release_and_licence(self):
         for forbidden in (
             "shards_kernel/api.py",
@@ -158,7 +196,9 @@ class LegalDocumentationContractTests(unittest.TestCase):
             repo = Path(directory)
 
             def git(*args):
-                return subprocess.check_output(["git", *args], cwd=repo).decode().strip()
+                return subprocess.check_output(
+                    [git_executable(), *args], cwd=repo
+                ).decode().strip()
 
             git("init", "-q", "-b", "main")
             git("config", "user.name", "Legal CI Test")
