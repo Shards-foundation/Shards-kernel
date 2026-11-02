@@ -43,31 +43,72 @@ def _check_inputs(
     return _identity(path)
 
 
-def checkpoint_ingress_revision(
+def _connect_existing(path: Path) -> sqlite3.Connection:
+    """Use SQLite URI mode=rw: a race must not create a missing trust DB."""
+    return sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=2.0)
+
+
+def bootstrap_ingress_checkpoint(
     path: Path, *, ingress_id: str, revision: int, digest: str
 ) -> tuple[int, int]:
-    """Commit new signed revision atomically before accepting any requests.
+    """Explicit single-use trusted-operator enrolment of a *virgin* DB.
 
-    Database must be created/protected by the trusted host operator before
-    running the ingress. Never reset it to roll back an enrolled policy.
+    Invoke out-of-band only after verifying the signed v2 ingress policy.
+    Startup deliberately never calls this method. An empty/replaced DB
+    at runtime is not treated as an opportunity to enrol new authority.
     """
     identity = _check_inputs(path, ingress_id, revision, digest)
     try:
-        with sqlite3.connect(path, timeout=2.0) as db:
+        with _connect_existing(path) as db:
             db.execute("PRAGMA synchronous=FULL")
             db.execute("BEGIN IMMEDIATE")
+            # A deleted row or table in a previously enrolled database
+            # must not be silently re-created by this bootstrap path.
+            if db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type IN "
+                "('table', 'index', 'view', 'trigger') LIMIT 1"
+            ).fetchone() is not None:
+                raise ValueError("Ingress checkpoint already initialised or altered")
             db.execute(
-                """CREATE TABLE IF NOT EXISTS ingress_policy_checkpoint (
+                """CREATE TABLE ingress_policy_checkpoint (
                     ingress_id TEXT PRIMARY KEY,
                     revision INTEGER NOT NULL,
                     digest TEXT NOT NULL
                 )"""
             )
+            db.execute(
+                "INSERT INTO ingress_policy_checkpoint VALUES (?, ?, ?)",
+                (ingress_id, revision, digest),
+            )
+            if _identity(path) != identity:
+                raise ValueError("Ingress checkpoint database changed during bootstrap")
+    except sqlite3.Error as exc:
+        raise ValueError("Ingress checkpoint database unavailable") from exc
+    return identity
+
+
+def checkpoint_ingress_revision(
+    path: Path, *, ingress_id: str, revision: int, digest: str
+) -> tuple[int, int]:
+    """Atomically advance an already enrolled signed revision.
+
+    Missing tables/rows are fatal. Only offline operator bootstrap may
+    establish the first trusted checkpoint. Do not recover a deleted
+    checkpoint automatically: require explicit, independently verified
+    recovery authority.
+    """
+    identity = _check_inputs(path, ingress_id, revision, digest)
+    try:
+        with _connect_existing(path) as db:
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT revision, digest FROM ingress_policy_checkpoint WHERE ingress_id=?",
                 (ingress_id,),
             ).fetchone()
-            if row is not None and (
+            if row is None:
+                raise ValueError("Missing enrolled ingress checkpoint")
+            if (
                 type(row[0]) is not int
                 or row[0] < 1
                 or not isinstance(row[1], str)
@@ -75,12 +116,7 @@ def checkpoint_ingress_revision(
                 or (revision == row[0] and digest != row[1])
             ):
                 raise ValueError("Ingress policy revision rollback or digest substitution")
-            if row is None:
-                db.execute(
-                    "INSERT INTO ingress_policy_checkpoint VALUES (?, ?, ?)",
-                    (ingress_id, revision, digest),
-                )
-            elif revision > row[0]:
+            if revision > row[0]:
                 db.execute(
                     "UPDATE ingress_policy_checkpoint SET revision=?, digest=? WHERE ingress_id=?",
                     (revision, digest, ingress_id),
@@ -100,7 +136,7 @@ def verify_ingress_checkpoint(
     if _check_inputs(path, ingress_id, revision, digest) != identity:
         raise ValueError("Ingress checkpoint database was replaced")
     try:
-        with sqlite3.connect(path, timeout=2.0) as db:
+        with _connect_existing(path) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT revision, digest FROM ingress_policy_checkpoint WHERE ingress_id=?",
