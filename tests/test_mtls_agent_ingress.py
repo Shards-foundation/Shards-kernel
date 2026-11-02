@@ -371,3 +371,196 @@ def test_untrusted_json_and_symlinks_are_rejected(tmp_path):
             str(symlink), pinned_public_key_hex=data["pinned"],
             now_ms=int(time.time() * 1000),
         )
+
+
+def test_signed_ingress_policy_validation_rejects_ambiguous_network_and_identity(tmp_path):
+    """Exercise independently signed but operationally dangerous configurations."""
+    setup = _setup(tmp_path)
+    now = int(time.time() * 1000)
+    original = setup["policy"]["config"]
+    key = setup["ingress_key"]
+
+    def rejected(mutator):
+        changed = copy.deepcopy(original)
+        mutator(changed)
+        signed = sign_mtls_ingress_policy(
+            changed, key,
+            issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
+        )
+        with pytest.raises(ValueError):
+            verify_ingress_policy(
+                signed, pinned_public_key_hex=setup["pinned"], now_ms=now
+            )
+
+    rejected(lambda x: x.update(listen_host="not-a-host"))
+    rejected(lambda x: x.update(listen_host="::1"))
+    rejected(lambda x: x.update(listen_host="239.1.1.1"))
+    rejected(lambda x: x.update(listen_port=0))
+    rejected(lambda x: x.update(operator_port=True))
+    rejected(lambda x: x.update(tls_key_file=None))
+    rejected(lambda x: x.update(tls_key_file="relative.pem"))
+    rejected(lambda x: x.update(client_ca_file=str(tmp_path / "absent-ca.pem")))
+    rejected(lambda x: x.update(agents=[]))
+    rejected(lambda x: x["agents"].append(dict(x["agents"][0])))
+    rejected(lambda x: x["agents"][0].update(actor="*"))
+    rejected(lambda x: x["agents"][0].update(client_cert_sha256="bad-digest"))
+    rejected(lambda x: x["agents"][1].update(client_cert_sha256=x["agents"][0]["client_cert_sha256"]))
+    rejected(lambda x: x.update(private_key=secrets.token_urlsafe(48)))
+    rejected(lambda x: x.update(listen_port="9443"))
+
+
+def test_ingress_envelope_schema_clock_and_signature_fail_closed(tmp_path):
+    setup = _setup(tmp_path)
+    now = int(time.time() * 1000)
+    signed = setup["policy"]
+    pinned = setup["pinned"]
+    key = setup["ingress_key"]
+    for change in (
+        {"schema": "other-protocol"},
+        {"issued_at_ms": True},
+        {"issued_at_ms": -1},
+        {"expires_at_ms": 0},
+        {"signature_hex": "bad"},
+        {"unexpected": "extra"},
+    ):
+        forged = dict(signed, **change)
+        with pytest.raises(ValueError):
+            verify_ingress_policy(forged, pinned_public_key_hex=pinned, now_ms=now)
+    for root in ("", "0", "g" * 64):
+        with pytest.raises(ValueError):
+            verify_ingress_policy(
+                signed, pinned_public_key_hex=root, now_ms=now
+            )
+    with pytest.raises(ValueError, match="expired"):
+        verify_ingress_policy(signed, pinned_public_key_hex=pinned, now_ms=now - 120_000)
+    for start, end in (
+        (now, now + 25 * 60 * 60 * 1000),
+        (-1, now + 10_000),
+        (now, now),
+    ):
+        with pytest.raises(ValueError):
+            sign_mtls_ingress_policy(
+                signed["config"], key, issued_at_ms=start, expires_at_ms=end
+            )
+    with pytest.raises(TypeError):
+        sign_mtls_ingress_policy(
+            signed["config"], object(),
+            issued_at_ms=now, expires_at_ms=now + 120_000,
+        )
+
+
+def test_runtime_expiry_invalid_body_privileged_path_and_downstream_outage(tmp_path, monkeypatch):
+    """TLS handshake and policy are valid, but unauthorised payloads never run."""
+    setup = _setup(tmp_path)
+    ingress = MTLSIngressServer(setup["config"])
+    ingress.start(blocking=False)
+    try:
+        port, ca = setup["ingress_port"], setup["files"]["ca"]
+        alpha = setup["files"]["alpha"]
+        token = setup["alpha"]
+        request = _body(
+            "agent-alpha", "no-backend", "echo", {"text": "no"}, None
+        )
+        assert _https(port, ca, alpha, bearer=token, payload=request)[0] == 502
+        assert _https(
+            port, ca, alpha, method="GET", path="/evidence", bearer=token
+        )[0] == 404
+        assert _https(
+            port, ca, alpha, method="POST", path="/halt", bearer=token, payload={}
+        )[0] == 404
+        assert _https(
+            port, ca, alpha, bearer=token,
+            payload=_body("agent-beta", "spoofed", "echo", {"text": "wrong"}),
+        )[0] == 403
+        assert _https(
+            port, ca, alpha, bearer=token,
+            payload=_body("agent-alpha", "unknown-tool", "not-allowlisted", {}),
+        )[0] == 403
+        assert _https(port, ca, alpha, bearer=None, payload=request)[0] == 401
+
+        def raw_request(body, content_type="application/json", extra_headers=None):
+            context = ssl.create_default_context(cafile=str(ca))
+            context.load_cert_chain(str(alpha[0]), str(alpha[1]))
+            conn = http.client.HTTPSConnection(
+                "127.0.0.1", port, context=context, timeout=3
+            )
+            try:
+                headers = {
+                    "Content-Type": content_type,
+                    "Authorization": "Bearer " + token,
+                }
+                if extra_headers:
+                    headers.update(extra_headers)
+                conn.request("POST", "/submit", body=body, headers=headers)
+                result = conn.getresponse()
+                return result.status
+            finally:
+                conn.close()
+
+        assert raw_request(b"{}", content_type="text/plain") == 400
+        assert raw_request(b"{}") == 403
+        assert raw_request(
+            b'{"actor":"agent-alpha","actor":"agent-beta"}'
+        ) == 400
+        assert raw_request(b"x" * (64 * 1024 + 1)) == 400
+        assert raw_request(
+            b"{}", extra_headers={"Transfer-Encoding": "chunked"}
+        ) == 400
+
+        # Enforce short lived signed ingress policy *after* socket startup.
+        monkeypatch.setattr(
+            ingress._clock, "now_ms", lambda: setup["config"].expires_at_ms + 1
+        )
+        assert _https(port, ca, alpha, bearer=token, payload=request)[0] == 503
+        def failed_clock():
+            raise RuntimeError("host time invalid")
+        monkeypatch.setattr(ingress._clock, "now_ms", failed_clock)
+        assert _https(port, ca, alpha, bearer=token, payload=request)[0] == 503
+    finally:
+        ingress.stop()
+
+
+def test_cli_ingress_valid_signed_policy_runs_and_stops_without_leaking(tmp_path, monkeypatch):
+    setup = _setup(tmp_path)
+    signed_path = tmp_path / "signed-ingress.json"
+    signed_path.write_text(json.dumps(setup["policy"]))
+    monkeypatch.setenv("SHARDS_KERNEL_INGRESS_PUBLIC_KEY_HEX", setup["pinned"])
+    calls = []
+    import shards_kernel.integrations.mtls_ingress as module
+
+    class FakeIngress:
+        def __init__(self, config, *, allow_remote_listen=False):
+            assert config == setup["config"]
+            assert not allow_remote_listen
+        def start(self, *, blocking=True):
+            assert blocking
+            calls.append("start")
+        def stop(self):
+            calls.append("stop")
+
+    monkeypatch.setattr(module, "MTLSIngressServer", FakeIngress)
+    assert run_mtls_ingress(str(signed_path)) == 0
+    assert calls == ["start", "stop"]
+
+
+def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
+    setup = _setup(tmp_path)
+    now = int(time.time() * 1000)
+    path = tmp_path / "big-policy.json"
+    path.write_bytes(b" " * (96 * 1024 + 1))
+    with pytest.raises(ValueError, match="too large"):
+        load_ingress_policy(
+            str(path), pinned_public_key_hex=setup["pinned"], now_ms=now
+        )
+    signed_config = copy.deepcopy(setup["policy"]["config"])
+    symlink = tmp_path / "server-cert-alias.pem"
+    symlink.symlink_to(setup["files"]["server"][0])
+    signed_config["tls_cert_file"] = str(symlink)
+    signed = sign_mtls_ingress_policy(
+        signed_config, setup["ingress_key"],
+        issued_at_ms=now - 1_000, expires_at_ms=now + 60_000,
+    )
+    with pytest.raises(ValueError, match="regular"):
+        verify_ingress_policy(
+            signed, pinned_public_key_hex=setup["pinned"], now_ms=now
+        )
