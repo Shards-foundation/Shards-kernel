@@ -72,6 +72,14 @@ def main() -> int:
         help="Explicit UNSIGNED local development opt-in; never use for deployed services",
     )
 
+    relay_parser = subparsers.add_parser(
+        "mcp-relay", help="Official MCP v2 stdio relay to local authenticated operator"
+    )
+    relay_parser.add_argument(
+        "--port", required=True, type=int,
+        help="Loopback operator port (no remote URL or administrator token)",
+    )
+
     issuer_parser = subparsers.add_parser(
         "issuer", help="OFFLINE operator-only signing; private key via pre-opened FD"
     )
@@ -118,6 +126,10 @@ def main() -> int:
         from shards_kernel.cli.issuer_command import run_issuer_command
 
         return run_issuer_command(args)
+    elif args.command == "mcp-relay":
+        from shards_kernel.integrations.mcp_local_relay import run_local_mcp_agent_relay
+
+        return run_local_mcp_agent_relay(args.port)
 
     return 0
 
