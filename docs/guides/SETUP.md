@@ -294,7 +294,7 @@ environment under `/opt/shards_kernel`. Do not install the unrelated
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin kernels
 sudo install -d -m 0700 -o root -g root /etc/shards_kernel
-sudo python3 -c 'import secrets; from pathlib import Path; p=Path("/etc/shards_kernel/shards-kernel.env"); p.write_text("SHARDS_KERNEL_API_KEY=" + secrets.token_urlsafe(48) + "\\n"); p.chmod(0o600)'
+sudo python3 -c 'import secrets; from pathlib import Path; p=Path("/etc/shards_kernel/shards-kernel.env"); p.write_text("SHARDS_KERNEL_API_KEY=" + secrets.token_urlsafe(48) + "\n"); p.chmod(0o600)'
 ```
 
 If the service account already exists, skip `useradd`. In a managed
