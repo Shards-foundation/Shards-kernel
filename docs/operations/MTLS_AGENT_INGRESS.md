@@ -229,3 +229,30 @@ closed before another request.
 This mitigates local file-descriptor exhaustion, **not** hostile network
 load or upstream denial-of-service: admission limits, deadline enforcement,
 network firewalls and platform monitoring remain independent release gates.
+
+
+## Versioned signature-domain migration and activation
+
+Signed v1 policies use the domain `SHARDS-MTLS-INGRESS-V1\0`.
+Signed v2 policies now use the **distinct**
+`SHARDS-MTLS-INGRESS-V2\0` domain. In both cases the final byte is a
+literal zero byte, not a printable backslash sequence. The offline issuer
+and verifier must agree exactly on that canonical message.
+
+**Compatibility note:** early development snapshots of v2 erroneously
+signed the v2 envelope using the v1 domain. Those signatures are **not**
+accepted by the corrected verifier. A trusted offline operator must
+**reissue** a v2 policy under the correct domain and advance to a new,
+positive revision when any prior v2 revision was already enrolled.
+Re-signing a different payload at the same revision is rejected by the
+existing checkpoint and must not be treated as emergency recovery
+authority. Do not silently accept either domain for v2.
+
+The ingress constructor now performs read-only, revision-aware preflight
+of the already-enrolled checkpoint. It does **not** ratchet the trusted
+revision during TLS file loading or while preparing the server. The
+revision advances atomically only **after** the HTTPS listener binds
+successfully, and **before** it can accept requests. A failed bind cannot
+consume a policy revision; failures during activation close the newly
+bound listening socket. Independent external monotonic anchoring is still
+required before production.
