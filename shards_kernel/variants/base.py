@@ -40,6 +40,7 @@ from shards_kernel.core.runtime import (
 from shards_kernel.permits import (
     NonceRegistry,
     PermitToken,
+    PublicVerificationKey,
     _params_satisfy_permit,
     verify_permit,
 )
@@ -144,7 +145,8 @@ class BaseKernel(Kernel):
         self._pending_decision: Optional[Decision] = None
         self._pending_result: Optional[Any] = None
         self._nonce_registry: NonceRegistry = NonceRegistry()
-        self._keyring: dict[str, bytes] = {}  # HMAC keys for permit verification
+        self._keyring: dict[str, bytes] = {}  # Legacy local HMAC only
+        self._public_verifiers: dict[str, PublicVerificationKey] | None = None
         self._transitions: list[tuple[KernelState, KernelState]] = []
         # Set only after a permit (or the explicit insecure opt-out) has bound
         # the parameters that EXECUTING is allowed to use.
@@ -180,7 +182,26 @@ class BaseKernel(Kernel):
         Args:
             keyring: Map of key_id -> HMAC secret key (32 bytes recommended).
         """
-        self._keyring = keyring
+        if self._public_verifiers is not None:
+            raise ValueError("Public-only verifier mode cannot enable HMAC signing secrets")
+        self._keyring = dict(keyring)
+
+    def set_public_verifiers(self, keys: dict[str, PublicVerificationKey]) -> None:
+        """Use operator-pinned public-only Ed25519 verification; disable HMAC.
+
+        A fresh kernel can switch to public verification. It cannot silently
+        re-enable HMAC once public-only mode has been selected.
+        Key replacement supports explicit key revocation and rotation.
+        """
+        if self._keyring:
+            raise ValueError("Refusing public-only mode while HMAC secrets are configured")
+        if not isinstance(keys, dict) or any(
+            not isinstance(key_id, str) or not key_id
+            or not isinstance(record, PublicVerificationKey)
+            for key_id, record in keys.items()
+        ):
+            raise ValueError("Expected key-id to PublicVerificationKey mapping")
+        self._public_verifiers = dict(keys)
 
     @property
     def transition_log(self) -> tuple[tuple[KernelState, KernelState], ...]:
@@ -453,6 +474,8 @@ class BaseKernel(Kernel):
                 request_params=canonical_params or {},
                 request_evidence=request.evidence,
                 commit_use=False,
+                public_keys=self._public_verifiers,
+                expected_audience=self.config.kernel_id,
             )
             permit_digest = permit_token.permit_id
             proposal_hash = permit_token.proposal_hash
