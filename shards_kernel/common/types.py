@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 
 class KernelState(Enum):
@@ -175,6 +175,12 @@ class VirtualClock:
         self._current_ms = ts_ms
 
 
+class Clock(Protocol):
+    """Protocol for a source of UTC milliseconds used for permit validity."""
+
+    def now_ms(self) -> int: ...
+
+
 # Type aliases for SDK compatibility
 Request = KernelRequest
 Receipt = KernelReceipt
@@ -191,7 +197,9 @@ class KernelConfig:
     fail_closed: bool = True
     require_jurisdiction: bool = True
     require_audit: bool = True
-    clock: VirtualClock = field(default_factory=VirtualClock)
+    # VirtualClock preserves deterministic library/test behaviour. Service
+    # factories must explicitly inject SystemClock for expiring permits.
+    clock: Clock = field(default_factory=VirtualClock)
     hash_alg: str = "sha256"
     max_param_bytes: int = 65536
     max_intent_length: int = 4096
