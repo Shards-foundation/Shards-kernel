@@ -167,7 +167,7 @@ def test_signature_binding_handles_variadic_and_unsupported_defaults():
     def invalid_default(value=object()):
         pass
 
-    assert resolve_effective_params(variadic, {"extra": 3}) == ({"extra": 3}, None)
+    assert "cannot bind" in resolve_effective_params(variadic, {"extra": 3})[1]
     assert "positional-only" in resolve_effective_params(positional_default, {})[1]
     assert "JSON" in resolve_effective_params(invalid_default, {})[1]
     registry = ToolRegistry()
@@ -531,3 +531,41 @@ def test_async_wrapper_refuses_two_active_event_loops():
         release.set()
         worker.join(2)
     assert outcomes == ["done"]
+
+
+@pytest.mark.parametrize("value", [True, False, 0, -1, "10", 1.5, None])
+def test_malformed_time_limits_are_rejected_before_execution(signed_kernel, value):
+    kernel, key, _clock, seen = signed_kernel
+    receipt = kernel.submit(
+        request({"amount": 1}),
+        signed_permit(key, {"amount": 1}, constraints={"max_time_ms": value}),
+    )
+    assert receipt.decision is Decision.DENY
+    assert "CONSTRAINT_MALFORMED_MAX_TIME_MS" in (receipt.error or "")
+    assert seen == []
+
+
+def test_missing_required_handler_argument_denied_before_execution(signed_kernel):
+    kernel, key, _clock, seen = signed_kernel
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", lambda amount: seen.append(amount))
+    receipt = kernel.submit(request({}), signed_permit(key, {}))
+    assert receipt.decision is Decision.DENY
+    assert "PARAM_BINDING_MISMATCH" in (receipt.error or "")
+    assert seen == []
+    assert all(entry.audit_phase != "intent" for entry in kernel.export_evidence().ledger_entries)
+
+
+def test_json_authorisation_comparison_fail_closed_for_non_json_values():
+    from shards_kernel.common.codec import equal_json_values
+
+    assert equal_json_values({"items": [1, {"enabled": True}]}, {"items": [1, {"enabled": True}]})
+    assert not equal_json_values({"value": True}, {"value": 1})
+    assert not equal_json_values(-0.0, 0.0)
+    assert not equal_json_values(float("nan"), float("nan"))
+    assert not equal_json_values(float("inf"), float("inf"))
+    assert not equal_json_values({1: "value"}, {1: "value"})
+    assert not equal_json_values((1,), (1,))
+    cycle = []
+    cycle.append(cycle)
+    assert not equal_json_values(cycle, cycle)
