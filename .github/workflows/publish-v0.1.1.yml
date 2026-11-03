@@ -121,7 +121,13 @@ jobs:
             echo "Refusing to replace the already published v0.1.1 release" >&2
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin refs/tags/v0.1.1 >/dev/null 2>&1; then
+          # A transport/authentication failure must NOT be mistaken for an absent tag.
+          # ls-remote without --exit-code returns success with empty output for no match.
+          tag_matches="$(git ls-remote --tags --refs origin refs/tags/v0.1.1)" || {
+            echo "Cannot verify absence of v0.1.1 tag; refusing release" >&2
+            exit 1
+          }
+          if [ -n "$tag_matches" ]; then
             echo "Refusing to replace the existing v0.1.1 tag" >&2
             exit 1
           fi
@@ -152,6 +158,22 @@ jobs:
       # GITHUB_TOKEN-originated release events do not trigger release:published
       # workflows. workflow_dispatch is exempt; this explicit dispatch runs
       # the separate checksum/metadata verification and PyPI OIDC publisher.
+      - name: Verify published GitHub release before PyPI handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A successful create request is not sufficient: verify the published
+          # release identity and the exact three checksum-protected assets.
+          verified="$(gh release view v0.1.1 --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,assets \
+            --jq '.tagName == "v0.1.1" and (.isDraft | not) and (.isPrerelease | not) and (([.assets[].name] | sort) == (["SHA256SUMS", "shards_kernel-0.1.1-py3-none-any.whl", "shards_kernel-0.1.1.tar.gz"] | sort))')"
+          if [ "$verified" != "true" ]; then
+            echo "GitHub release v0.1.1 is not verified; refusing PyPI dispatch" >&2
+            exit 1
+          fi
+
       - name: Dispatch verified trusted PyPI publisher
         env:
           GH_TOKEN: ${{ github.token }}
