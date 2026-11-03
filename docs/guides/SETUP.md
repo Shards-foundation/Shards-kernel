@@ -1,6 +1,6 @@
 # Shards-Kernel Setup Guide
 
-**Version:** 0.1.0  
+**Version:** 0.1.1  
 **Classification:** Installation  
 **Last Updated:** January 2025
 
@@ -60,7 +60,7 @@ python -m shards_kernel info
 The published PyPI distribution is `shards-kernel`, the Python import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install "shards-kernel==0.1.0"
+python -m pip install "shards-kernel==0.1.1"
 python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
 shards-kernel --help
 ```
