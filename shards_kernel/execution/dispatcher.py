@@ -71,7 +71,8 @@ def resolve_effective_params(
     """
     try:
         signature = inspect.signature(handler)
-        bound = signature.bind_partial(**params)
+        # Do not authorise an invalid call or consume its permit budget.
+        bound = signature.bind(**params)
         bound.apply_defaults()
         effective: dict[str, Any] = {}
         for parameter in signature.parameters.values():
