@@ -21,7 +21,7 @@ Shards-Kernel's implementation and API names such as `KernelRequest` remain unch
 The initial version is published on PyPI. For a released installation:
 
 ```bash
-python -m pip install "shards-kernel==0.1.0"
+python -m pip install "shards-kernel==0.1.1"
 python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
 python -m shards_kernel --version
 shards-kernel --help
@@ -40,7 +40,7 @@ python -m pytest tests/test_distribution_identity.py
 python -m build
 ```
 
-Version `0.1.0` has been published to PyPI. The separate `.github/workflows/publish.yml` workflow publishes verified GitHub release artifacts using OIDC Trusted Publishing; `.github/workflows/release.yml` remains a build-and-verification workflow. PyPI release metadata is immutable after publication, so a future metadata change requires a new release version.
+Version `0.1.1` has been published to PyPI. The separate `.github/workflows/publish.yml` workflow publishes verified GitHub release artifacts using OIDC Trusted Publishing; `.github/workflows/release.yml` remains a build-and-verification workflow. PyPI release metadata is immutable after publication, so a future metadata change requires a new release version.
 
 ## Integration caveat
 

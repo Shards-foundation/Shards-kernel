@@ -1,6 +1,6 @@
 # Shards-Kernel Quick Start Guide
 
-**Version:** 0.1.0  
+**Version:** 0.1.1  
 **Time to Complete:** 10 minutes
 
 ---
@@ -26,7 +26,7 @@ python -m shards_kernel info
 The package is published on PyPI as `shards-kernel`. Import it as `shards_kernel`; the command-line entry point is `shards-kernel`. The unrelated PyPI project `kernels` belongs to Hugging Face and must not be installed as a substitute.
 
 ```bash
-python -m pip install "shards-kernel==0.1.0"
+python -m pip install "shards-kernel==0.1.1"
 python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
 shards-kernel --help
 ```

@@ -126,12 +126,12 @@ Variants tune posture while preserving invariants:
 The PyPI distribution name is `shards-kernel`, the import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install "shards-kernel==0.1.0"
+python -m pip install "shards-kernel==0.1.1"
 python -c "import shards_kernel"
 shards-kernel --help
 ```
 
-**Version 0.1.0 is published on [PyPI](https://pypi.org/project/shards-kernel/0.1.0/)** via GitHub OIDC Trusted Publishing, with verified wheel and source distributions. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
+**Version 0.1.1 is the maintenance release on [PyPI](https://pypi.org/project/shards-kernel/0.1.1/)** via GitHub OIDC Trusted Publishing, with verified wheel and source distributions. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
@@ -151,8 +151,8 @@ For existing users migrating from the old `kernels` Python import path, see [the
 
 ### Execution and evidence boundaries
 
-These notes describe this source checkout. The published 0.1.0 package does
-not include later fixes; consult release notes before relying on a PyPI build.
+These boundaries are included in Shards-Kernel 0.1.1 and later. Older
+published versions do not include the complete hardening fixes.
 
 - Registered tools are trusted Python code; the kernel is not an operating-system
   sandbox and cannot prevent code with direct access to a tool from calling it.
