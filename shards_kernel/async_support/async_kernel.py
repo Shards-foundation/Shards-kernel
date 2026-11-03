@@ -8,7 +8,7 @@ intent-before-execute, halt-on-fault, and permit budgets cannot drift.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional, Type
+from typing import Any, Callable, Optional, Type
 
 from shards_kernel.common.errors import StateError
 from shards_kernel.common.types import (
@@ -32,7 +32,10 @@ class AsyncKernel:
 
     def __init__(self, kernel: BaseKernel) -> None:
         self.kernel = kernel
-        self._lock = asyncio.Lock()
+        # Python 3.9 binds locks at construction. Defer construction until
+        # the first running loop, so wrappers can be created synchronously.
+        self._lock: Optional[asyncio.Lock] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def state(self) -> KernelState:
@@ -47,21 +50,49 @@ class AsyncKernel:
         """Replace the jurisdiction policy."""
         self.kernel.set_policy(policy)
 
+    async def _call_serialized(
+        self, operation: Callable[..., KernelReceipt], *args: Any
+    ) -> KernelReceipt:
+        """Keep the lock until the worker finishes, even if its waiter cancels."""
+        loop = asyncio.get_running_loop()
+        if self._lock is None or (
+            self._loop is not loop
+            and self._loop is not None
+            and self._loop.is_closed()
+            and not self._lock.locked()
+        ):
+            self._lock = asyncio.Lock()
+            self._loop = loop
+        elif self._loop is not loop:
+            raise StateError("AsyncKernel cannot be shared between active event loops")
+        lock = self._lock
+        await lock.acquire()
+        try:
+            worker = asyncio.create_task(asyncio.to_thread(operation, *args))
+        except BaseException:
+            lock.release()
+            raise
+
+        def finished(task: asyncio.Task) -> None:
+            lock.release()
+            # Retrieve exceptions even if the original waiter was cancelled.
+            if not task.cancelled():
+                task.exception()
+
+        worker.add_done_callback(finished)
+        return await asyncio.shield(worker)
+
     async def submit(
         self,
         request: KernelRequest,
         permit_token: Optional[PermitToken] = None,
     ) -> KernelReceipt:
         """Submit one request. The synchronous kernel does the governance."""
-        async with self._lock:
-            return await asyncio.to_thread(
-                self.kernel.submit, request, permit_token
-            )
+        return await self._call_serialized(self.kernel.submit, request, permit_token)
 
     async def halt(self, reason: str = "halt") -> KernelReceipt:
         """Halt the underlying kernel."""
-        async with self._lock:
-            return await asyncio.to_thread(self.kernel.halt, reason)
+        return await self._call_serialized(self.kernel.halt, reason)
 
     def export_evidence(self):
         """Export the underlying evidence bundle."""
@@ -114,7 +145,10 @@ async def submit_batch(
     permits: Optional[list[Optional[PermitToken]]] = None,
 ) -> list[KernelReceipt]:
     """Submit requests one after another on the kernel lock."""
-    permits = permits or [None] * len(requests)
+    if permits is None:
+        permits = [None] * len(requests)
+    elif len(permits) != len(requests):
+        raise ValueError("The number of permits must match the number of requests")
     receipts = []
     for request, permit in zip(requests, permits):
         receipts.append(await kernel.submit(request, permit))
@@ -127,7 +161,12 @@ async def submit_with_timeout(
     timeout: float,
     permit_token: Optional[PermitToken] = None,
 ) -> KernelReceipt:
-    """Submit a request and raise TimeoutError if it overruns."""
+    """Stop waiting after timeout; a running tool may continue to have effects.
+
+    The kernel remains serialized until that work finishes. Inspect its audit
+    trail before retrying, and use idempotent tools when retries are possible.
+    This is not a hard execution deadline.
+    """
     return await asyncio.wait_for(
         kernel.submit(request, permit_token), timeout=timeout
     )
@@ -140,16 +179,17 @@ async def submit_with_retry(
     max_retries: int = 3,
     backoff: float = 0.0,
 ) -> KernelReceipt:
-    """Retry a failed tool execution. A halt is not retried."""
-    last: Optional[KernelReceipt] = None
+    """Retry failed execution only when repeating the tool's effects is safe.
+
+    A failed handler may already have had side effects. Permit replay limits
+    still apply independently to each attempt. A halt is not retried.
+    """
+    if type(max_retries) is not int or max_retries < 0:
+        raise ValueError("max_retries must be a non-negative integer")
     for attempt in range(max_retries + 1):
-        try:
-            last = await kernel.submit(request, permit_token)
-        except StateError:
-            raise
-        if last.status.value != "FAILED":
-            return last
-        if attempt < max_retries and backoff:
+        receipt = await kernel.submit(request, permit_token)
+        if receipt.status.value != "FAILED" or attempt == max_retries:
+            return receipt
+        if backoff:
             await asyncio.sleep(backoff * (2**attempt))
-    assert last is not None
-    return last
+    raise RuntimeError("retry loop did not execute")

@@ -9,9 +9,8 @@ entry hash from the entry content and compares ``prev_hash`` links and
 ``root_hash`` is taken from the bundle itself. A match shows only that the
 bundle is internally consistent (integrity only). The bundle is not signed.
 
-``replay_and_verify`` reports an empty entry list as consistent, and
-``verify_evidence_bundle`` treats a missing ``ledger_entries`` key as ``[]``.
-This command rejects those bundles before it delegates.
+The public verifier accepts an explicitly empty ledger only with its genesis
+root. This command requires at least one entry and rejects it before replay.
 
 Usage:
     python -m shards_kernel.cli.verify evidence.json
@@ -51,11 +50,9 @@ def reject_before_replay(evidence: Any) -> Optional[str]:
     """Return a fail-closed reason, or None when replay may run.
 
     Call this before ``verify_evidence_bundle``. An empty or missing
-    ``ledger_entries`` list must not be delegated: ``replay_and_verify``
-    returns ``(True, [])`` for an empty entry list, and the bundle helper
-    reads a missing key as ``[]``. A missing ``root_hash`` must not be
-    delegated either, because replay skips the root comparison when that
-    value is absent. The comparison uses the bundle's own ``root_hash``,
+    ``ledger_entries`` list must not be delegated because the CLI requires
+    at least one entry. The public verifier separately rejects missing fields.
+    The comparison uses the bundle's own ``root_hash``,
     so it shows internal consistency only.
     """
     if not isinstance(evidence, dict):
@@ -64,9 +61,7 @@ def reject_before_replay(evidence: Any) -> Optional[str]:
         return "empty bundle"
     if any(field in evidence for field in _SCHEMA_FIELDS):
         return "unknown schema"
-    # Canonical exports use ledger_entries. `entries` is not aliased: replay
-    # does not read it, and a missing ledger_entries key would be delegated
-    # as an empty list that replay reports as consistent.
+    # Canonical exports use ledger_entries. `entries` is not an alias.
     if "entries" in evidence:
         return "legacy entries key is not accepted"
     foreign = [

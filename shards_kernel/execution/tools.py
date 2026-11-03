@@ -102,7 +102,9 @@ class ToolRegistry:
         """
         return list(self._tools.keys())
 
-    def invoke(self, name: str, params: dict[str, Any]) -> Any:
+    def invoke(
+        self, name: str, params: dict[str, Any], *, expected_tool: Optional[Tool] = None
+    ) -> Any:
         """Invoke a tool with parameters.
 
         Args:
@@ -118,6 +120,8 @@ class ToolRegistry:
         tool = self.get(name)
         if tool is None:
             raise ToolError(f"Tool '{name}' not found")
+        if expected_tool is not None and tool is not expected_tool:
+            raise ToolError(f"TOOL_BINDING_MISMATCH: tool '{name}' changed after authorisation")
 
         try:
             return tool.handler(**params)

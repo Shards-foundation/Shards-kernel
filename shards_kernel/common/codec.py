@@ -5,7 +5,41 @@ hashing and reproducible behavior across platforms.
 """
 
 import json
+import math
 from typing import Any, Optional
+
+
+def equal_json_values(left: Any, right: Any) -> bool:
+    """Compare JSON values without Python's bool/int or int/float aliases.
+
+    Unknown objects, non-string keys, non-finite numbers and recursive values
+    are not valid authorisation parameters and therefore do not compare equal.
+    """
+    def equal(a: Any, b: Any) -> bool:
+        if type(a) is not type(b):
+            return False
+        if type(a) is dict:
+            return (
+                all(type(key) is str for key in a)
+                and all(type(key) is str for key in b)
+                and a.keys() == b.keys()
+                and all(equal(a[key], b[key]) for key in a)
+            )
+        if type(a) is list:
+            return len(a) == len(b) and all(equal(x, y) for x, y in zip(a, b))
+        if type(a) is float:
+            return (
+                math.isfinite(a)
+                and math.isfinite(b)
+                and a == b
+                and (a != 0.0 or math.copysign(1.0, a) == math.copysign(1.0, b))
+            )
+        return type(a) in (str, int, bool, type(None)) and a == b
+
+    try:
+        return equal(left, right)
+    except (RecursionError, TypeError, ValueError):
+        return False
 
 
 def serialize_deterministic(data: Any) -> str:

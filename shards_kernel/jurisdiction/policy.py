@@ -44,11 +44,12 @@ class JurisdictionPolicy:
         """Create a default policy with common settings.
 
         Returns:
-            A policy with wildcard actor/tool access.
+            A policy with wildcard actor/tool access and intent-only requests.
         """
         return cls(
             allowed_actors=frozenset({"*"}),
             allowed_tools=frozenset({"*"}),
+            allow_intent_only=True,
         )
 
     @classmethod

@@ -53,8 +53,8 @@ def test_request_mapping_normalizes_optional_fields_and_clock():
             "actor": "agent",
             "intent": "inspect",
             "ts_ms": "invalid",
-            "tool_call": {"name": "echo", "params": ["bad"]},
-            "params": ["bad"],
+            "tool_call": {"name": "echo", "params": {}},
+            "params": {},
             "evidence": ["one", 2],
         },
     )
@@ -63,6 +63,20 @@ def test_request_mapping_normalizes_optional_fields_and_clock():
     assert request.tool_call.params == {}
     assert request.evidence == "one\n2"
     assert permit is None
+
+
+@pytest.mark.parametrize("field", ["tool_call", "tool_params", "params"])
+def test_request_mapping_rejects_malformed_parameter_objects(field):
+    kernel = boot_strict_kernel("wire-invalid")
+    payload = {"request_id": "r", "actor": "agent", "intent": "inspect"}
+    if field == "tool_call":
+        payload["tool_call"] = ["bad"]
+    elif field == "tool_params":
+        payload["tool_call"] = {"name": "echo", "params": ["bad"]}
+    else:
+        payload["params"] = ["bad"]
+    with pytest.raises(ValueError):
+        request_from_mapping(kernel, payload)
 
 
 def test_request_mapping_defaults_params_and_rebuilds_permit():

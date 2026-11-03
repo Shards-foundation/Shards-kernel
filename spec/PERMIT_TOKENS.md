@@ -455,7 +455,11 @@ Entries are sorted by `ledger_seq` (not `ts_ms`) to prevent non-determinism when
 
 ### 8.1 Constraint Schema
 
-The `constraints` dict supports:
+The implementation currently enforces `forbidden_params` and
+`require_evidence`. Unsupported constraints, including `max_time_ms`,
+`max_memory_mb`, and `allowed_domains`, are rejected before execution.
+The following illustrates possible future constraint fields, not a guarantee
+that each field is implemented:
 
 ```python
 constraints = {
@@ -469,6 +473,10 @@ constraints = {
 ```
 
 ### 8.2 Constraint Validation
+
+The following is illustrative pseudocode for future mechanisms. In particular,
+a post-execution measurement cannot enforce `max_time_ms`; synchronous tools
+with this constraint are denied until a suitable isolation mechanism exists.
 
 ```python
 def validate_constraints(permit: PermitToken, request: KernelRequest) -> list[str]:

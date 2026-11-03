@@ -112,7 +112,10 @@ def create_flask_app(
         k = app.config["kernel"]
         data = request.get_json()
 
-        request_obj, permit = request_from_mapping(k, data or {})
+        try:
+            request_obj, permit = request_from_mapping(k, data or {})
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": "Malformed request"}), 400
         receipt = k.submit(request_obj, permit_token=permit)
         return jsonify(receipt_to_mapping(receipt))
 

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from shards_kernel.common.types import Decision
+from shards_kernel.common.codec import equal_json_values
 
 # ============================================================================
 # PERMIT TOKEN DATA MODEL
@@ -673,19 +674,17 @@ def _params_satisfy_permit(
 
         # Values must match exactly (strict equality)
         # Future: Could support range checks, regex, etc.
-        if permit_params[key] != value:
+        if not equal_json_values(permit_params[key], value):
             return False  # Param value mismatch
 
     return True
 
 
 # Constraints the kernel actually enforces. Anything else fails closed.
-_IMPLEMENTED_CONSTRAINTS = frozenset(
-    {"forbidden_params", "require_evidence", "max_time_ms"}
-)
+_IMPLEMENTED_CONSTRAINTS = frozenset({"forbidden_params", "require_evidence"})
 # Named in the docs but not enforced at execution time. Accepting them would
 # look like a control and do nothing, so they are rejected.
-_UNIMPLEMENTED_CONSTRAINTS = frozenset({"max_memory_mb", "allowed_domains"})
+_UNIMPLEMENTED_CONSTRAINTS = frozenset({"max_time_ms", "max_memory_mb", "allowed_domains"})
 
 
 def _validate_constraints(
@@ -725,8 +724,10 @@ def _validate_constraints(
         elif flag and not (isinstance(request_evidence, str) and request_evidence.strip()):
             violations.append("REQUIRE_EVIDENCE_MISSING")
 
-    if "max_time_ms" in constraints and not isinstance(constraints["max_time_ms"], int):
-        violations.append("CONSTRAINT_MALFORMED_MAX_TIME_MS")
+    if "max_time_ms" in constraints:
+        value = constraints["max_time_ms"]
+        if type(value) is not int or value <= 0:
+            violations.append("CONSTRAINT_MALFORMED_MAX_TIME_MS")
 
     for key in constraints:
         if key in _IMPLEMENTED_CONSTRAINTS:

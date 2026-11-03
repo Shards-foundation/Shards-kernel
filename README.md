@@ -149,6 +149,32 @@ Both approaches provide `import shards_kernel` and the `shards-kernel` command.
 
 For existing users migrating from the old `kernels` Python import path, see [the package migration guide](docs/PACKAGE_MIGRATION.md).
 
+### Execution and evidence boundaries
+
+These notes describe this source checkout. The published 0.1.0 package does
+not include later fixes; consult release notes before relying on a PyPI build.
+
+- Registered tools are trusted Python code; the kernel is not an operating-system
+  sandbox and cannot prevent code with direct access to a tool from calling it.
+  Protect tool access at the process and deployment boundaries.
+- Permit parameters are matched with type-strict JSON values. Handler defaults
+  are included in the authorized and audited parameters; operators must include
+  them in the permit. A handler can still interpret its arguments internally,
+  so register only implementations whose behavior you trust.
+- `max_time_ms` permits are refused before execution: the synchronous runtime
+  cannot enforce a hard deadline or roll back effects already performed.
+- An async wait timeout or cancellation does not stop a synchronous tool that
+  is already running. The async wrapper keeps other operations serialized
+  until it finishes; inspect the audit trail before deciding whether to retry.
+  Serialization covers calls through the same wrapper, so do not share its
+  underlying kernel with concurrent direct callers or additional wrappers.
+- Evidence replay checks hash-chain consistency. The bundle's own root hash and
+  identity labels do not establish provenance; compare against an independently
+  trusted root or use an external attestation mechanism. An explicitly empty
+  ledger is valid only with the genesis root.
+- A halted kernel instance is terminal. Create a new instance and restore a
+  verified ledger when recovery is required.
+
 ## Agent-ready local MCP integration (first release scope)
 
 **An agent can use this kernel today without a separate Shards MCP Gateway.**

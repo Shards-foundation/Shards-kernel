@@ -411,15 +411,9 @@ kernel = StrictKernel(
 
 ### 8.2 Tool Timeout
 
-Configure per-tool timeouts.
-
-```python
-registry.register(
-    "slow_tool",
-    slow_tool_fn,
-    timeout=60.0,  # 60 second timeout
-)
-```
+The current `ToolRegistry.register` does not support timeouts. Synchronous
+execution cannot safely enforce or roll back a timeout, so permits containing
+`max_time_ms` are rejected before the tool runs.
 
 ### 8.3 Tool Schemas
 

@@ -92,9 +92,9 @@ class TestKernelRuntimeHooks(unittest.TestCase):
         permit = self._permit(constraints={"max_time_ms": -1})
         receipt = self.kernel.submit(request, permit_token=permit)
 
-        self.assertEqual(receipt.status, ReceiptStatus.FAILED)
+        self.assertEqual(receipt.status, ReceiptStatus.REJECTED)
         self.assertIsNotNone(receipt.error)
-        self.assertIn("Execution budget exceeded", receipt.error)
+        self.assertIn("CONSTRAINT_MALFORMED_MAX_TIME_MS", receipt.error)
 
     def test_before_hook_can_deny_execution(self) -> None:
         request = KernelRequest(

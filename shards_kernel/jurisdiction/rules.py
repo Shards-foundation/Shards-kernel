@@ -49,8 +49,7 @@ def check_tool_allowed(request: KernelRequest, policy: JurisdictionPolicy) -> li
     if request.tool_call is None:
         if policy.allow_intent_only:
             return []
-        # No tool call is not a violation if allow_intent_only
-        return []
+        return ["A tool call is required by jurisdiction policy"]
 
     tool_name = (
         request.tool_call.name

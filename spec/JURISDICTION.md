@@ -54,10 +54,14 @@ For each field in required_fields:
 ### 3.4 Tool Check
 
 - If tool_call is None and allow_intent_only is true, the check passes
-- If tool_call is None and allow_intent_only is false, the check passes (no tool to check)
+- If tool_call is None and allow_intent_only is false, the check MUST fail
 - If allowed_tools contains `*`, all tools are permitted
 - Otherwise, tool_call.name MUST be in allowed_tools
 - If tool is not permitted, the check MUST fail
+
+The convenience `JurisdictionPolicy.default()` explicitly allows intent-only
+requests to preserve its historical behavior. An explicit policy with
+`allow_intent_only=false` requires a tool call.
 
 ### 3.5 Parameter Size Check
 

@@ -1,7 +1,5 @@
 """Failure-path and invariant tests for the canonical runtime boundary."""
 
-from unittest.mock import patch
-
 import pytest
 
 from shards_kernel.common.types import ToolCall
@@ -94,16 +92,32 @@ def test_before_hook_denial_calls_error_hook_but_not_after_hook():
     assert "policy.denied" in [event.event_type for event in events]
 
 
-def test_execution_time_budget_converts_success_to_failure():
-    rt = runtime()
-    with patch("shards_kernel.core.runtime.perf_counter", side_effect=[1.0, 1.1]):
-        result = rt.execute(
-            ToolCall("echo", {"text": "hello"}),
-            context(max_time_ms=1, idempotency_key="time-budget-test"),
-        )
-    assert result.budget_exceeded is True
+def test_unenforceable_execution_time_budget_is_denied_before_dispatch():
+    calls = []
+    rt = runtime(before_execute=lambda *_: calls.append("before"))
+    result = rt.execute(
+        ToolCall("echo", {"text": "hello"}),
+        context(max_time_ms=1, idempotency_key="time-budget-test"),
+    )
+    assert calls == []
+    assert result.budget_exceeded is False
     assert result.dispatcher_result.success is False
-    assert "Execution budget exceeded" in result.dispatcher_result.error
+    assert "TIME_LIMIT_NOT_ENFORCEABLE" in result.dispatcher_result.error
+
+
+
+def test_expired_authorisation_deadline_denied_before_runtime_dispatch():
+    events = []
+    rt = runtime(event_sink=events.append)
+    result = rt.execute(
+        ToolCall("echo", {"text": "not executed"}),
+        context(idempotency_key="expired-permit"),
+        authorisation_deadline_ms=122,
+    )
+    assert result.dispatcher_result.success is False
+    assert result.dispatcher_result.error == "PERMIT_EXPIRED_BEFORE_DISPATCH"
+    assert result.elapsed_ms == 0
+    assert [event.event_type for event in events] == ["task.started", "error.raised"]
 
 
 def test_graph_order_rejects_duplicate_nodes_and_unknown_dependencies():
