@@ -569,3 +569,27 @@ def test_json_authorisation_comparison_fail_closed_for_non_json_values():
     cycle = []
     cycle.append(cycle)
     assert not equal_json_values(cycle, cycle)
+
+
+def test_dual_channel_split_keeps_context_without_leaking_tool_kwargs():
+    kernel = DualChannelKernel()
+    params = {"text": "hello", "constraints": {"scope": "echo"}}
+
+    def plain(text):
+        return text
+
+    def explicit(text, *, constraints):
+        return text, constraints
+
+    def variadic(text, **kwargs):
+        return text, kwargs
+
+    assert kernel._split_dispatch_params({"text": "hello"}, plain) == ({"text": "hello"}, {})
+    assert kernel._split_dispatch_params(params, plain) == (
+        {"text": "hello"}, {"constraints": {"scope": "echo"}}
+    )
+    assert kernel._split_dispatch_params(params, explicit) == (params, {})
+    assert kernel._split_dispatch_params(params, variadic) == (params, {})
+    # A signature that cannot be inspected remains intact; the later
+    # effective-argument binder rejects it before any execution.
+    assert kernel._split_dispatch_params(params, object()) == (params, {})
