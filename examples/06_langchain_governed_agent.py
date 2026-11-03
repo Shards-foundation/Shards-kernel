@@ -318,7 +318,6 @@ def main():
         print()
     else:
         raise SystemExit(f"Email should have been allowed: {email_result2.error}")
-        print()
 
     # ========================================================================
     # Step 6: Demonstrate replay protection
