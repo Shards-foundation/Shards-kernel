@@ -174,7 +174,7 @@ def test_release_verification_gates_and_order_are_explicit():
         "python scripts/ci/run_e2e_gate.py",
         "--cov-branch",
         "--cov-fail-under=90",
-        "not math.isfinite(percent) or percent < 90.0",
+        "not math.isfinite(coverage) or coverage < 90.0",
         "python scripts/ci/check_governance_coverage.py coverage.json",
         "./scripts/smoke.sh",
         "python examples/01_minimal_request.py",
