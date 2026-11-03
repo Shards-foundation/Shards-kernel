@@ -57,18 +57,19 @@ python -m shards_kernel info
 
 ### 2.2 PyPI
 
-The distribution name is `shards-kernel`. After it is published:
+The published PyPI distribution is `shards-kernel`, the Python import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install shards-kernel
-python -c "import shards_kernel"
+python -m pip install "shards-kernel==0.1.0"
+python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
+shards-kernel --help
 ```
 
-A verified PyPI release is pending. Do **not** install the unrelated PyPI distribution `kernels` (maintained by Hugging Face). After an approved release, install `shards-kernel` and import `shards_kernel`. Until then, install this repository directly from GitHub.
+Do **not** install or import the unrelated PyPI distribution `kernels` (maintained by Hugging Face).
 
 ### 2.3 From GitHub
 
-This repository has no published release tarball (`shards_kernel-0.1.0.tar.gz` is not a release asset). Install from the Git repository:
+To install the latest repository source instead of the published package, use:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
@@ -377,7 +378,7 @@ Do not use a placeholder Kubernetes deployment to claim horizontal scaling.
 
 | Issue | Solution |
 |-------|----------|
-| `ModuleNotFoundError: kernels` | Run `pip install -e .` |
+| `ModuleNotFoundError: No module named 'shards_kernel'` | Install `shards-kernel` into the active Python environment using `python -m pip install shards-kernel`. |
 | `Python version error` | Use Python 3.11+ |
 | `Permission denied` | Check file permissions |
 | `Import error` | Check virtual environment |
@@ -399,7 +400,7 @@ python -m shards_kernel info -v
 python --version
 
 # Check pip packages
-pip list | grep kernels
+python -m pip show shards-kernel
 
 # Check import
 python -c "import shards_kernel; print(shards_kernel.__version__)"
@@ -441,7 +442,7 @@ python -m shards_kernel info
 
 ```bash
 # Uninstall package
-pip uninstall kernels
+python -m pip uninstall shards-kernel
 
 # Remove source (if installed from source)
 rm -rf /path/to/kernels
