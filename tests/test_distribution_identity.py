@@ -4,6 +4,7 @@ import importlib
 import subprocess
 import sys
 from importlib.metadata import distribution
+from pathlib import Path
 
 
 def test_distribution_name_and_version():
@@ -31,3 +32,27 @@ def test_entrypoint_metadata():
 def test_module_cli_is_invokable():
     result = subprocess.run([sys.executable, "-m", "shards_kernel", "--version"], capture_output=True, text=True, check=True)
     assert result.stdout.strip().startswith("shards-kernel ")
+
+
+def test_documentation_preserves_canonical_distribution_identity():
+    root = Path(__file__).resolve().parents[1]
+    guides = (
+        "docs/guides/QUICKSTART.md",
+        "docs/guides/SETUP.md",
+        "docs/PACKAGE_MIGRATION.md",
+    )
+    pinned_install = 'python -m pip install "shards-kernel=={}"'.format(distribution("shards-kernel").version)
+    for relative_path in guides:
+        document = (root / relative_path).read_text(encoding="utf-8")
+        assert pinned_install in document, relative_path
+        assert "from shards_kernel import StrictKernel" in document, relative_path
+        assert "shards-kernel --help" in document, relative_path
+        assert "release is pending" not in document.lower(), relative_path
+        assert "pip install kernels" not in document, relative_path
+        assert "pip uninstall kernels" not in document, relative_path
+
+    migration = (root / "docs/PACKAGE_MIGRATION.md").read_text(encoding="utf-8")
+    assert "\x60from kernels import StrictKernel\x60 | \x60from shards_kernel import StrictKernel\x60" in migration
+    assert "Do not add an import alias named \x60kernels\x60" in migration
+    assert "publish.yml\x60 workflow publishes verified GitHub release artifacts using OIDC Trusted Publishing" in migration
+    assert "release.yml\x60 remains a build-and-verification workflow" in migration

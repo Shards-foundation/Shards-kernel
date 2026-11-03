@@ -23,11 +23,12 @@ python -m shards_kernel info
 
 ### Option B: Install the distribution
 
-The distribution name is `shards-kernel`, and its import namespace is `shards_kernel`. An approved PyPI release is pending. Do not install the unrelated PyPI project `kernels`. Until a verified Shards-Kernel release exists, install from GitHub:
+The package is published on PyPI as `shards-kernel`. Import it as `shards_kernel`; the command-line entry point is `shards-kernel`. The unrelated PyPI project `kernels` belongs to Hugging Face and must not be installed as a substitute.
 
 ```bash
-python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
-python -c "import shards_kernel"
+python -m pip install "shards-kernel==0.1.0"
+python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
+shards-kernel --help
 ```
 
 ---

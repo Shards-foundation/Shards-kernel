@@ -18,7 +18,16 @@ Shards-Kernel's implementation and API names such as `KernelRequest` remain unch
 
 ## Install and verify
 
-Until an approved PyPI release exists, use a GitHub checkout:
+The initial version is published on PyPI. For a released installation:
+
+```bash
+python -m pip install "shards-kernel==0.1.0"
+python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
+python -m shards_kernel --version
+shards-kernel --help
+```
+
+For a development checkout:
 
 ```bash
 git clone https://github.com/Shards-foundation/Shards-kernel.git
@@ -31,7 +40,7 @@ python -m pytest tests/test_distribution_identity.py
 python -m build
 ```
 
-The release workflow currently only verifies and uploads distributions as GitHub artifacts. It does **not** publish to PyPI. Publishing requires explicit owner approval and separate trusted-publisher configuration.
+Version `0.1.0` has been published to PyPI. The separate `.github/workflows/publish.yml` workflow publishes verified GitHub release artifacts using OIDC Trusted Publishing; `.github/workflows/release.yml` remains a build-and-verification workflow. PyPI release metadata is immutable after publication, so a future metadata change requires a new release version.
 
 ## Integration caveat
 
