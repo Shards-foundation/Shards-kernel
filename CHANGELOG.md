@@ -6,20 +6,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-11-03
-
-### Fixed
-
-- Bind signed permits to type-strict effective handler arguments, including defaults; reject missing required arguments before authorisation.
-- Reject malformed evidence and inconsistent audit roots, and protect tool registration, permit expiry, and async cancellation boundaries.
-- Refuse unenforceable synchronous hard deadlines instead of reporting false enforcement.
-- Exercise regressions across Python 3.9–3.12, real-process E2E, isolated wheel builds, security analysis, and branch-aware coverage.
-
-### Notes
-
-- This maintenance release integrates PR #99 without adding a hosted service, trading engine, or autonomous agent deployment.
-- Previously published 0.1.0 wheels are immutable; install 0.1.1 to receive these changes.
-
 ### Added
 
 - Added `shards-kernel mcp-call`: one-shot official MCP v2 stdio client for an independently enrolled local agent, using an operator-issued private signed permit file; refuses arbitrary tools/destinations and treats every non-ALLOW receipt as a failure. The relay supplies only an agent-scoped bearer, never an operator or signing key.
@@ -96,6 +82,20 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Async callers: build a `KernelRequest` and pass it to `AsyncKernel.submit(request, permit_token=...)` with a permit bound to the exact parameters. Construct the async wrappers with `kernel_id` only, then call `set_policy` and `set_keyring`. `AsyncDispatcher.dispatch` does not run tools; submit tool calls through the kernel.
 - Evidence bundles for `python -m kernels.cli.verify`: the command reads `ledger_entries`. The LangChain, Hugging Face, generic, LangGraph, CrewAI, AutoGPT, and Moltbook adapters still export `entries`. Rename `entries` to `ledger_entries` in the bundle, or build the bundle with `evidence_to_mapping`. There is no CLI flag or alias for `entries`.
 - Scripts that parse `verify --json` output: until the separately tracked fix lands, stdout holds the text report followed by the JSON object, so do not pass it directly to a JSON parser.
+
+## [0.1.1] - 2026-11-03
+
+### Fixed
+
+- Bind signed permits to type-strict effective handler arguments, including defaults; reject missing required arguments before authorisation.
+- Reject malformed evidence and inconsistent audit roots, and protect tool registration, permit expiry, and async cancellation boundaries.
+- Refuse unenforceable synchronous hard deadlines instead of reporting false enforcement.
+- Exercise regressions across Python 3.9–3.12, real-process E2E, isolated wheel builds, security analysis, and branch-aware coverage.
+
+### Notes
+
+- This maintenance release integrates PR #99 without adding a hosted service, trading engine, or autonomous agent deployment.
+- Previously published 0.1.0 wheels are immutable; install 0.1.1 to receive these changes.
 
 ## [0.1.0] - 2026-01-01
 
