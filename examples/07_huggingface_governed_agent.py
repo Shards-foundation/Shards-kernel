@@ -200,7 +200,7 @@ def main():
         .jurisdiction("default")
         .action("execute_python_code")
         .params({"code": "print('Hello from governed agent')"})
-        .constraints({"max_time_ms": 5000})
+        .constraints({})  # Hard time limits are not yet enforceable.
         .max_executions(1)
         .valid_from_ms(0)
         .valid_until_ms(1000000)

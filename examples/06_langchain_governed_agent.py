@@ -287,7 +287,7 @@ def main():
                 "body": "Your refund of $50 has been processed.",
             }
         )  # Must match exact params
-        .constraints({"max_time_ms": 5000})
+        .constraints({})  # Hard time limits are not yet enforceable.
         .max_executions(1)  # Single-use permit
         .valid_from_ms(0)
         .valid_until_ms(1000000)
@@ -317,7 +317,7 @@ def main():
         print(f"  Audit hash: {email_result2.audit_hash[:16]}...")
         print()
     else:
-        print("✗ ERROR: Should have been allowed!")
+        raise SystemExit(f"Email should have been allowed: {email_result2.error}")
         print()
 
     # ========================================================================

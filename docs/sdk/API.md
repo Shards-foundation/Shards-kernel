@@ -193,7 +193,7 @@ The dual-channel example above is intent-only. Add a `ToolCall` whose `params` e
 
 `PermitBuilder` signs an HMAC permit with a key from the kernel keyring. The permit `action` is the tool name. `params` must contain every parameter the call will use, with the same values. `max_executions` counts successful intent records. A denial does not consume that budget.
 
-Implemented constraint keys are `forbidden_params`, `require_evidence`, and `max_time_ms`. `max_memory_mb` and `allowed_domains` are rejected as `CONSTRAINT_UNIMPLEMENTED`. Any other key is `CONSTRAINT_UNKNOWN`.
+Implemented constraint keys are `forbidden_params` and `require_evidence`. `max_time_ms`, `max_memory_mb`, and `allowed_domains` are rejected as `CONSTRAINT_UNIMPLEMENTED`. Synchronous Python cannot reliably stop or undo a tool's effects after a time limit, so a timed permit is refused before execution. Any other key is `CONSTRAINT_UNKNOWN`.
 
 ---
 
@@ -225,6 +225,10 @@ kernel.set_policy(policy)
 ```
 
 `PolicyBuilder` in `shards_kernel.sdk` produces the same object. `require_tool_call(False)` sets `allow_intent_only`. `with_custom_rule` raises when `build()` is called.
+
+When `allow_intent_only` is false, requests without a tool call are denied.
+The `JurisdictionPolicy.default()` convenience policy explicitly enables
+intent-only requests for compatibility; set a scoped policy to require a tool.
 
 ---
 
@@ -268,7 +272,7 @@ kernel.set_keyring(keyring)
 receipt = await kernel.submit(request, permit_token=permit)
 ```
 
-`submit_batch(kernel, requests, permits)` submits one request at a time on the kernel lock.
+`submit_batch(kernel, requests, permits)` submits one request at a time on the kernel lock and rejects a permit list of a different length. Async cancellation or `submit_with_timeout` stops the caller waiting; it does not stop an already running synchronous tool or undo its effects. The lock remains held until that tool finishes. Check the audit trail before retrying, and retry only operations whose effects can safely be repeated.
 
 ---
 

@@ -322,15 +322,10 @@ for request in requests:
 
 ### 6.3 Set Appropriate Timeouts
 
-**Configure timeouts for your workload.**
-
-```python
-# Short timeout for fast tools
-fast_registry.register("lookup", lookup_fn, timeout=5.0)
-
-# Longer timeout for slow tools
-slow_registry.register("analyze", analyze_fn, timeout=60.0)
-```
+Synchronous tool time limits are not currently enforceable by the kernel.
+Permits that specify `max_time_ms` are denied before dispatch. Use a separately
+designed isolation and side-effect control mechanism when a hard limit is
+required; a timeout alone cannot undo effects that have already occurred.
 
 ---
 

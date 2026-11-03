@@ -316,9 +316,10 @@ class AuditLedger:
         Returns:
             EvidenceBundle containing all entries and verification data.
         """
+        entries = tuple(self._entries)
         return EvidenceBundle(
-            ledger_entries=tuple(self._entries),
-            root_hash=self._last_hash,
+            ledger_entries=entries,
+            root_hash=entries[-1].entry_hash if entries else genesis_hash(),
             exported_at_ms=ts_ms,
             kernel_id=self._kernel_id,
             variant=self._variant,

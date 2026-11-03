@@ -189,7 +189,10 @@ def create_fastapi_app(
                 "name": body.tool_call.name,
                 "params": body.tool_call.params,
             }
-        request, permit = request_from_mapping(k, payload)
+        try:
+            request, permit = request_from_mapping(k, payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Malformed request") from exc
         receipt = k.submit(request, permit_token=permit)
         mapped = receipt_to_mapping(receipt)
         return ReceiptResponse(

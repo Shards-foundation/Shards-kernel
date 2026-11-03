@@ -9,12 +9,14 @@ the last check before a side effect.
 """
 
 import copy
+import inspect
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from shards_kernel.common.types import ToolCall
 from shards_kernel.common.errors import ToolError
-from shards_kernel.execution.tools import ToolRegistry
+from shards_kernel.common.codec import equal_json_values
+from shards_kernel.execution.tools import Tool, ToolRegistry
 
 
 @dataclass
@@ -47,15 +49,47 @@ def resolve_bound_params(
     """
     if not isinstance(request_params, dict) or not isinstance(tool_params, dict):
         return None, "PARAM_BINDING_MISMATCH: parameters must be dictionaries"
-    if request_params != tool_params:
+    try:
+        bound_params = copy.deepcopy(tool_params)
+    except Exception as exc:
+        return None, f"PARAM_BINDING_MISMATCH: parameters could not be bound ({exc})"
+    if not equal_json_values(request_params, bound_params):
         return (
             None,
             "PARAM_BINDING_MISMATCH: request.params differ from tool_call.params",
         )
+    return bound_params, None
+
+
+def resolve_effective_params(
+    handler: Any, params: dict[str, Any]
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Resolve inspectable handler defaults into explicit authorised kwargs.
+
+    Handlers are trusted code. This binds their Python call arguments, not
+    implicit behavior a handler might implement internally via **kwargs.
+    """
     try:
-        return copy.deepcopy(tool_params), None
-    except Exception as exc:
-        return None, f"PARAM_BINDING_MISMATCH: parameters could not be bound ({exc})"
+        signature = inspect.signature(handler)
+        bound = signature.bind_partial(**params)
+        bound.apply_defaults()
+        effective: dict[str, Any] = {}
+        for parameter in signature.parameters.values():
+            if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                if parameter.name in bound.arguments:
+                    return None, "PARAM_BINDING_MISMATCH: positional-only defaults cannot be authorised"
+            elif parameter.kind == inspect.Parameter.VAR_POSITIONAL:
+                continue
+            elif parameter.kind == inspect.Parameter.VAR_KEYWORD:
+                effective.update(bound.arguments.get(parameter.name, {}))
+            elif parameter.name in bound.arguments:
+                effective[parameter.name] = bound.arguments[parameter.name]
+        effective = copy.deepcopy(effective)
+        if not equal_json_values(effective, effective):
+            return None, "PARAM_BINDING_MISMATCH: effective parameters must be JSON values"
+        return effective, None
+    except (TypeError, ValueError, RecursionError) as exc:
+        return None, f"PARAM_BINDING_MISMATCH: cannot bind tool arguments ({exc})"
 
 
 class Dispatcher:
@@ -122,6 +156,8 @@ class Dispatcher:
         tool_call: Union[ToolCall, dict[str, Any]],
         authorised_params: Optional[dict[str, Any]] = None,
         authorised_tool_name: Optional[str] = None,
+        authorised_tool: Optional[Tool] = None,
+        before_invoke: Optional[Callable[[], Optional[str]]] = None,
     ) -> ExecutionResult:
         """Execute a tool call.
 
@@ -168,7 +204,17 @@ class Dispatcher:
                 ),
             )
 
-        if authorised_params is not None and params != authorised_params:
+        bound_authorised_params = None
+        if authorised_params is not None:
+            try:
+                bound_authorised_params = copy.deepcopy(authorised_params)
+            except Exception as exc:
+                return ExecutionResult(
+                    success=False,
+                    tool_name=name,
+                    error=f"PARAM_BINDING_MISMATCH: parameters could not be bound ({exc})",
+                )
+        if bound_authorised_params is not None and not equal_json_values(params, bound_authorised_params):
             return ExecutionResult(
                 success=False,
                 tool_name=name,
@@ -187,19 +233,19 @@ class Dispatcher:
                 error="; ".join(errors),
             )
 
-        if authorised_params is not None:
-            try:
-                params = copy.deepcopy(authorised_params)
-            except Exception as exc:
-                return ExecutionResult(
-                    success=False,
-                    tool_name=name,
-                    error=f"PARAM_BINDING_MISMATCH: parameters could not be bound ({exc})",
-                )
+        if bound_authorised_params is not None:
+            params = bound_authorised_params
 
         # Execute
         try:
-            result = self._registry.invoke(name, params)
+            if before_invoke is not None:
+                denial = before_invoke()
+                if denial:
+                    return ExecutionResult(success=False, tool_name=name, error=denial)
+            if authorised_tool is None:
+                result = self._registry.invoke(name, params)
+            else:
+                result = self._registry.invoke(name, params, expected_tool=authorised_tool)
             return ExecutionResult(
                 success=True,
                 tool_name=name,

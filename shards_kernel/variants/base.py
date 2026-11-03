@@ -8,6 +8,8 @@ import copy
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional
 
+from shards_kernel.common.codec import equal_json_values
+
 from shards_kernel.common.types import (
     Decision,
     DecisionEnvelope,
@@ -30,7 +32,7 @@ from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 from shards_kernel.jurisdiction.rules import evaluate_policy
 from shards_kernel.state.machine import StateMachine
 from shards_kernel.execution.tools import create_default_registry
-from shards_kernel.execution.dispatcher import Dispatcher, resolve_bound_params
+from shards_kernel.execution.dispatcher import Dispatcher, resolve_bound_params, resolve_effective_params
 from shards_kernel.core.runtime import (
     ExecutionContext,
     KernelRuntime,
@@ -233,6 +235,8 @@ class BaseKernel(Kernel):
         self._state_machine.assert_not_halted()
 
         try:
+            if evidence.kernel_id != self.config.kernel_id or evidence.variant != self.config.variant:
+                raise AuditError("Evidence kernel identity does not match this kernel")
             self._ledger.load_verified(evidence.ledger_entries, evidence.root_hash)
         except AuditError:
             self._halt_on_fault(
@@ -267,7 +271,7 @@ class BaseKernel(Kernel):
 
     def boot(self, config: KernelConfig) -> None:
         """Boot the kernel with configuration."""
-        if self._state_machine is not None and not self._state_machine.is_halted:
+        if self._state_machine is not None:
             raise BootError("Kernel already booted")
 
         self._config = config
@@ -379,6 +383,12 @@ class BaseKernel(Kernel):
             return name, {}, "PARAM_BINDING_MISMATCH: tool_call.params must be a dictionary"
         return name, params, None
 
+    def _split_dispatch_params(
+        self, params: dict[str, Any], handler: Callable[..., Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Separate tool kwargs from additional, still-authorised context."""
+        return params, {}
+
     def _submit_bound(
         self, request: KernelRequest, permit_token: Optional[PermitToken]
     ) -> KernelReceipt:
@@ -420,7 +430,20 @@ class BaseKernel(Kernel):
         if tool_error:
             return self._deny_request(request, state_from, tool_error)
 
+        if self._requires_permit(request) and permit_token is not None and tool_name != permit_token.action:
+            return self._deny_permit(
+                request,
+                state_from,
+                f"ACTION_TOOL_MISMATCH: permit authorises '{permit_token.action}' but the tool is '{tool_name}'",
+                ["ACTION_TOOL_MISMATCH"],
+                permit_digest=permit_token.permit_id,
+                proposal_hash=permit_token.proposal_hash,
+            )
+
         canonical_params: Optional[dict[str, Any]] = None
+        request_bound_params: Optional[dict[str, Any]] = None
+        dispatch_params: Optional[dict[str, Any]] = None
+        registered_tool = None
         if request.tool_call is not None:
             canonical_params, bind_error = resolve_bound_params(request.params, tool_params)
             if bind_error or canonical_params is None:
@@ -429,6 +452,21 @@ class BaseKernel(Kernel):
                     state_from,
                     bind_error or "PARAM_BINDING_MISMATCH",
                 )
+            request_bound_params = canonical_params
+            dispatch_params = canonical_params
+            registered_tool = self._dispatcher.registry.get(tool_name or "")
+            if registered_tool is not None:
+                tool_params_for_dispatch, context_params = self._split_dispatch_params(
+                    request_bound_params, registered_tool.handler
+                )
+                dispatch_params, bind_error = resolve_effective_params(
+                    registered_tool.handler, tool_params_for_dispatch
+                )
+                if bind_error or dispatch_params is None:
+                    return self._deny_request(
+                        request, state_from, bind_error or "PARAM_BINDING_MISMATCH"
+                    )
+                canonical_params = {**dispatch_params, **context_params}
 
         permit_digest = None
         proposal_hash = None
@@ -446,19 +484,6 @@ class BaseKernel(Kernel):
                     "MISSING_PERMIT",
                     ["MISSING_PERMIT"],
                 )
-            if tool_name != permit_token.action:
-                return self._deny_permit(
-                    request,
-                    state_from,
-                    (
-                        "ACTION_TOOL_MISMATCH: permit authorises "
-                        f"'{permit_token.action}' but the tool is '{tool_name}'"
-                    ),
-                    ["ACTION_TOOL_MISMATCH"],
-                    permit_digest=permit_token.permit_id,
-                    proposal_hash=permit_token.proposal_hash,
-                )
-
             allowed_actions = self.policy.allowed_tools
             if "*" in allowed_actions:
                 allowed_actions = frozenset({permit_token.action, "*"})
@@ -556,7 +581,8 @@ class BaseKernel(Kernel):
             live_error
             or rebound_error
             or live_name != tool_name
-            or rebound != canonical_params
+            or not equal_json_values(rebound, request_bound_params)
+            or dispatch_params is None
         ):
             return self._deny_request(
                 request,
@@ -650,10 +676,12 @@ class BaseKernel(Kernel):
             call_index=1,
         )
         runtime_result = self._runtime.execute(
-            ToolCall(name=tool_name or "", params=copy.deepcopy(canonical_params)),
+            ToolCall(name=tool_name or "", params=copy.deepcopy(dispatch_params)),
             context,
-            authorised_params=copy.deepcopy(canonical_params),
+            authorised_params=copy.deepcopy(dispatch_params),
             authorised_tool_name=tool_name,
+            authorised_tool=registered_tool,
+            authorisation_deadline_ms=(permit_token.valid_until_ms if permit_token is not None else None),
         )
         if not runtime_result.dispatcher_result.success:
             return self._fail_request(

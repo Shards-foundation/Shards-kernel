@@ -50,6 +50,17 @@ def test_flask_adapter_rejects_anonymous_control_and_audit_access():
     assert client.get("/status", headers=AUTH_HEADER).headers["Cache-Control"] == "no-store"
 
 
+def test_flask_rejects_malformed_params_without_submitting():
+    pytest.importorskip("flask")
+    from shards_kernel.integrations.flask_adapter import create_flask_app
+
+    app = create_flask_app(kernel_id="test-flask-malformed", api_key=TEST_KEY)
+    client = app.test_client()
+    payload = {**DENIED_REQUEST, "tool_call": {"name": "echo", "params": ["invalid"]}}
+    assert client.post("/submit", json=payload, headers=AUTH_HEADER).status_code == 400
+    assert client.get("/evidence", headers=AUTH_HEADER).get_json()["entry_count"] == 0
+
+
 def test_fastapi_adapter_exposes_authenticated_routes_and_halt():
     pytest.importorskip("fastapi")
     pytest.importorskip("httpx")
@@ -71,6 +82,19 @@ def test_fastapi_adapter_exposes_authenticated_routes_and_halt():
         halted = client.post("/halt")
         assert halted.status_code == 200
         assert halted.json()["status"] == "halted"
+
+
+def test_fastapi_rejects_malformed_permit_without_submitting():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
+
+    app = create_fastapi_app(kernel_id="test-fastapi-malformed", api_key=TEST_KEY)
+    with TestClient(app, headers=AUTH_HEADER) as client:
+        payload = {**DENIED_REQUEST, "permit": {"issuer": "incomplete"}}
+        assert client.post("/submit", json=payload).status_code == 400
+        assert client.get("/evidence").json()["entry_count"] == 0
 
 
 def test_fastapi_adapter_rejects_anonymous_control_and_audit_access():

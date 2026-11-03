@@ -119,15 +119,19 @@ def request_from_mapping(
     tool_payload = data.get("tool_call")
     tool_call = None
     tool_params: dict[str, Any] = {}
-    if tool_payload:
-        raw_params = tool_payload.get("params") or {}
+    if tool_payload is not None:
+        if not isinstance(tool_payload, dict):
+            raise ValueError("tool_call must be a dictionary")
+        raw_params = tool_payload.get("params", {})
         if not isinstance(raw_params, dict):
-            raw_params = {}
+            raise ValueError("tool_call.params must be a dictionary")
         tool_params = dict(raw_params)
         tool_call = ToolCall(name=tool_payload.get("name") or "", params=tool_params)
 
     if "params" in data and data["params"] is not None:
-        params = data["params"] if isinstance(data["params"], dict) else {}
+        if not isinstance(data["params"], dict):
+            raise ValueError("params must be a dictionary")
+        params = data["params"]
     else:
         params = dict(tool_params)
 

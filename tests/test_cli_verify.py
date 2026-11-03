@@ -1,8 +1,7 @@
 """Regression tests for the evidence-bundle CLI.
 
-The command must fail closed. ``replay_and_verify([])`` returns ``(True, [])``,
-so an empty or missing ``ledger_entries`` list is rejected in the CLI before
-``verify_evidence_bundle`` is called.
+The command requires a non-empty ledger. The public verifier also rejects
+missing fields but accepts an explicitly empty ledger with the genesis root.
 """
 
 from __future__ import annotations
@@ -173,14 +172,12 @@ class TestCliEvidenceConsistency(unittest.TestCase):
     def test_legacy_entries_key_fails_closed(self) -> None:
         """`entries` is rejected, not read as an alias.
 
-        Exported bundles store ``ledger_entries``. ``verify_evidence_bundle``
-        ignores ``entries`` and treats a missing ``ledger_entries`` key as an
-        empty list, which replay reports as consistent. Aliasing the legacy
-        key would keep a second shape. The CLI fails closed instead.
+        Exported bundles store ``ledger_entries``. Neither public verification
+        nor the CLI treats the legacy key as an alias.
         """
         legacy = copy.deepcopy(self.valid)
         legacy["entries"] = legacy.pop("ledger_entries")
-        self.assertTrue(verify_evidence_bundle(legacy).is_valid)
+        self.assertFalse(verify_evidence_bundle(legacy).is_valid)
 
         with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             result = verify_evidence(legacy)
@@ -196,9 +193,8 @@ class TestCliEvidenceConsistency(unittest.TestCase):
     def test_empty_or_missing_ledger_entries_rejected_before_replay(self) -> None:
         """Empty and missing ledgers fail before delegation.
 
-        ``replay_and_verify([])`` is ``(True, [])``, and
-        ``verify_evidence_bundle`` therefore accepts an empty export. The CLI
-        check has to run first.
+        A complete empty export with the genesis root is valid at the public
+        verifier level, but the CLI requires evidence of at least one entry.
         """
         self.assertEqual(replay_and_verify([]), (True, []))
         empty_export = _exported_bundle(0)
@@ -212,7 +208,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
             "root_hash": empty_export["root_hash"],
         }
         self.assertNotIn("ledger_entries", missing)
-        self.assertTrue(verify_evidence_bundle(missing).is_valid)
+        self.assertFalse(verify_evidence_bundle(missing).is_valid)
 
         with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             empty_result = verify_evidence(empty_export)
@@ -229,7 +225,7 @@ class TestCliEvidenceConsistency(unittest.TestCase):
     def test_unknown_schema_fails_before_replay(self) -> None:
         coded = copy.deepcopy(self.valid)
         coded["schema_version"] = "other.vendor.v9"
-        self.assertTrue(verify_evidence_bundle(coded).is_valid)
+        self.assertFalse(verify_evidence_bundle(coded).is_valid)
         with patch("shards_kernel.cli.verify.verify_evidence_bundle") as replay:
             result = verify_evidence(coded)
             listed = verify_evidence([])
@@ -262,10 +258,10 @@ class TestCliEvidenceConsistency(unittest.TestCase):
         self.assertIn("unknown entries key: audit_entries", extra_result.errors)
 
     def test_missing_root_hash_rejected_before_replay(self) -> None:
-        """Replay skips the root comparison when root_hash is absent."""
+        """Both the public verifier and the CLI reject a missing root."""
         missing = copy.deepcopy(self.valid)
         del missing["root_hash"]
-        self.assertTrue(verify_evidence_bundle(missing).is_valid)
+        self.assertFalse(verify_evidence_bundle(missing).is_valid)
         blank = copy.deepcopy(self.valid)
         blank["root_hash"] = "  "
         wrong_type = copy.deepcopy(self.valid)

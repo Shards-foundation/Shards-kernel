@@ -13,6 +13,7 @@ from typing import Callable, Optional
 from shards_kernel.common.hashing import compute_hash_dict
 from shards_kernel.common.types import ToolCall
 from shards_kernel.execution.dispatcher import Dispatcher, ExecutionResult
+from shards_kernel.execution.tools import Tool
 from shards_kernel.memory.artifact_store import ArtifactStore
 from shards_kernel.memory.idempotency_store import IdempotencyRecord, IdempotencyStore
 
@@ -181,7 +182,7 @@ class KernelRuntime:
     This class wraps dispatcher execution so every call can consistently apply:
     1) context propagation
     2) pre/post execution hooks
-    3) execution-time budget checks
+    3) call-budget checks and pre-execution refusal of unenforceable time limits
     """
 
     def __init__(
@@ -321,6 +322,8 @@ class KernelRuntime:
         *,
         authorised_params: Optional[dict] = None,
         authorised_tool_name: Optional[str] = None,
+        authorised_tool: Optional[Tool] = None,
+        authorisation_deadline_ms: Optional[int] = None,
     ) -> RuntimeExecutionResult:
         """Execute a tool call through the canonical runtime boundary."""
         execution_identity = self._build_execution_identity(
@@ -355,6 +358,24 @@ class KernelRuntime:
             {"tool_name": tool_call.name, "actor": context.actor},
         )
 
+        # Synchronous Python handlers cannot be safely interrupted or rolled
+        # back. Reporting failure after they return would not enforce a limit.
+        if effective_context.max_time_ms is not None:
+            denied = RuntimeExecutionResult(
+                dispatcher_result=ExecutionResult(
+                    success=False,
+                    tool_name=tool_call.name,
+                    error="TIME_LIMIT_NOT_ENFORCEABLE: synchronous execution cannot enforce max_time_ms",
+                ),
+                trace_id=effective_context.trace_id,
+                elapsed_ms=0,
+                budget_exceeded=False,
+            )
+            self._emit("error.raised", effective_context, {"error": denied.dispatcher_result.error or "UNKNOWN"})
+            if self._on_error is not None:
+                self._on_error(effective_context, tool_call, denied)
+            return denied
+
         if (
             effective_context.max_calls is not None
             and effective_context.call_index > effective_context.max_calls
@@ -377,6 +398,16 @@ class KernelRuntime:
                 effective_context,
                 {"error": denied.dispatcher_result.error or "UNKNOWN"},
             )
+            return denied
+
+        if authorisation_deadline_ms is not None and self._now_ms() > authorisation_deadline_ms:
+            denied = RuntimeExecutionResult(
+                dispatcher_result=ExecutionResult(False, tool_call.name, error="PERMIT_EXPIRED_BEFORE_DISPATCH"),
+                trace_id=effective_context.trace_id,
+                elapsed_ms=0,
+                budget_exceeded=False,
+            )
+            self._emit("error.raised", effective_context, {"error": "PERMIT_EXPIRED_BEFORE_DISPATCH"})
             return denied
 
         idempotency_key = self._compute_idempotency_key(effective_context, tool_call)
@@ -431,28 +462,21 @@ class KernelRuntime:
             tool_call,
             authorised_params=authorised_params,
             authorised_tool_name=authorised_tool_name,
+            authorised_tool=authorised_tool,
+            before_invoke=(
+                lambda: "PERMIT_EXPIRED_BEFORE_DISPATCH"
+                if authorisation_deadline_ms is not None
+                and self._now_ms() > authorisation_deadline_ms
+                else None
+            ),
         )
         elapsed_ms = int((perf_counter() - start) * 1000)
-
-        budget_exceeded = (
-            effective_context.max_time_ms is not None
-            and elapsed_ms > effective_context.max_time_ms
-        )
-        if budget_exceeded and dispatcher_result.success:
-            dispatcher_result = ExecutionResult(
-                success=False,
-                tool_name=tool_call.name,
-                error=(
-                    f"Execution budget exceeded: {elapsed_ms}ms > "
-                    f"{effective_context.max_time_ms}ms"
-                ),
-            )
 
         result = RuntimeExecutionResult(
             dispatcher_result=dispatcher_result,
             trace_id=effective_context.trace_id,
             elapsed_ms=elapsed_ms,
-            budget_exceeded=budget_exceeded,
+            budget_exceeded=False,
         )
         if result.dispatcher_result.success:
             self._result_cache[idempotency_key] = result

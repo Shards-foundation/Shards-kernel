@@ -56,7 +56,6 @@ def main() -> None:
         .params({"text": "Hello Shards-Kernel"})
         .constraints(
             {
-                "max_time_ms": 5000,
                 "forbidden_params": [],
             }
         )

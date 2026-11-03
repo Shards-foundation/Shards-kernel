@@ -7,6 +7,9 @@ The dual-channel kernel requires both intent and constraints:
 - Produces richer receipts with constraint information
 """
 
+import inspect
+from typing import Any, Callable
+
 from shards_kernel.common.types import KernelConfig, KernelRequest
 from shards_kernel.variants.base import BaseKernel
 
@@ -48,6 +51,30 @@ class DualChannelKernel(BaseKernel):
     def _is_strict_ambiguity(self) -> bool:
         """Dual-channel kernel uses strict ambiguity checking."""
         return True
+
+    def _split_dispatch_params(
+        self, params: dict[str, Any], handler: Callable[..., Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Keep constraints authorised and audited even if a tool cannot accept them."""
+        if "constraints" not in params:
+            return params, {}
+        try:
+            parameters = inspect.signature(handler).parameters.values()
+            accepts_constraints = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                or (
+                    p.name == "constraints"
+                    and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                )
+                for p in parameters
+            )
+        except (TypeError, ValueError):
+            return params, {}
+        if accepts_constraints:
+            return params, {}
+        return {key: value for key, value in params.items() if key != "constraints"}, {
+            "constraints": params["constraints"]
+        }
 
     def _check_variant_requirements(self, request: KernelRequest) -> list[str]:
         """Dual-channel kernel requires constraints in params."""

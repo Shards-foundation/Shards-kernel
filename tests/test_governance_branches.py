@@ -208,10 +208,7 @@ class TestRulesBranches(unittest.TestCase):
             check_tool_allowed(_request(tool_call=None), open_policy),
             [],
         )
-        self.assertEqual(
-            check_tool_allowed(_request(tool_call=None), closed),
-            [],
-        )
+        self.assertIn("tool call is required", check_tool_allowed(_request(tool_call=None), closed)[0])
         as_dict = _request(tool_call={"name": "other", "params": {}})
         self.assertTrue(check_tool_allowed(as_dict, open_policy))
 
