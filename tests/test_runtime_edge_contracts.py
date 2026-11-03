@@ -105,6 +105,21 @@ def test_unenforceable_execution_time_budget_is_denied_before_dispatch():
     assert "TIME_LIMIT_NOT_ENFORCEABLE" in result.dispatcher_result.error
 
 
+
+def test_expired_authorisation_deadline_denied_before_runtime_dispatch():
+    events = []
+    rt = runtime(event_sink=events.append)
+    result = rt.execute(
+        ToolCall("echo", {"text": "not executed"}),
+        context(idempotency_key="expired-permit"),
+        authorisation_deadline_ms=122,
+    )
+    assert result.dispatcher_result.success is False
+    assert result.dispatcher_result.error == "PERMIT_EXPIRED_BEFORE_DISPATCH"
+    assert result.elapsed_ms == 0
+    assert [event.event_type for event in events] == ["task.started", "error.raised"]
+
+
 def test_graph_order_rejects_duplicate_nodes_and_unknown_dependencies():
     rt = runtime()
     duplicate = TaskGraph(
