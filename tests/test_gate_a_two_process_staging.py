@@ -9,7 +9,6 @@ from __future__ import annotations
 import multiprocessing
 import os
 from pathlib import Path
-import shutil
 import sys
 import time
 
