@@ -1,4 +1,4 @@
-"""Hermetic regression tests for the one-shot v0.1.1 release boundaries.
+"""Hermetic regression tests for the one-shot v0.1.2 release boundaries.
 
 GitHub and git commands are replaced with local fixtures: no publishing,
 credentials, network access, or production side effects occur in these tests.
@@ -6,6 +6,8 @@ credentials, network access, or production side effects occur in these tests.
 
 from __future__ import annotations
 
+import hashlib
+import zipfile
 import os
 import re
 import subprocess
@@ -19,7 +21,7 @@ from shards_kernel._version import __version__
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = (ROOT / ".github/workflows/publish-v0.1.1.yml").read_text(encoding="utf-8")
+WORKFLOW = (ROOT / ".github/workflows/publish-v0.1.2.yml").read_text(encoding="utf-8")
 CREATE_STEP = "Publish GitHub Release with checksummed wheel and source"
 VERIFY_STEP = "Verify published GitHub release before PyPI handoff"
 DISPATCH_STEP = "Dispatch verified trusted PyPI publisher"
@@ -80,6 +82,24 @@ case "$1:$2" in
     if [ "${CREATE_FAIL:-0}" = "1" ]; then exit 1; fi
     touch "$CREATED_MARKER"
     ;;
+  "release:download")
+    if [ ! -f "$CREATED_MARKER" ]; then exit 1; fi
+    destination=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --dir) destination="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    test -n "$destination"
+    cp "$ARTIFACTS_DIR/"* "$destination/"
+    if [ "${RELEASE_ASSETS_TAMPERED:-0}" = "1" ]; then
+      printf 'altered content' >> "$destination/shards_kernel-0.1.2-py3-none-any.whl"
+    fi
+    if [ "${RELEASE_CHECKSUMS_TAMPERED:-0}" = "1" ]; then
+      printf 'altered checksum' >> "$destination/SHA256SUMS"
+    fi
+    ;;
   "workflow:run")
     ;;
   *) exit 97 ;;
@@ -95,7 +115,7 @@ printf 'git:%s\\n' "$*" >> "$COMMAND_LOG"
 case "$1" in
   ls-remote)
     case "${TAG_LOOKUP:-absent}" in
-      present) printf '%s refs/tags/v0.1.1\\n' "$GITHUB_SHA" ;;
+      present) printf '%s refs/tags/v0.1.2\\n' "$GITHUB_SHA" ;;
       error) exit 128 ;;
     esac
     ;;
@@ -106,13 +126,20 @@ esac
     )
     gh.chmod(0o700)
     git.chmod(0o700)
-    (tmp_path / "dist").mkdir()
-    for filename in (
-        "shards_kernel-0.1.1-py3-none-any.whl",
-        "shards_kernel-0.1.1.tar.gz",
-        "SHA256SUMS",
-    ):
-        (tmp_path / "dist" / filename).write_bytes(b"test fixture only")
+    artifacts = tmp_path / "dist"
+    artifacts.mkdir()
+    artifact_names = (
+        "shards_kernel-0.1.2-py3-none-any.whl",
+        "shards_kernel-0.1.2.tar.gz",
+    )
+    checksum_lines = []
+    for filename in artifact_names:
+        payload = ("test fixture only: " + filename).encode("utf-8")
+        (artifacts / filename).write_bytes(payload)
+        checksum_lines.append(hashlib.sha256(payload).hexdigest() + "  " + filename)
+    (artifacts / "SHA256SUMS").write_text(
+        "\n".join(checksum_lines) + "\n", encoding="utf-8"
+    )
 
     env = {
         **os.environ,
@@ -123,6 +150,7 @@ esac
         "GH_TOKEN": "local-fixture-not-a-credential",
         "COMMAND_LOG": str(log),
         "CREATED_MARKER": str(marker),
+        "ARTIFACTS_DIR": str(artifacts),
         **flags,
     }
     for step in (CREATE_STEP, VERIFY_STEP, DISPATCH_STEP):
@@ -139,16 +167,57 @@ esac
     return 0, log.read_text(encoding="utf-8")
 
 
-def test_release_candidate_version_reports_0_1_1():
-    assert __version__ == "0.1.1"
-    assert distribution("shards-kernel").version == "0.1.1"
+@pytest.mark.parametrize("corrupt_description", [False, True])
+def test_wheel_readme_metadata_utf8_validation(tmp_path, corrupt_description):
+    """Reproduce wheel metadata's non-ASCII body, including the em dash."""
+    readme = (
+        "# Shards-Kernel — Deterministic Control Planes for AI Systems\n"
+        "![Shards-Kernel branded banner](docs/images/shards-kernel-banner.svg)\n"
+        "[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)\n"
+        "## When to use Shards-Kernel\n"
+        "shards-kernel demo --json\n"
+        "shards-kernel[crypto]==0.1.2\n"
+    )
+    (tmp_path / "README.md").write_text(readme, encoding="utf-8")
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    metadata_description = readme.replace("Shards-Kernel", "Altered-Kernel", 1) if corrupt_description else readme
+    header = (
+        "Metadata-Version: 2.4\n"
+        "Name: shards-kernel\n"
+        "Version: 0.1.2\n"
+        "Description-Content-Type: text/markdown\n\n"
+    ).encode("ascii")
+    with zipfile.ZipFile(dist / "shards_kernel-0.1.2-py3-none-any.whl", "w") as wheel:
+        wheel.writestr(
+            "shards_kernel-0.1.2.dist-info/METADATA",
+            header + metadata_description.encode("utf-8"),
+        )
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c",
+         _step_script("Verify PyPI README description is embedded in wheel")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if corrupt_description:
+        assert result.returncode != 0
+        assert "differs from committed README" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+
+
+def test_release_candidate_version_reports_0_1_2():
+    assert __version__ == "0.1.2"
+    assert distribution("shards-kernel").version == "0.1.2"
     result = subprocess.run(
         [sys.executable, "-m", "shards_kernel", "--version"],
         capture_output=True,
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == "shards-kernel 0.1.1"
+    assert result.stdout.strip() == "shards-kernel 0.1.2"
 
 
 def test_release_verification_gates_and_order_are_explicit():
@@ -162,6 +231,7 @@ def test_release_verification_gates_and_order_are_explicit():
         "Audit declared dependencies and Python security",
         "Build and validate distribution artifacts",
         "Verify installed wheel in a fresh virtual environment",
+        "Verify PyPI README description is embedded in wheel",
         CREATE_STEP,
         VERIFY_STEP,
         DISPATCH_STEP,
@@ -169,7 +239,7 @@ def test_release_verification_gates_and_order_are_explicit():
     indices = [steps.index(name) for name in required]
     assert indices == sorted(indices)
     for command in (
-        '__version__ != "0.1.1"',
+        '__version__ != "0.1.2"',
         "ruff check . --select E,F --ignore E501",
         "python scripts/ci/run_e2e_gate.py",
         "--cov-branch",
@@ -190,6 +260,15 @@ def test_release_verification_gates_and_order_are_explicit():
         "pip install --no-deps dist/*.whl",
     ):
         assert command in WORKFLOW
+    assert 'metadata.get_payload(decode=True)' in WORKFLOW
+    assert 'payload.decode("utf-8", errors="strict")' in WORKFLOW
+    assert 'cmp -- dist/SHA256SUMS "$verify_dir/SHA256SUMS"' in WORKFLOW
+    assert 'sha256sum --check --strict SHA256SUMS' in WORKFLOW
+    assert 'cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"' in WORKFLOW
+    assert "readme.strip() != description.strip()" in WORKFLOW
+    assert '"## When to use Shards-Kernel"' in WORKFLOW
+    assert 'metadata.get("Version") != "0.1.2"' in WORKFLOW
+    assert "gh workflow run publish.yml" in WORKFLOW
     assert "continue-on-error: true" not in WORKFLOW
     assert "if: always()" not in WORKFLOW
 
@@ -223,6 +302,21 @@ def test_unverified_release_assets_block_pypi_dispatch(tmp_path):
     assert "gh:workflow run" not in calls
 
 
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"RELEASE_ASSETS_TAMPERED": "1"},
+        {"RELEASE_CHECKSUMS_TAMPERED": "1"},
+    ],
+)
+def test_changed_release_bytes_prevent_pypi_dispatch(tmp_path, flags):
+    status, calls = _run_mocked_release(tmp_path, **flags)
+    assert status != 0
+    assert "gh:release create" in calls
+    assert "gh:release download" in calls
+    assert "gh:workflow run" not in calls
+
+
 def test_pypi_dispatch_occurs_only_after_verified_github_release(tmp_path):
     status, calls = _run_mocked_release(tmp_path)
     assert status == 0
@@ -231,4 +325,4 @@ def test_pypi_dispatch_occurs_only_after_verified_github_release(tmp_path):
     dispatched = calls.index("gh:workflow run")
     assert created < confirmed < dispatched
     assert "publish.yml" in calls
-    assert "release_tag=v0.1.1" in calls
+    assert "release_tag=v0.1.2" in calls
