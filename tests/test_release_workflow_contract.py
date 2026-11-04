@@ -171,22 +171,22 @@ esac
 def test_wheel_readme_metadata_utf8_validation(tmp_path, corrupt_description):
     """Reproduce wheel metadata's non-ASCII body, including the em dash."""
     readme = (
-        "# Shards-Kernel — Deterministic Control Planes for AI Systems\\n"
-        "![Shards-Kernel branded banner](docs/images/shards-kernel-banner.svg)\\n"
-        "[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)\\n"
-        "## When to use Shards-Kernel\\n"
-        "shards-kernel demo --json\\n"
-        "shards-kernel[crypto]==0.1.2\\n"
+        "# Shards-Kernel — Deterministic Control Planes for AI Systems\n"
+        "![Shards-Kernel branded banner](docs/images/shards-kernel-banner.svg)\n"
+        "[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)\n"
+        "## When to use Shards-Kernel\n"
+        "shards-kernel demo --json\n"
+        "shards-kernel[crypto]==0.1.2\n"
     )
     (tmp_path / "README.md").write_text(readme, encoding="utf-8")
     dist = tmp_path / "dist"
     dist.mkdir()
     metadata_description = readme.replace("Shards-Kernel", "Altered-Kernel", 1) if corrupt_description else readme
     header = (
-        "Metadata-Version: 2.4\\n"
-        "Name: shards-kernel\\n"
-        "Version: 0.1.2\\n"
-        "Description-Content-Type: text/markdown\\n\\n"
+        "Metadata-Version: 2.4\n"
+        "Name: shards-kernel\n"
+        "Version: 0.1.2\n"
+        "Description-Content-Type: text/markdown\n\n"
     ).encode("ascii")
     with zipfile.ZipFile(dist / "shards_kernel-0.1.2-py3-none-any.whl", "w") as wheel:
         wheel.writestr(
