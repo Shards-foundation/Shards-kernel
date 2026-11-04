@@ -1,4 +1,4 @@
-"""Hermetic regression tests for the one-shot v0.1.1 release boundaries.
+"""Hermetic regression tests for the one-shot v0.1.2 release boundaries.
 
 GitHub and git commands are replaced with local fixtures: no publishing,
 credentials, network access, or production side effects occur in these tests.
@@ -19,7 +19,7 @@ from shards_kernel._version import __version__
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = (ROOT / ".github/workflows/publish-v0.1.1.yml").read_text(encoding="utf-8")
+WORKFLOW = (ROOT / ".github/workflows/publish-v0.1.2.yml").read_text(encoding="utf-8")
 CREATE_STEP = "Publish GitHub Release with checksummed wheel and source"
 VERIFY_STEP = "Verify published GitHub release before PyPI handoff"
 DISPATCH_STEP = "Dispatch verified trusted PyPI publisher"
@@ -95,7 +95,7 @@ printf 'git:%s\\n' "$*" >> "$COMMAND_LOG"
 case "$1" in
   ls-remote)
     case "${TAG_LOOKUP:-absent}" in
-      present) printf '%s refs/tags/v0.1.1\\n' "$GITHUB_SHA" ;;
+      present) printf '%s refs/tags/v0.1.2\\n' "$GITHUB_SHA" ;;
       error) exit 128 ;;
     esac
     ;;
@@ -108,8 +108,8 @@ esac
     git.chmod(0o700)
     (tmp_path / "dist").mkdir()
     for filename in (
-        "shards_kernel-0.1.1-py3-none-any.whl",
-        "shards_kernel-0.1.1.tar.gz",
+        "shards_kernel-0.1.2-py3-none-any.whl",
+        "shards_kernel-0.1.2.tar.gz",
         "SHA256SUMS",
     ):
         (tmp_path / "dist" / filename).write_bytes(b"test fixture only")
@@ -140,15 +140,15 @@ esac
 
 
 def test_release_candidate_version_reports_0_1_1():
-    assert __version__ == "0.1.1"
-    assert distribution("shards-kernel").version == "0.1.1"
+    assert __version__ == "0.1.2"
+    assert distribution("shards-kernel").version == "0.1.2"
     result = subprocess.run(
         [sys.executable, "-m", "shards_kernel", "--version"],
         capture_output=True,
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == "shards-kernel 0.1.1"
+    assert result.stdout.strip() == "shards-kernel 0.1.2"
 
 
 def test_release_verification_gates_and_order_are_explicit():
@@ -162,6 +162,7 @@ def test_release_verification_gates_and_order_are_explicit():
         "Audit declared dependencies and Python security",
         "Build and validate distribution artifacts",
         "Verify installed wheel in a fresh virtual environment",
+        "Verify PyPI README description is embedded in wheel",
         CREATE_STEP,
         VERIFY_STEP,
         DISPATCH_STEP,
@@ -169,7 +170,7 @@ def test_release_verification_gates_and_order_are_explicit():
     indices = [steps.index(name) for name in required]
     assert indices == sorted(indices)
     for command in (
-        '__version__ != "0.1.1"',
+        '__version__ != "0.1.2"',
         "ruff check . --select E,F --ignore E501",
         "python scripts/ci/run_e2e_gate.py",
         "--cov-branch",
@@ -190,6 +191,10 @@ def test_release_verification_gates_and_order_are_explicit():
         "pip install --no-deps dist/*.whl",
     ):
         assert command in WORKFLOW
+    assert "readme.strip() != description.strip()" in WORKFLOW
+    assert '"## When to use Shards-Kernel"' in WORKFLOW
+    assert 'metadata.get("Version") != "0.1.2"' in WORKFLOW
+    assert "gh workflow run publish.yml" in WORKFLOW
     assert "continue-on-error: true" not in WORKFLOW
     assert "if: always()" not in WORKFLOW
 
@@ -231,4 +236,4 @@ def test_pypi_dispatch_occurs_only_after_verified_github_release(tmp_path):
     dispatched = calls.index("gh:workflow run")
     assert created < confirmed < dispatched
     assert "publish.yml" in calls
-    assert "release_tag=v0.1.1" in calls
+    assert "release_tag=v0.1.2" in calls
