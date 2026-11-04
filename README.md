@@ -1,11 +1,11 @@
 # Shards-Kernel — Deterministic Control Planes for AI Systems
 
-![Shards-Kernel branded banner: deterministic control plane for autonomous AI systems](docs/images/shards-kernel-banner.svg)
+![Shards-Kernel branded banner: deterministic control plane for autonomous AI systems](https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/main/docs/images/shards-kernel-banner.svg)
 
 [![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/Shards-kernel)
 [![PyPI](https://img.shields.io/pypi/v/shards-kernel.svg)](https://pypi.org/project/shards-kernel/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Shards-foundation/Shards-kernel/blob/main/LICENSE)
 
 A **kernel** is a deterministic state machine that governs AI agent execution via **jurisdiction**, **fail-closed arbitration**, and an **append-only hash-chained audit ledger**.
 
