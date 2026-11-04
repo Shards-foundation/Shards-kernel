@@ -139,7 +139,7 @@ esac
     return 0, log.read_text(encoding="utf-8")
 
 
-def test_release_candidate_version_reports_0_1_1():
+def test_release_candidate_version_reports_0_1_2():
     assert __version__ == "0.1.2"
     assert distribution("shards-kernel").version == "0.1.2"
     result = subprocess.run(
