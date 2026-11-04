@@ -6,6 +6,7 @@ credentials, network access, or production side effects occur in these tests.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -80,6 +81,24 @@ case "$1:$2" in
     if [ "${CREATE_FAIL:-0}" = "1" ]; then exit 1; fi
     touch "$CREATED_MARKER"
     ;;
+  "release:download")
+    if [ ! -f "$CREATED_MARKER" ]; then exit 1; fi
+    destination=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --dir) destination="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    test -n "$destination"
+    cp "$ARTIFACTS_DIR/"* "$destination/"
+    if [ "${RELEASE_ASSETS_TAMPERED:-0}" = "1" ]; then
+      printf 'altered content' >> "$destination/shards_kernel-0.1.2-py3-none-any.whl"
+    fi
+    if [ "${RELEASE_CHECKSUMS_TAMPERED:-0}" = "1" ]; then
+      printf 'altered checksum' >> "$destination/SHA256SUMS"
+    fi
+    ;;
   "workflow:run")
     ;;
   *) exit 97 ;;
@@ -106,13 +125,20 @@ esac
     )
     gh.chmod(0o700)
     git.chmod(0o700)
-    (tmp_path / "dist").mkdir()
-    for filename in (
+    artifacts = tmp_path / "dist"
+    artifacts.mkdir()
+    artifact_names = (
         "shards_kernel-0.1.2-py3-none-any.whl",
         "shards_kernel-0.1.2.tar.gz",
-        "SHA256SUMS",
-    ):
-        (tmp_path / "dist" / filename).write_bytes(b"test fixture only")
+    )
+    checksum_lines = []
+    for filename in artifact_names:
+        payload = ("test fixture only: " + filename).encode("utf-8")
+        (artifacts / filename).write_bytes(payload)
+        checksum_lines.append(hashlib.sha256(payload).hexdigest() + "  " + filename)
+    (artifacts / "SHA256SUMS").write_text(
+        "\n".join(checksum_lines) + "\n", encoding="utf-8"
+    )
 
     env = {
         **os.environ,
@@ -123,6 +149,7 @@ esac
         "GH_TOKEN": "local-fixture-not-a-credential",
         "COMMAND_LOG": str(log),
         "CREATED_MARKER": str(marker),
+        "ARTIFACTS_DIR": str(artifacts),
         **flags,
     }
     for step in (CREATE_STEP, VERIFY_STEP, DISPATCH_STEP):
@@ -191,6 +218,11 @@ def test_release_verification_gates_and_order_are_explicit():
         "pip install --no-deps dist/*.whl",
     ):
         assert command in WORKFLOW
+    assert 'metadata.get_payload(decode=True)' in WORKFLOW
+    assert 'payload.decode("utf-8", errors="strict")' in WORKFLOW
+    assert 'cmp -- dist/SHA256SUMS "$verify_dir/SHA256SUMS"' in WORKFLOW
+    assert 'sha256sum --check --strict SHA256SUMS' in WORKFLOW
+    assert 'cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"' in WORKFLOW
     assert "readme.strip() != description.strip()" in WORKFLOW
     assert '"## When to use Shards-Kernel"' in WORKFLOW
     assert 'metadata.get("Version") != "0.1.2"' in WORKFLOW
@@ -225,6 +257,21 @@ def test_unverified_release_assets_block_pypi_dispatch(tmp_path):
     status, calls = _run_mocked_release(tmp_path, RELEASE_ASSETS_INVALID="1")
     assert status != 0
     assert "gh:release create" in calls
+    assert "gh:workflow run" not in calls
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"RELEASE_ASSETS_TAMPERED": "1"},
+        {"RELEASE_CHECKSUMS_TAMPERED": "1"},
+    ],
+)
+def test_changed_release_bytes_prevent_pypi_dispatch(tmp_path, flags):
+    status, calls = _run_mocked_release(tmp_path, **flags)
+    assert status != 0
+    assert "gh:release create" in calls
+    assert "gh:release download" in calls
     assert "gh:workflow run" not in calls
 
 
