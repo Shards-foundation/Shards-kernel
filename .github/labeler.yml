@@ -6,7 +6,8 @@
 "area: kernel":
   - changed-files:
       - any-glob-to-any-file:
-          - "kernels/**"
+          - "shards_kernel/**"
+          - "implementations/**"
 "area: docs":
   - changed-files:
       - any-glob-to-any-file:
