@@ -181,7 +181,7 @@ def test_wheel_readme_metadata_utf8_validation(tmp_path, corrupt_description):
     (tmp_path / "README.md").write_text(readme, encoding="utf-8")
     dist = tmp_path / "dist"
     dist.mkdir()
-    metadata_description = readme.replace("autonomous", "unauthorised") if corrupt_description else readme
+    metadata_description = readme.replace("Shards-Kernel", "Altered-Kernel", 1) if corrupt_description else readme
     header = (
         "Metadata-Version: 2.4\\n"
         "Name: shards-kernel\\n"
