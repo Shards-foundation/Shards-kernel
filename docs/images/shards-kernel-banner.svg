@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="512" viewBox="0 0 1536 512" role="img" aria-labelledby="title desc">
+<title id="title">Shards-Kernel</title><desc id="desc">Violet crystalline Shards-Kernel banner with a glowing horizon and the description: deterministic control plane python package kernel for autonomous ai systems.</desc>
+<defs>
+<radialGradient id="sky"><stop stop-color="#170026"/><stop offset=".65" stop-color="#090412"/><stop offset="1" stop-color="#030207"/></radialGradient>
+<linearGradient id="crystal" x1="0" y1="0" x2=".75" y2="1"><stop stop-color="#fff1ff"/><stop offset=".23" stop-color="#b94dff"/><stop offset=".58" stop-color="#4c12da"/><stop offset="1" stop-color="#250055"/></linearGradient>
+<linearGradient id="name"><stop stop-color="#b65aff"/><stop offset=".52" stop-color="#b31bff"/><stop offset="1" stop-color="#7c00b6"/></linearGradient>
+<linearGradient id="thin"><stop stop-color="#e4a2ff"/><stop offset=".4" stop-color="#ad35ff"/><stop offset="1" stop-color="#3d0a67"/></linearGradient>
+<filter id="glow" x="-50%" y="-300%" width="200%" height="700%"><feGaussianBlur stdDeviation="11"/></filter>
+<filter id="soft" x="-30%" y="-150%" width="160%" height="400%"><feGaussianBlur stdDeviation="23"/></filter>
+</defs>
+<rect width="1536" height="512" fill="url(#sky)"/>
+<g fill="none" stroke-linecap="round">
+<path d="M-60 190 C130 245 144 -18 348 -64" stroke="#6d07d7" stroke-width="52" opacity=".32" filter="url(#soft)"/>
+<path d="M-20 214 C168 203 182 10 351 -48" stroke="#cf49ff" stroke-width="6" filter="url(#glow)"/>
+<path d="M-20 214 C168 203 182 10 351 -48" stroke="url(#thin)" stroke-width="3"/>
+<path d="M-10 108 C192 149 387 72 532 -20" stroke="#5300a2" stroke-width="2" opacity=".6"/>
+<path d="M1240 -12 C1350 93 1458 10 1569 34" stroke="#5100b0" stroke-width="24" opacity=".22" filter="url(#soft)"/>
+<path d="M1455 143 Q1535 95 1590 112" stroke="#8d29d8" stroke-width="4" filter="url(#glow)"/>
+</g>
+<path d="M0 410 45 385 107 311 144 373 184 337 220 407 287 385 345 448 0 469Z" fill="#180529"/>
+<path d="m0 410 107-99 38 66-29-19-16-29-47 69Z" fill="#37106e" opacity=".85"/>
+<path d="m0 438 108-127 33 82 42-57 39 66 45-4 83 64Z" fill="#0d0718"/>
+<path d="M1012 468 1111 421 1178 405 1237 426 1303 399 1365 424 1451 388 1536 419 1536 512 1008 512Z" fill="#10061b"/>
+<path d="M0 510 Q754 275 1536 491 L1536 512Z" fill="#160622"/>
+<path d="M0 511 Q746 281 1536 491" fill="none" stroke="#b533ff" stroke-width="17" opacity=".8" filter="url(#glow)"/>
+<path d="M0 511 Q746 281 1536 491" fill="none" stroke="#c75dff" stroke-width="3.5"/>
+<g transform="translate(280 108)">
+<path d="M94 4 31 109 68 140 111 102Z" fill="url(#crystal)"/>
+<path d="M94 4 68 140 111 102Z" fill="#590bbc"/>
+<path d="M94 4 31 109 68 140Z" fill="#e39bff" opacity=".65"/>
+<path d="M111 102 170 66 153 141 88 205Z" fill="url(#crystal)"/>
+<path d="M170 66 111 102 153 141Z" fill="#b83cff" opacity=".85"/>
+<path d="M13 140 68 205 52 167Z" fill="#8b18e6"/>
+<path d="M13 140 40 190 68 205Z" fill="#a13eff"/>
+<path d="M68 140 94 4 111 102 88 205Z" fill="#2f0a7b" opacity=".45"/>
+</g>
+<g font-family="Arial,Helvetica,sans-serif" font-weight="700" letter-spacing="-4">
+<text x="486" y="228" font-size="105" fill="#ffffff">Shards-</text>
+<text x="894" y="228" font-size="105" fill="url(#name)">Kernel</text>
+</g>
+<path d="M482 251H1248" stroke="#9e2fea" stroke-width="2"/>
+<path d="M482 251H1248" stroke="#9e2fea" stroke-width="12" opacity=".5" filter="url(#glow)"/>
+<g font-family="Arial,Helvetica,sans-serif">
+<text x="864" y="301" text-anchor="middle" fill="#f5f1fa" font-size="31">Deterministic control plane python package kernel</text>
+<text x="640" y="341" font-size="31" text-anchor="start"><tspan fill="#f5f1fa">for </tspan><tspan fill="#c45dff" font-weight="700">autonomous ai systems.</tspan></text>
+</g>
+<g transform="translate(1370 255)">
+<path d="M40 2 C9 2 -2 23 1 55 L-8 107 C-28 137 -12 169 22 173 L103 173 C136 174 157 140 129 107 L122 55 C121 18 91 0 69 2 C58 1 50 3 40 2Z" fill="#170a29" stroke="#9c36e9" stroke-width="3"/>
+<path d="M24 159 C20 119 31 64 56 56 C70 51 81 59 91 79 C104 108 105 139 114 158 C98 171 39 172 24 159Z" fill="#4c148c"/>
+<path d="M46 55 Q59 41 70 53 L64 64Z" fill="#7217bd"/>
+</g>
+</svg>
