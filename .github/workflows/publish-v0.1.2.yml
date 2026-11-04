@@ -135,9 +135,10 @@ jobs:
               metadata = BytesParser(policy=policy.default).parsebytes(
                   wheel.read(metadata_paths[0])
               )
-          description = metadata.get_payload()
-          if not isinstance(description, str):
-              raise SystemExit("Expected text README in wheel metadata")
+          payload = metadata.get_payload(decode=True)
+          if not isinstance(payload, bytes):
+              raise SystemExit("Expected UTF-8 README bytes in wheel metadata")
+          description = payload.decode("utf-8", errors="strict")
           if readme.strip() != description.strip():
               raise SystemExit("Published description differs from committed README")
           for required in (
@@ -217,6 +218,27 @@ jobs:
             echo "GitHub release v0.1.2 is not verified; refusing PyPI dispatch" >&2
             exit 1
           fi
+
+          # Compare the uploaded asset bytes with locally built, verified
+          # artifacts. GitHub's asset names alone are not an integrity proof,
+          # and a substituted checksum file must not validate itself.
+          verify_dir="$(mktemp -d "$RUNNER_TEMP/shards-release-assets.XXXXXX")"
+          gh release download v0.1.2 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$verify_dir" \
+            --pattern 'shards_kernel-0.1.2-*.whl' \
+            --pattern 'shards_kernel-0.1.2.tar.gz' \
+            --pattern 'SHA256SUMS'
+          test "$(find "$verify_dir" -maxdepth 1 -type f | wc -l)" -eq 3
+          cmp -- dist/SHA256SUMS "$verify_dir/SHA256SUMS"
+          (
+            cd "$verify_dir"
+            sha256sum --check --strict SHA256SUMS
+          )
+          for local_artifact in dist/*.whl dist/*.tar.gz; do
+            cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"
+          done
+          echo "Verified uploaded release assets match exact local build bytes"
 
       - name: Dispatch verified trusted PyPI publisher
         env:
