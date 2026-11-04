@@ -19,10 +19,17 @@ ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 
 
-def _relative_file(markdown_target):
-    """Resolve a local Markdown target without following outside-repo paths."""
-    target = Path(markdown_target)
-    if target.is_absolute() or ".." in target.parts or "://" in markdown_target:
+def _repository_file(target_url):
+    """Map known public GitHub URLs back to the committed local file."""
+    prefixes = (
+        "https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/main/",
+        "https://github.com/Shards-foundation/Shards-kernel/blob/main/",
+    )
+    prefix = next((item for item in prefixes if target_url.startswith(item)), None)
+    if prefix is None:
+        raise AssertionError("README target must use a canonical GitHub HTTPS URL")
+    target = Path(target_url[len(prefix):])
+    if target.is_absolute() or ".." in target.parts or not target.parts:
         raise AssertionError("README target must be a repository-local path")
     resolved = (ROOT / target).resolve()
     if ROOT not in resolved.parents:
@@ -53,7 +60,12 @@ class ReadmeDocumentationContractTests(unittest.TestCase):
         readme = README.read_text(encoding="utf-8")
         match = re.search(r"!\[Shards-Kernel branded banner:[^\]]+\]\(([^)]+)\)", readme)
         self.assertIsNotNone(match, "README branded image link missing")
-        image_path = _relative_file(match.group(1))
+        self.assertEqual(
+            match.group(1),
+            "https://raw.githubusercontent.com/Shards-foundation/"
+            "Shards-kernel/main/docs/images/shards-kernel-banner.svg",
+        )
+        image_path = _repository_file(match.group(1))
         self.assertTrue(image_path.is_file(), str(image_path))
         self.assertEqual(image_path.suffix, ".svg")
         root = ET.parse(image_path).getroot()
@@ -69,7 +81,11 @@ class ReadmeDocumentationContractTests(unittest.TestCase):
             readme,
         )
         self.assertIsNotNone(match, "MIT shields.io badge missing")
-        license_path = _relative_file(match.group(1))
+        self.assertEqual(
+            match.group(1),
+            "https://github.com/Shards-foundation/Shards-kernel/blob/main/LICENSE",
+        )
+        license_path = _repository_file(match.group(1))
         self.assertEqual(license_path, ROOT / "LICENSE")
         self.assertTrue(license_path.is_file())
         self.assertTrue(license_path.read_text(encoding="utf-8").startswith("MIT License\n"))
