@@ -17,14 +17,14 @@ PINNED_V5 = "8558fd74291d67161a8a78ce36a881fa63b766a9"
 
 def _label_globs() -> dict[str, list[str]]:
     """Extract the repository's deliberately simple changed-files YAML dialect."""
-    sections = re.split(r'(?m)^"([^"]+)":\\s*$', CONFIG)
+    sections = re.split(r'(?m)^"([^"]+)":\s*$', CONFIG)
     assert sections[0].strip() == ""
     assert len(sections) % 2 == 1
     mappings = {}
     for label, body in zip(sections[1::2], sections[2::2]):
         assert body.count("  - changed-files:") == 1
         assert body.count("      - any-glob-to-any-file:") == 1
-        globs = re.findall(r'^          - "([^"\\n]+)"$', body, flags=re.MULTILINE)
+        globs = re.findall(r'^          - "([^"\n]+)"$', body, flags=re.MULTILINE)
         assert globs, f"No file globs for {label}"
         assert label not in mappings
         mappings[label] = globs
@@ -39,7 +39,7 @@ def test_labeler_action_is_immutable_and_uses_scoped_permissions():
     assert f"uses: actions/labeler@{PINNED_V5} # v5.0.0" in WORKFLOW
     assert "uses: actions/labeler@v5" not in WORKFLOW
     assert "actions/checkout@" not in WORKFLOW  # No untrusted code checkout with write authority.
-    assert not re.search(r"(?m)^\\s+run:\\s*", WORKFLOW)
+    assert not re.search(r"(?m)^\s+run:\s*", WORKFLOW)
 
 
 @pytest.mark.parametrize(
