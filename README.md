@@ -1,12 +1,31 @@
 # Shards-Kernel — Deterministic Control Planes for AI Systems
 
+![Shards-Kernel branded banner: deterministic control plane for autonomous AI systems](docs/images/shards-kernel-banner.svg)
+
 [![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/Shards-kernel)
 [![PyPI](https://img.shields.io/pypi/v/shards-kernel.svg)](https://pypi.org/project/shards-kernel/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A **kernel** is a deterministic state machine that governs AI agent execution via **jurisdiction**, **fail-closed arbitration**, and an **append-only hash-chained audit ledger**.
 
 **Hard constraint:** no tool execution without an explicit `ALLOW`; no `ALLOW` without a committed audit decision.
+
+---
+
+## Try it in your terminal
+
+Install the published package with the optional cryptographic demo support, verify the Python namespace and CLI, and run a **local, offline** permit-and-audit demonstration:
+
+```bash
+python -m pip install "shards-kernel[crypto]==0.1.1"
+python -c "import shards_kernel; print(shards_kernel.__version__)"
+shards-kernel --version
+shards-kernel info --variant strict
+shards-kernel demo --json
+```
+
+The **PyPI project name** is `shards-kernel`, the **Python import** is `shards_kernel` (not `kernels`), and the **terminal executable** is `shards-kernel`. This demo exercises the built-in `echo` tool; it does not grant an agent access to external systems. See [installation](#install), the [agent quickstart](docs/AGENT_QUICKSTART.md), and the [import migration guide](docs/PACKAGE_MIGRATION.md).
 
 ---
 
@@ -23,6 +42,24 @@ Ungoverned agent systems fail in predictable ways:
 | Accountability diffuses | No single place to prove "why this happened" |
 
 Shards-Kernel exists to make those failure modes **structurally expensive** and **forensically obvious**.
+
+---
+
+## When to use Shards-Kernel
+
+Shards-Kernel is designed for the boundary between **what an AI agent proposes** and **what it is authorised to execute**. It becomes particularly useful when an agent can cause consequential changes: editing files, deploying code, calling third-party APIs, spending funds, handling sensitive data, or directing other agents. A successful prompt or capable model is **not** an execution permission.
+
+For these workflows, a control plane can require explicit policy decisions, narrowly scoped permits, **fail-closed** handling of unknown or unauthorised requests, and hash-chained audit evidence of the decision and outcome. Shared enforcement rules can also keep multiple agents and services from inventing inconsistent permission boundaries.
+
+| Integration scenario | Why a governed execution boundary matters |
+|---|---|
+| Repository maintenance and deployments | Restrict which agent may edit a repository, open a pull request or initiate a deployment |
+| External API access | Bind each operation to an identified actor, approved tool and permitted parameters |
+| Financial or other high-impact operations | Require separately granted authority and refuse actions outside explicit scope |
+| Sensitive-data workflows | Limit the tools and operations an agent may invoke; preserve evidence for review |
+| Multi-agent orchestration | Apply a common approval and audit policy when work passes between agents |
+
+**Current scope:** these are *integration use cases*, not a claim that the released package ships GitHub deployment, wallet, financial execution, or sensitive-data connectors. The signed local reference operator currently exposes only `echo` and `add`; further operations require a separately built and trusted integration with appropriate process isolation, authentication and external controls. Shards-Kernel is **not** a sandbox and cannot constrain tools that bypass its execution path.
 
 ---
 
