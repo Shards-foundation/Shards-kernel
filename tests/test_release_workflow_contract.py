@@ -7,6 +7,7 @@ credentials, network access, or production side effects occur in these tests.
 from __future__ import annotations
 
 import hashlib
+import zipfile
 import os
 import re
 import subprocess
@@ -164,6 +165,47 @@ esac
         if run.returncode:
             return run.returncode, log.read_text() if log.exists() else ""
     return 0, log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("corrupt_description", [False, True])
+def test_wheel_readme_metadata_utf8_validation(tmp_path, corrupt_description):
+    """Reproduce wheel metadata's non-ASCII body, including the em dash."""
+    readme = (
+        "# Shards-Kernel — Deterministic Control Planes for AI Systems\\n"
+        "![Shards-Kernel branded banner](docs/images/shards-kernel-banner.svg)\\n"
+        "[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)\\n"
+        "## When to use Shards-Kernel\\n"
+        "shards-kernel demo --json\\n"
+        "shards-kernel[crypto]==0.1.2\\n"
+    )
+    (tmp_path / "README.md").write_text(readme, encoding="utf-8")
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    metadata_description = readme.replace("autonomous", "unauthorised") if corrupt_description else readme
+    header = (
+        "Metadata-Version: 2.4\\n"
+        "Name: shards-kernel\\n"
+        "Version: 0.1.2\\n"
+        "Description-Content-Type: text/markdown\\n\\n"
+    ).encode("ascii")
+    with zipfile.ZipFile(dist / "shards_kernel-0.1.2-py3-none-any.whl", "w") as wheel:
+        wheel.writestr(
+            "shards_kernel-0.1.2.dist-info/METADATA",
+            header + metadata_description.encode("utf-8"),
+        )
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c",
+         _step_script("Verify PyPI README description is embedded in wheel")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if corrupt_description:
+        assert result.returncode != 0
+        assert "differs from committed README" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
 
 
 def test_release_candidate_version_reports_0_1_2():
