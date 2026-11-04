@@ -83,6 +83,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Evidence bundles for `python -m kernels.cli.verify`: the command reads `ledger_entries`. The LangChain, Hugging Face, generic, LangGraph, CrewAI, AutoGPT, and Moltbook adapters still export `entries`. Rename `entries` to `ledger_entries` in the bundle, or build the bundle with `evidence_to_mapping`. There is no CLI flag or alias for `entries`.
 - Scripts that parse `verify --json` output: until the separately tracked fix lands, stdout holds the text report followed by the JSON object, so do not pass it directly to a JSON parser.
 
+## [0.1.2] - 2026-11-04
+
+### Documentation
+
+- Publish the updated README as the PyPI 0.1.2 long description, including the branded SVG banner, MIT licence badge, terminal quickstart, and explicit autonomous-agent control-plane use cases.
+- Add executable README/CLI/assets documentation contracts without changing runtime execution behaviour.
+- Verify wheel long-description metadata contains the updated README before GitHub Release and OIDC PyPI publishing.
+
 ## [0.1.1] - 2026-11-03
 
 ### Fixed
