@@ -2,27 +2,36 @@
 
 **Version:** 0.1.0  
 **Classification:** Requirements  
-**Last Updated:** January 2025
+**Last Updated:** November 2026 (Python compatibility section; other sections require separate review)
 
 ---
 
 ## 1. Overview
 
-This document specifies the system requirements for deploying and operating Shards-Kernel.
+This document specifies the system requirements for d### 2.1 Python Version
 
----
+Shards-Kernel currently declares `requires-python = ">=3.9"`. The maintained
+Linux CI matrix tests the complete suite with branch-aware coverage, smoke
+demos and isolated wheel installation across Python 3.9–3.15.
 
-## 2. Runtime Requirements
+| Python | Project compatibility | Upstream Python lifecycle |
+|--------|-----------------------|---------------------------|
+| 3.15 | CI tested (Ubuntu 24.04) | Supported |
+| 3.14 | CI tested (Ubuntu 24.04) | Supported |
+| 3.13 | CI tested (Ubuntu 24.04) | Supported |
+| 3.12 | CI tested (Ubuntu 24.04) | Supported |
+| 3.11 | CI tested (Ubuntu 24.04) | Supported |
+| 3.10 | Legacy compatibility retained and CI tested | End of life |
+| 3.9 | Legacy compatibility retained and CI tested | End of life |
+| 3.16+ | Not verified | Development/pre-release |
 
-### 2.1 Python Version
+**Scope:** This is version compatibility in the GitHub Actions reference
+environment, not certification across every OS or free-threaded interpreter.
+The optional MCP SDK requires Python 3.11+; older interpreters remain
+supported for the library API without this integration. Release qualification
+and production security readiness are separate gates.
 
-| Version | Status | Notes |
-|---------|--------|-------|
-| 3.13+ | ✅ Supported | Recommended |
-| 3.12 | ✅ Supported | Recommended |
-| 3.11 | ✅ Supported | Minimum required |
-| 3.10 | ⚠️ Untested | May work |
-| 3.9 | ❌ Not supported | Missing features |
+ | ❌ Not supported | Missing features |
 | <3.9 | ❌ Not supported | - |
 
 ### 2.2 Operating System
