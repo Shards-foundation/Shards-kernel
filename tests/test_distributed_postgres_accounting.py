@@ -143,7 +143,7 @@ def test_partition_and_validation_fail_closed(journal):
 
 def test_identifier_and_public_api_input_boundaries(journal):
     p = permit()
-    invalid_ids = ("", " ", "a b", "\\n", "nonascii-λ", "x" * 257)
+    invalid_ids = ("", " ", "a b", chr(10), "nonascii-λ", "x" * 257)
     for bad in invalid_ids:
         with pytest.raises(ValueError):
             reserve(journal, p, operation_id=bad)
