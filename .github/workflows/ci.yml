@@ -31,8 +31,39 @@ jobs:
       - name: Run strict multi-process E2E acceptance gate
         run: python scripts/ci/run_e2e_gate.py
 
+  distributed-accounting:
+    name: Cross-host PostgreSQL accounting gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: shards_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shards_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SHARDS_TEST_POSTGRES_DSN: postgresql://postgres:test-only@127.0.0.1:5432/shards_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install PostgreSQL test dependencies
+        run: python -m pip install -e ".[postgres]" pytest
+      - name: Verify distributed invariants against real PostgreSQL
+        run: python -m pytest tests/test_distributed_postgres_accounting.py -q
+
   quality:
-    needs: e2e
+    needs: [e2e, distributed-accounting]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
