@@ -45,7 +45,7 @@ agent onboarding or execution authority.
 2. Preserve the normative controls: **no tool execution without signed
    authority and a committed audit decision**, no wildcard permissions,
    no unsigned deployed policy, no insecure transport fallback.
-3. Run targeted negative-path tests, then the complete Python 3.9–3.12 CI
+3. Run targeted negative-path tests, then the complete Python 3.9–3.15 CI
    matrix with measured branch coverage **>=90%**. Include mandatory
    real-process MCP/TLS E2E gate when available at that exact head.
 4. Report commit SHA, tested scope, pass/fail, uncovered paths, and any

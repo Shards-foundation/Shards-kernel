@@ -13,7 +13,7 @@ Use this skill when an agent claims a Shards-Kernel PR or release is ready. It i
 1. Read the PR **current head SHA** and its base branch, then confirm the intended diff is within Shards-Kernel. Don't inspect another Shards repository or reuse its credentials, CI, storage or deployment.
 2. Inspect **every** inline review thread and timeline comment; distinguish active blockers, stale resolved findings, and unverified replies. An author's "fixed" comment is not independent verification.
 3. Verify the recorded formal `APPROVED` review comes from a **non-author** independent reviewer and matches the **current commit SHA**. An approval on an older commit, a bot `COMMENTED`, or a green mergeability badge cannot substitute.
-4. Query GitHub checks and workflow runs **for that exact SHA**, including Python 3.9–3.12, lint, branch-aware coverage, governance coverage, CodeQL, static security, secret scanning, dependency review, docs, smoke and external quality checks that are configured. No failed, pending, cancelled or action-required required checks.
+4. Query GitHub checks and workflow runs **for that exact SHA**, including Python 3.9–3.15, lint, branch-aware coverage, governance coverage, CodeQL, static security, secret scanning, dependency review, docs, smoke and external quality checks that are configured. No failed, pending, cancelled or action-required required checks.
 5. Verify branch protection/ruleset enforcement on `main`, including independent review, required checks, conversation resolution and prevention of unauthorised force pushes. An API `403` means **not verified**, not "enabled".
 6. Re-check the head SHA and reviews immediately before any approved merge. New commits invalidate old-head sign-off even if GitHub continues to display an approval.
 
@@ -41,7 +41,7 @@ python -m pytest -q tests/test_operator_process_restart.py
 python -m pytest -q tests/test_separate_issuer_process_e2e.py
 ```
 
-Where the files exist, include PR #90's `tests/test_mcp_call_cli.py` and `tests/test_mcp_call_e2e.py`; where merged, include the mandatory real-process gate `python scripts/ci/run_e2e_gate.py` from PR #88. **Do not use missing/optional tests as evidence of passing**. The supported CI matrix covers 3.9–3.12, while the official MCP v2 SDK is installed on 3.11+.
+Where the files exist, include PR #90's `tests/test_mcp_call_cli.py` and `tests/test_mcp_call_e2e.py`; where merged, include the mandatory real-process gate `python scripts/ci/run_e2e_gate.py` from PR #88. **Do not use missing/optional tests as evidence of passing**. The supported CI matrix covers 3.9–3.15, while the official MCP v2 SDK is installed on 3.11+.
 
 The release workflow must not apply a weaker coverage rule than PR CI, and the **unrounded** branch-aware coverage threshold is at least **90%**. Exact test counts change across commits; never reuse an old count as a new result.
 
