@@ -242,6 +242,126 @@ def variants_reject_missing_permit():
     return output
 check(8,"all_variants_missing_permit",variants_reject_missing_permit)
 
+
+# Deliberate high-severity adversarial regression: a permit demanding a field
+# must not authorise an effect if the caller omits that field entirely.
+def omitted_signed_constraint():
+    seen=[]
+    k=new_kernel()
+    def effect(**kwargs):
+        seen.append(dict(kwargs))
+        return "external-side-effect"
+    k._dispatcher.registry.register("effect",effect)
+    p=new_permit(params={"marker":"approved"})
+    req=KernelRequest(request_id="omitted-signed-marker",ts_ms=1000,
+        actor=ACTOR,intent="intent",
+        tool_call=ToolCall(name="effect",params={}),params={})
+    receipt=k.submit(req,permit_token=p)
+    require(receipt.decision!=Decision.ALLOW and len(seen)==0,
+        "P1: signed required marker omitted; DECISION="+receipt.decision.value+
+        "; effects="+repr(seen))
+    return {"decision":receipt.decision.value,"side_effects":len(seen)}
+check(1,"required_signed_field_omission",omitted_signed_constraint)
+
+def omitted_signed_null_constraint():
+    seen=[]
+    k=new_kernel()
+    def effect(**kwargs):
+        seen.append(dict(kwargs))
+        return "external-side-effect"
+    k._dispatcher.registry.register("effect",effect)
+    p=new_permit(params={"x":None})
+    req=KernelRequest(request_id="omitted-signed-null",ts_ms=1000,actor=ACTOR,
+        intent="intent",tool_call=ToolCall(name="effect",params={}),params={})
+    receipt=k.submit(req,permit_token=p)
+    require(receipt.decision!=Decision.ALLOW and len(seen)==0,
+        "P1: signed null constraint omitted; DECISION="+receipt.decision.value+
+        "; effects="+repr(seen))
+    return {"decision":receipt.decision.value,"side_effects":len(seen)}
+check(1,"required_signed_null_omission",omitted_signed_null_constraint)
+
+def durable_crash_replay():
+    """Real SQLite audit + independent effect DB + SIGKILL mid-tool.
+    Verifies one supported durable-storage recovery scenario, not exactly once.
+    """
+    import sqlite3
+    import signal
+    with tempfile.TemporaryDirectory(prefix="shards-acceptance-crash-") as tmp:
+        work=pathlib.Path(tmp)
+        ledger=str(work/"audit.sqlite")
+        effectdb=str(work/"effects.sqlite")
+        permit=new_permit()
+        (work/"permit.json").write_text(json.dumps(dataclasses.asdict(permit)))
+        child=work/"worker.py"
+        child.write_text(r'''
+import dataclasses,json,sqlite3,sys,time
+from implementations.storage import SQLiteAuditStorage
+from shards_kernel import StrictKernel,KernelConfig,KernelRequest,ToolCall,VirtualClock,JurisdictionPolicy
+from shards_kernel.permits import PublicVerificationKey,PermitToken
+db,effects,pfile,pub,mode=sys.argv[1:]
+p=PermitToken(**json.load(open(pfile)))
+k=StrictKernel(audit_storage=SQLiteAuditStorage(db))
+k.boot(KernelConfig(kernel_id="acceptance-kernel",variant="strict",clock=VirtualClock(1000)))
+k.set_policy(JurisdictionPolicy(allowed_actors=frozenset({"agent-acceptance"}),
+                               allowed_tools=frozenset({"effect"})))
+k.set_public_verifiers({"independent-issuer":PublicVerificationKey(
+    issuer="acceptance-issuer",audience="acceptance-kernel",public_key=bytes.fromhex(pub))})
+def effect(payload):
+    with sqlite3.connect(effects) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS effects(id INTEGER PRIMARY KEY,value TEXT)")
+        conn.execute("INSERT INTO effects(value) VALUES (?)",(str(payload),))
+        conn.commit()
+    print("EFFECT_COMMITTED",flush=True)
+    if mode=="kill-me":time.sleep(20)
+    return "effect-done"
+k._dispatcher.registry.register("effect",effect)
+req=KernelRequest(request_id="request-"+mode,ts_ms=1000,actor="agent-acceptance",
+    intent="external-effect",tool_call=ToolCall(name="effect",params={"payload":{"amount":1}}),
+    params={"payload":{"amount":1}})
+result=k.submit(req,permit_token=p)
+print("DECISION="+result.decision.value,flush=True)
+''')
+        pub=SECRET.public_key().public_bytes_raw().hex()
+        args=[sys.executable,"-I",str(child),ledger,effectdb,str(work/"permit.json"),pub]
+        first=subprocess.Popen(args+["kill-me"],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        try:
+            # The first line is emitted only AFTER an independent SQLite commit.
+            line=first.stdout.readline().strip()
+            require(line=="EFFECT_COMMITTED",
+                    "child did not durably execute: "+line+" "+first.stderr.read()[:300] if first.poll() is not None else "child emitted: "+line)
+            first.kill()
+            first.wait(timeout=10)
+        finally:
+            if first.poll() is None: first.kill();first.wait(timeout=10)
+        with sqlite3.connect(effectdb) as db:
+            n1=db.execute("SELECT COUNT(*) FROM effects").fetchone()[0]
+        require(n1==1,"external side effect was not committed before kill")
+        again=subprocess.run(args+["restart"],capture_output=True,text=True,timeout=20)
+        require(again.returncode==0,"recovery worker failed: "+again.stderr[-600:])
+        with sqlite3.connect(effectdb) as db:
+            n2=db.execute("SELECT COUNT(*) FROM effects").fetchone()[0]
+        require("DECISION=DENY" in again.stdout and n2==1,
+                "P1: replay after SIGKILL created duplicate effects; before="+str(n1)+
+                " after="+str(n2)+" restarted="+again.stdout[-250:])
+        return {"sigkill":"after separate effects DB commit",
+                "external_effects_before":n1,"external_effects_after_restart":n2,
+                "restart_decision":"DENY","durable_audit":True}
+check(3,"sigkill_after_external_effect_with_durable_audit",durable_crash_replay)
+
+def sequential_10000():
+    k=new_kernel(effects=[])
+    start=time.perf_counter()
+    for n in range(10000):
+        receipt=k.submit(request("bulk-denied-"+str(n)))
+        require(receipt.decision==Decision.DENY,"missing permit accepted in sequential stress")
+    seconds=time.perf_counter()-start
+    evidence=k.export_evidence()
+    require(len(evidence.ledger_entries)>=10000,"missing audit records")
+    return {"attempts":10000,"unapproved":0,"audit_entries":len(evidence.ledger_entries),
+            "elapsed_seconds":round(seconds,3),
+            "decisions_per_second":round(10000/seconds,1)}
+check(9,"ten_thousand_real_denied_decisions",sequential_10000)
+
 def env_info():
     versions={}
     for n in ["shards-kernel","cryptography","mcp","pip","httpx","pytest","pip-audit"]:
