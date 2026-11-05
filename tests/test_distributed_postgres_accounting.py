@@ -183,3 +183,16 @@ def test_all_recovery_operations_fail_closed_when_primary_unreachable():
     ):
         with pytest.raises(ConnectionError, match="primary offline"):
             operation()
+
+
+def test_remaining_contract_and_transition_guards(journal):
+    with pytest.raises(TypeError, match="connection_factory"):
+        PostgresPermitJournal(None)
+    with pytest.raises(ValueError, match="Unsupported effect transition"):
+        journal._transition("op", "SUCCEEDED", ("RESERVED",))
+    # An optional provider reference is permitted for a verified NOT_APPLIED
+    # outcome, but cannot fabricate a missing operation.
+    assert not journal.reconcile(
+        "absent-op", outcome="NOT_APPLIED",
+        evidence_ref="evidence:verified", provider_ref="provider:optional"
+    )
