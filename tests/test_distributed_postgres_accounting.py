@@ -41,7 +41,7 @@ def permit(max_executions=1):
 
 
 def reserve(store, p, operation_id=None):
-    return store.reserve(operation_id=operation_id or uuid4().hex, **p)
+    return store.reserve(operation_id=operation_id if operation_id is not None else uuid4().hex, **p)
 
 
 def test_single_use_and_no_tentative_intent_left_on_denial(journal):
