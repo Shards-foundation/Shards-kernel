@@ -63,7 +63,7 @@ jobs:
         run: python -m pytest tests/test_distributed_postgres_accounting.py -q
 
   quality:
-    needs: [e2e, distributed-accounting]
+    needs: e2e
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
