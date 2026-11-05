@@ -62,6 +62,16 @@ def _make_certificates(folder):
         .not_valid_before(now - dt.timedelta(minutes=5))
         .not_valid_after(now + dt.timedelta(days=1))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        # Strict X.509 verification on Python 3.13+ requires a complete
+        # authority/subject key identifier chain, not merely a valid signature.
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.KeyUsage(
+            digital_signature=False, content_commitment=False,
+            key_encipherment=False, data_encipherment=False, key_agreement=False,
+            key_cert_sign=True, crl_sign=True, encipher_only=False,
+            decipher_only=False,
+        ), critical=True)
         .sign(ca_key, hashes.SHA256())
     )
     ca_path = folder / "ca.pem"
@@ -78,6 +88,16 @@ def _make_certificates(folder):
             .not_valid_before(now - dt.timedelta(minutes=5))
             .not_valid_after(now + dt.timedelta(hours=1))
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
+                ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+            ), critical=False)
+            .add_extension(x509.KeyUsage(
+                digital_signature=True, content_commitment=False,
+                key_encipherment=True, data_encipherment=False, key_agreement=False,
+                key_cert_sign=False, crl_sign=False, encipher_only=False,
+                decipher_only=False,
+            ), critical=True)
             .add_extension(
                 x509.ExtendedKeyUsage([
                     ExtendedKeyUsageOID.SERVER_AUTH if server
@@ -102,6 +122,21 @@ def _make_certificates(folder):
         "beta": leaf("beta"),
         "unlisted": leaf("unlisted"),
     }
+
+
+def test_fixture_certificate_key_identifiers_are_linked(tmp_path):
+    """Test PKI must remain valid under strict RFC 5280 verification."""
+    files = _make_certificates(tmp_path)
+    ca = x509.load_pem_x509_certificate(files["ca"].read_bytes())
+    ca_ski = ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    ca_key_usage = ca.extensions.get_extension_for_class(x509.KeyUsage).value
+    assert ca_key_usage.key_cert_sign
+    for label in ("server", "alpha", "beta", "unlisted"):
+        cert = x509.load_pem_x509_certificate(files[label][0].read_bytes())
+        aki = cert.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+        leaf_usage = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+        assert aki.key_identifier == ca_ski.digest
+        assert leaf_usage.digital_signature and not leaf_usage.key_cert_sign
 
 
 def _https(port, ca_path, client_pair=None, *, method="POST", path="/submit",
