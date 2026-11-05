@@ -362,6 +362,128 @@ def sequential_10000():
             "decisions_per_second":round(10000/seconds,1)}
 check(9,"ten_thousand_real_denied_decisions",sequential_10000)
 
+
+def http_service_signed_end_to_end():
+    """Real signed-policy subprocess bound to 127.0.0.1 only; real HTTP requests."""
+    import urllib.request
+    import urllib.error
+    import socket
+    import secrets
+    from shards_kernel.issuer import sign_operator_policy
+    from shards_kernel.sdk.client import KernelClient
+    from shards_kernel.integrations.wire import permit_to_mapping
+    import shutil
+
+    with tempfile.TemporaryDirectory(prefix="shards-http-acceptance-") as folder:
+        root=pathlib.Path(folder)
+        issuer_pub=SECRET.public_key().public_bytes_raw().hex()
+        policy_private=Ed25519PrivateKey.generate()
+        policy_public=policy_private.public_key().public_bytes_raw().hex()
+        with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1",0))
+            port=sock.getsockname()[1]
+        now=int(time.time()*1000)
+        config={
+            "version":1,"kernel_id":KID,"actor":ACTOR,
+            "tools":["echo"],
+            "issuer_keys":[{"key_id":KEY_ID,"issuer":ISSUER,
+                            "public_key_hex":issuer_pub,"revoked":False}],
+            "audit_db":str(root/"operator.db"),"port":port
+        }
+        signed=sign_operator_policy(config,policy_private,revision=1,
+                                   issued_at_ms=now-1000,expires_at_ms=now+3600000)
+        policy_file=root/"signed.json"
+        policy_file.write_text(json.dumps(signed,sort_keys=True))
+        api_key=secrets.token_urlsafe(50)
+        env={**os.environ,"SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX":policy_public,
+             "SHARDS_KERNEL_API_KEY":api_key}
+        cli=str(pathlib.Path(sys.executable).parent/"shards-kernel")
+        process=subprocess.Popen([cli,"serve","--config",str(policy_file)],
+             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=env)
+        base=f"http://127.0.0.1:{port}"
+        def request_http(method,path,data=None,token=None,raw=False):
+            headers={"Content-Type":"application/json"}
+            if token is not None: headers["Authorization"]="Bearer "+token
+            body=(data if raw else json.dumps(data).encode()) if data is not None else None
+            req=urllib.request.Request(base+path,data=body,headers=headers,method=method)
+            try:
+                with urllib.request.urlopen(req,timeout=3) as resp:
+                    return resp.status,json.loads(resp.read().decode())
+            except urllib.error.HTTPError as err:
+                return err.code,json.loads(err.read().decode())
+        try:
+            started=False
+            for i in range(60):
+                if process.poll() is not None:break
+                try:
+                    code,body=request_http("GET","/health")
+                    if code==200 and body.get("status")=="healthy":
+                        started=True;break
+                except (OSError,ValueError):
+                    pass
+                time.sleep(.1)
+            require(started,"signed operator failed to reach healthy state; exit="+str(process.poll()))
+            unauth_status,_=request_http("GET","/status")
+            invalid_auth,_=request_http("GET","/status",token="invalid")
+            auth_status,auth_body=request_http("GET","/status",token=api_key)
+            require((unauth_status,invalid_auth,auth_status)==(401,401,200),
+                    f"operator bearer enforcement failed: {(unauth_status,invalid_auth,auth_status)}")
+            require(auth_body.get("state")=="IDLE","operator not idle")
+            from_ms=now-5000
+            until_ms=now+60000
+            signed_permit=sign_v2_permit(
+                PermitBuilder().issuer(ISSUER).subject(ACTOR)
+                  .jurisdiction("default").action("echo")
+                  .params({"text":"accepted"}).max_executions(1)
+                  .valid_from_ms(from_ms).valid_until_ms(until_ms)
+                  .proposal_hash("http-acceptance")
+                  .build_unsigned_v2(key_id=KEY_ID,audience=KID),SECRET)
+            data={"request_id":"http-allowed","actor":ACTOR,"intent":"signed HTTP",
+                  "tool_call":{"name":"echo","params":{"text":"accepted"}},
+                  "params":{"text":"accepted"},"permit":permit_to_mapping(signed_permit)}
+            notok,_=request_http("POST","/submit",data)
+            require(notok==401,"unauthenticated submission accepted")
+            allowed,first=request_http("POST","/submit",data,token=api_key)
+            require(allowed==200 and first["decision"]=="ALLOW" and first["result"]=="accepted",
+                    "valid signed HTTP permit did not execute: "+repr(first))
+            replay_data={**data,"request_id":"http-replayed"}
+            replay_status,replay=request_http("POST","/submit",replay_data,token=api_key)
+            require(replay_status==200 and replay["decision"]=="DENY" and replay["result"] is None,
+                    "HTTP replay incorrectly executed: "+repr(replay))
+            sdk=KernelClient(base,api_key=api_key,timeout=3)
+            sdk_receipt=sdk.submit(KernelRequest(
+                request_id="http-sdk-replay",ts_ms=now,actor=ACTOR,intent="SDK replay",
+                tool_call=ToolCall(name="echo",params={"text":"accepted"}),
+                params={"text":"accepted"}),permit_token=signed_permit)
+            require(sdk_receipt.decision==Decision.DENY and sdk_receipt.tool_result is None,
+                    "SDK treats denied receipt as an executed tool")
+            bad_actor={**data,"request_id":"http-impostor","actor":"other-agent"}
+            wrong_status,_=request_http("POST","/submit",bad_actor,token=api_key)
+            require(wrong_status==403,"HTTP actor mismatch accepted")
+            badjson,_=request_http("POST","/submit",b"{malformed",token=api_key,raw=True)
+            require(badjson==400,"malformed JSON accepted")
+            evidence_status,evidence=request_http("GET","/evidence",token=api_key)
+            require(evidence_status==200 and len(evidence.get("ledger_entries",[]))>=3,
+                    "missing operator audit export")
+            valid,_=replay_and_verify(evidence["ledger_entries"],evidence["root_hash"])
+            require(valid,"operator evidence replay invalid")
+            haltcode,halt=request_http("POST","/halt",{},token=api_key)
+            require(haltcode==200 and halt.get("kernel_state")=="HALTED","operator halt failed")
+            health_after,_=request_http("GET","/health")
+            require(health_after==503,"HALTED operator health must be unhealthy")
+            return {"loopback_http":base.replace(str(port),"<ephemeral-port>"),
+                    "signed_policy":True,"valid_signed_execution":"ALLOW",
+                    "unauthenticated":401,"incorrect_bearer":401,
+                    "replayed_permit":"DENY","sdk_replay":"DENY",
+                    "actor_mismatch":403,"malformed_json":400,
+                    "audit_verified":True,"halt_health":503}
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:process.wait(timeout=5)
+                except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
+check(5,"signed_operator_real_http_and_sdk",http_service_signed_end_to_end)
+
 def env_info():
     versions={}
     for n in ["shards-kernel","cryptography","mcp","pip","httpx","pytest","pip-audit"]:
