@@ -58,9 +58,28 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install PostgreSQL test dependencies
-        run: python -m pip install -e ".[postgres]" pytest
+        run: python -m pip install -e ".[postgres]" pytest pytest-cov
       - name: Verify distributed invariants against real PostgreSQL
-        run: python -m pytest tests/test_distributed_postgres_accounting.py -q
+        run: python -m pytest tests/test_distributed_postgres_accounting.py -q --cov=shards_kernel.distributed.postgres --cov-branch --cov-report=term-missing --cov-report=xml:coverage-distributed.xml
+      - name: Check whether Codecov upload is configured
+        id: distributed-codecov-token
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload measured PostgreSQL coverage
+        if: steps.distributed-codecov-token.outputs.available == 'true'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Shards-foundation/Shards-kernel
+          files: coverage-distributed.xml
+          flags: distributed
+          fail_ci_if_error: true
 
   quality:
     needs: e2e
