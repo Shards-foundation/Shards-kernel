@@ -193,7 +193,11 @@ jobs:
           "$wheel_venv/bin/python" -m pip install --upgrade pip
           wheel="$(find "$GITHUB_WORKSPACE/dist" -maxdepth 1 -type f -name 'shards_kernel-*.whl' -print -quit)"
           test -n "$wheel"
-          "$wheel_venv/bin/python" -m pip install "$wheel[crypto,mcp]"
+          wheel_extras="crypto"
+          if "$wheel_venv/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+            wheel_extras="crypto,mcp"
+          fi
+          "$wheel_venv/bin/python" -m pip install "$wheel[$wheel_extras]"
           "$wheel_venv/bin/python" -m pip check
           cd "$RUNNER_TEMP"
           "$wheel_venv/bin/python" -c "import shards_kernel; from shards_kernel.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
