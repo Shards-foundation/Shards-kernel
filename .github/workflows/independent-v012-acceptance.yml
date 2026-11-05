@@ -1,0 +1,60 @@
+name: Independent PyPI 0.1.2 acceptance evidence
+on:
+  push:
+    branches:
+      - test/independent-v012-acceptance-20261105
+    paths:
+      - "independent-acceptance/**"
+      - ".github/workflows/independent-v012-acceptance.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  published-wheel-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run independent probes in fresh installation (not checkout)
+        id: probes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/shards-acceptance"
+          cp independent-acceptance/run_acceptance.py "$RUNNER_TEMP/shards-acceptance/"
+          cp independent-acceptance/reproduce.sh "$RUNNER_TEMP/shards-acceptance/"
+          cd "$RUNNER_TEMP/shards-acceptance"
+          chmod +x reproduce.sh
+          set +e
+          bash reproduce.sh > execution.log 2>&1
+          code=$?
+          set -e
+          mkdir -p evidence-output
+          cp execution.log evidence-output/execution.log
+          if [ "$code" -ne 0 ]; then
+            printf 'reproduce.sh exit=%s\n' "$code" > evidence-output/harness-exit.txt
+          fi
+          echo "run_exit=$code" >> "$GITHUB_OUTPUT"
+      - name: Independent hash and evidence bundle
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$RUNNER_TEMP/shards-acceptance"
+          mkdir -p evidence-output
+          find evidence-output -type f ! -name artifacts.sha256 -print0 | sort -z | xargs -0 -r sha256sum > evidence-output/artifacts.sha256
+          zip -q -r "$GITHUB_WORKSPACE/shards-kernel-0.1.2-acceptance.zip" evidence-output run_acceptance.py reproduce.sh
+      - name: Publish independently executable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shards-kernel-v012-independent-acceptance
+          path: shards-kernel-0.1.2-acceptance.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Reject failed harness execution
+        if: steps.probes.outputs.run_exit != '0'
+        run: exit 1
