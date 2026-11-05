@@ -50,7 +50,7 @@ def require(cond, message):
         raise AssertionError(message)
 
 def run_cli(args):
-    cp = subprocess.run(["shards-kernel",*args],capture_output=True,text=True,timeout=30)
+    cp = subprocess.run([str(pathlib.Path(sys.executable).parent/"shards-kernel"),*args],capture_output=True,text=True,timeout=30)
     require(cp.returncode == 0, f"CLI {args} exit={cp.returncode} stderr={cp.stderr[-450:]}")
     return cp.stdout
 
