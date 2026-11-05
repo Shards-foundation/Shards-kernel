@@ -12,7 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/label.yml").read_text(encoding="utf-8")
 CONFIG = (ROOT / ".github/labeler.yml").read_text(encoding="utf-8")
-PINNED_V5 = "8558fd74291d67161a8a78ce36a881fa63b766a9"
+PINNED_V7 = "bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13"
 
 
 def _label_globs() -> dict[str, list[str]]:
@@ -36,8 +36,8 @@ def test_labeler_action_is_immutable_and_uses_scoped_permissions():
     assert "contents: read" in WORKFLOW
     assert "pull-requests: write" in WORKFLOW
     assert 'repo-token: "${{ secrets.GITHUB_TOKEN }}"' in WORKFLOW
-    assert f"uses: actions/labeler@{PINNED_V5} # v5.0.0" in WORKFLOW
-    assert "uses: actions/labeler@v5" not in WORKFLOW
+    assert f"uses: actions/labeler@{PINNED_V7} # v7.0.0" in WORKFLOW
+    assert "uses: actions/labeler@v7" not in WORKFLOW
     assert "actions/checkout@" not in WORKFLOW  # No untrusted code checkout with write authority.
     assert not re.search(r"(?m)^\s+run:\s*", WORKFLOW)
 
