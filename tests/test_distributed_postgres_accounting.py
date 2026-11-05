@@ -139,3 +139,47 @@ def test_partition_and_validation_fail_closed(journal):
         reserve(journal, {**p, "max_executions": True})
     with pytest.raises(ValueError, match="limit"):
         journal.unresolved(limit=0)
+
+
+def test_identifier_and_public_api_input_boundaries(journal):
+    p = permit()
+    invalid_ids = ("", " ", "a b", "\\n", "nonascii-λ", "x" * 257)
+    for bad in invalid_ids:
+        with pytest.raises(ValueError):
+            reserve(journal, p, operation_id=bad)
+        with pytest.raises(ValueError):
+            journal.get(bad)
+        with pytest.raises(ValueError):
+            journal.mark_dispatched(bad)
+        with pytest.raises(ValueError):
+            journal.mark_unknown(bad)
+
+    for field in ("issuer", "subject", "permit_id", "nonce"):
+        with pytest.raises(ValueError):
+            reserve(journal, {**p, field: ""})
+    with pytest.raises(ValueError):
+        journal.unresolved(limit=True)
+    with pytest.raises(ValueError):
+        journal.unresolved(limit=1001)
+    with pytest.raises(ValueError):
+        journal.reconcile("op", outcome="UNKNOWN", evidence_ref="proof")
+    with pytest.raises(ValueError):
+        journal.reconcile("op", outcome="SUCCEEDED", evidence_ref="proof", provider_ref="")
+    with pytest.raises(ValueError):
+        journal.reconcile("op", outcome="NOT_APPLIED", evidence_ref="")
+
+    
+def test_all_recovery_operations_fail_closed_when_primary_unreachable():
+    def offline():
+        raise ConnectionError("primary offline")
+
+    journal = PostgresPermitJournal(offline)
+    for operation in (
+        lambda: journal.mark_dispatched("op"),
+        lambda: journal.mark_unknown("op"),
+        lambda: journal.reconcile("op", outcome="NOT_APPLIED", evidence_ref="proof"),
+        lambda: journal.get("op"),
+        lambda: journal.unresolved(),
+    ):
+        with pytest.raises(ConnectionError, match="primary offline"):
+            operation()
