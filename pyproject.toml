@@ -22,6 +22,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
@@ -46,7 +49,7 @@ dev = [
     "pytest-cov>=4",
     "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
     "hypothesis>=6",
-    "ruff==0.17.2",
+    "ruff==0.17.3",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
     # FastAPI 0.129+ requires Python >=3.10. Pip honors Requires-Python, so
     # CPython 3.9 still resolves to the newest compatible release (0.128.x).
