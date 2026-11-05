@@ -10,6 +10,7 @@ on:
       - "LICENSE"
       - "tests/test_legal_docs.py"
       - "tests/test_readme_contract.py"
+      - "tests/test_requirements_docs.py"
       - ".github/workflows/docs.yml"
   push:
     branches: [main, master]
@@ -21,6 +22,7 @@ on:
       - "LICENSE"
       - "tests/test_legal_docs.py"
       - "tests/test_readme_contract.py"
+      - "tests/test_requirements_docs.py"
   workflow_dispatch:
 
 jobs:
@@ -44,7 +46,7 @@ jobs:
           LEGAL_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Checkout uses GitHub's PR merge commit, not untrusted PR head.
           LEGAL_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.sha || '' }}
-        run: python -m unittest tests.test_legal_docs tests.test_readme_contract -v
+        run: python -m unittest tests.test_legal_docs tests.test_readme_contract tests.test_requirements_docs -v
 
       - name: Install docs dependencies
         run: |
