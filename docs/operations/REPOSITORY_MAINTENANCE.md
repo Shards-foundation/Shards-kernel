@@ -61,6 +61,20 @@ failure for a maintainer to investigate. Cancelled, neutral and skipped runs
 are logged as advisory; missing/unknown conclusions fail closed. Pagination
 incompleteness is an error, not a successful check.
 
+## Measured regression coverage
+
+`.github/workflows/repository-maintenance.yml` runs
+`tests/test_repository_maintenance.py` in an isolated Python
+3.12 environment and measures statement and branch coverage for
+`scripts.maintenance`. The workflow now enforces **at least 90%
+unrounded branch-aware coverage** and archives `coverage-maintenance.json`
+for 14 days. The first fully measured regression run after expanding failure
+paths produced 65 passing tests and 92% branch-aware coverage (rounded).
+
+This is an additional gate for maintenance scripts. It does not replace the
+kernel's separate Python 3.9–3.15 matrix, critical security invariant tests
+or independent review.
+
 ## What could go wrong
 
 - Git is missing, the checkout is malformed, or tracked files have disappeared:
