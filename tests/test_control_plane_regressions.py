@@ -764,9 +764,11 @@ def test_queued_halt_finalizes_if_submit_releases_lock_during_audit(monkeypatch)
         return result
 
     monkeypatch.setattr(ledger, "append", append_and_release)
-    queued = kernel.halt("urgent")
-    assert queued.error == "HALT_QUEUED"
-    assert queued.decision is Decision.HALT
+    completed = kernel.halt("urgent")
+    assert completed.status is ReceiptStatus.ACCEPTED
+    assert completed.error is None
+    assert completed.decision is Decision.HALT
+    assert completed.state_to is KernelState.HALTED
     assert kernel.get_state() is KernelState.HALTED
     assert kernel._pending_halt is None
     bundle = kernel.export_evidence()
@@ -950,9 +952,11 @@ def test_queued_halt_skips_second_halt_after_racing_fault(monkeypatch):
         return entry
 
     monkeypatch.setattr(ledger, "append", append_and_fault)
-    queued = kernel.halt("requested")
-    assert queued.decision is Decision.HALT
-    assert queued.error == "HALT_QUEUED"
+    completed = kernel.halt("requested")
+    assert completed.status is ReceiptStatus.ACCEPTED
+    assert completed.decision is Decision.HALT
+    assert completed.state_to is KernelState.HALTED
+    assert completed.error == "HALT_ALREADY_EFFECTIVE"
     assert kernel.get_state() is KernelState.HALTED
     bundle = kernel.export_evidence()
     assert len(bundle.ledger_entries) == 2
