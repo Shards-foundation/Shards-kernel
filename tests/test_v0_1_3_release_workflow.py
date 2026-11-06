@@ -105,6 +105,11 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert "gh release create v0.1.3" in release_job
     assert "--draft" in release_job
     assert "gh release upload v0.1.3" in release_job
+    assert "gh release delete-asset v0.1.3" in release_job
+    assert "Refusing to repair draft targeting an unrelated commit" in release_job
+    assert "Unexpected existing release asset; refusing draft repair" in release_job
+    assert "Replacing unpublished draft asset with newly verified artifact" in release_job
+    assert release_job.index("gh release delete-asset v0.1.3") < release_job.index("cmp -- dist/SHA256SUMS")
     assert "--clobber" not in release_job
 
     for name in ("verify_candidate_wheel_concurrency.py", "verify_candidate_wheel_permit_scope.py"):
