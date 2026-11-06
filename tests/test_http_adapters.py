@@ -33,6 +33,9 @@ def test_flask_adapter_exposes_authenticated_routes_and_halt():
     halted = client.post("/halt", headers=AUTH_HEADER)
     assert halted.status_code == 200
     assert halted.get_json()["status"] == "halted"
+    assert halted.get_json()["receipt_status"] == "ACCEPTED"
+    assert halted.get_json()["halt_confirmed"] is True
+    assert halted.get_json()["state_to"] == "HALTED"
 
 
 def test_flask_adapter_rejects_anonymous_control_and_audit_access():
@@ -82,6 +85,9 @@ def test_fastapi_adapter_exposes_authenticated_routes_and_halt():
         halted = client.post("/halt")
         assert halted.status_code == 200
         assert halted.json()["status"] == "halted"
+        assert halted.json()["receipt_status"] == "ACCEPTED"
+        assert halted.json()["halt_confirmed"] is True
+        assert halted.json()["state_to"] == "HALTED"
 
 
 def test_fastapi_rejects_malformed_permit_without_submitting():
