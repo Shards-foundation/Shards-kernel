@@ -31,6 +31,16 @@ class CheckpointIntegrityError(RuntimeError):
     """A checkpoint is missing, altered, untrusted, stale or inconsistent."""
 
 
+def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate JSON keys before signature verification or interpretation."""
+    values: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in values:
+            raise CheckpointIntegrityError("Duplicate checkpoint JSON field")
+        values[key] = value
+    return values
+
+
 @dataclass(frozen=True)
 class SignedAuthorityCheckpoint:
     """Signed, canonical audit root; it is not an off-host storage receipt."""
@@ -120,7 +130,7 @@ class SignedAuthorityCheckpoint:
         if not isinstance(source, str):
             raise CheckpointIntegrityError("Checkpoint JSON must be text")
         try:
-            parsed = json.loads(source)
+            parsed = json.loads(source, object_pairs_hook=_unique_json_pairs)
         except (TypeError, ValueError) as exc:
             raise CheckpointIntegrityError("Malformed checkpoint JSON") from exc
         if not isinstance(parsed, dict) or set(parsed) != _FIELDS:
@@ -217,6 +227,8 @@ def verify_checkpoint_chain(
     """Verify a complete externally retained checkpoint chain, oldest first."""
     if not checkpoints:
         raise CheckpointIntegrityError("No externally retained checkpoints")
+    if type(minimum_sequence) is not int or minimum_sequence < 0:
+        raise ValueError("minimum_sequence must be a nonnegative integer")
     previous: SignedAuthorityCheckpoint | None = None
     for checkpoint in checkpoints:
         verify_checkpoint(
