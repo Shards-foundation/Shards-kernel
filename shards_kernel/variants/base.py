@@ -404,17 +404,21 @@ class BaseKernel(Kernel):
             raise StateError("Kernel not booted")
         state = self._state_machine.state
         error = "KERNEL_BUSY: single-flight admission in progress"
-        entry = self._ledger.append(
-            request_id=request.request_id,
-            actor=request.actor,
-            intent=request.intent,
-            decision=Decision.DENY,
-            state_from=state,
-            state_to=state,
-            ts_ms=self.config.clock.now_ms(),
-            error=error,
-            audit_phase="outcome",
-        )
+        try:
+            entry = self._ledger.append(
+                request_id=request.request_id,
+                actor=request.actor,
+                intent=request.intent,
+                decision=Decision.DENY,
+                state_from=state,
+                state_to=state,
+                ts_ms=self.config.clock.now_ms(),
+                error=error,
+                audit_phase="outcome",
+            )
+        except Exception:
+            self._quarantine_failed_admission_audit("Admission rejection audit failure")
+            raise
         return KernelReceipt(
             request_id=request.request_id,
             status=ReceiptStatus.REJECTED,
@@ -425,6 +429,15 @@ class BaseKernel(Kernel):
             error=error,
             evidence_hash=entry.entry_hash,
         )
+
+    def _quarantine_failed_admission_audit(self, reason: str) -> None:
+        """Prevent future execution when a pre-admission audit could not commit."""
+        self._pending_halt = reason
+        if self._submit_lock.acquire(blocking=False):
+            try:
+                self._halt_on_fault(reason)
+            finally:
+                self._submit_lock.release()
 
     def _submit_serialized(
         self, request: KernelRequest, permit_token: Optional[PermitToken]
@@ -438,8 +451,8 @@ class BaseKernel(Kernel):
         ):
             raise StateError("Kernel not booted")
 
-        if self._halted:
-            raise StateError("Kernel is halted")
+        if self._halted or self._pending_halt is not None:
+            raise StateError("Kernel is halted or halt requested")
         self._state_machine.assert_not_halted()
         self._state_machine.assert_state(KernelState.IDLE)
         self._execution_authorised = False
@@ -926,17 +939,21 @@ class BaseKernel(Kernel):
                 self._submit_lock.release()
 
         state = self._state_machine.state
-        entry = self._ledger.append(
-            request_id="HALT",
-            actor="SYSTEM",
-            intent=reason,
-            decision=Decision.HALT,
-            state_from=state,
-            state_to=state,
-            ts_ms=self.config.clock.now_ms(),
-            error="HALT_QUEUED",
-            audit_phase="halt",
-        )
+        try:
+            entry = self._ledger.append(
+                request_id="HALT",
+                actor="SYSTEM",
+                intent=reason,
+                decision=Decision.HALT,
+                state_from=state,
+                state_to=state,
+                ts_ms=self.config.clock.now_ms(),
+                error="HALT_QUEUED",
+                audit_phase="halt",
+            )
+        except Exception:
+            self._quarantine_failed_admission_audit("Operator halt audit failure")
+            raise
         self._pending_halt = reason
         # Close the race where the submission completed while the request
         # audit was committed: if the owner has gone, perform the halt now.
