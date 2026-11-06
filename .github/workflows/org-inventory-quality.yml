@@ -36,7 +36,7 @@ jobs:
           --cov-branch
           --cov-report=term-missing
           --cov-report=json:coverage-org-inventory.json
-          --cov-fail-under=80
+          --cov-fail-under=95
 
       - name: Independently enforce unrounded coverage percentage
         run: |
@@ -48,8 +48,8 @@ jobs:
 
           report = json.loads(Path("coverage-org-inventory.json").read_text(encoding="utf-8"))
           actual = float(report["totals"]["percent_covered"])
-          if not math.isfinite(actual) or actual < 80.0:
-              sys.exit("Organisation inventory coverage below enforced 80% floor")
+          if not math.isfinite(actual) or actual < 95.0:
+              sys.exit("Organisation inventory coverage below enforced 95% floor")
           PY
 
       - name: Archive measured coverage
