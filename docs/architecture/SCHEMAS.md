@@ -85,7 +85,7 @@ class Receipt:
     request_id: str          # Echoed from request
     
     # Status
-    status: str              # ACCEPTED, REJECTED, FAILED
+    status: str              # ACCEPTED, QUEUED, REJECTED, FAILED
     
     # Decision
     decision: Decision       # ALLOW, DENY, HALT
