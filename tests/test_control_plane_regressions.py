@@ -216,13 +216,36 @@ def test_authorised_handler_default_is_audited_and_executed(signed_kernel):
     )
 
 
-def test_signed_permit_still_allows_safe_subset(signed_kernel):
+def test_signed_permit_rejects_omitted_even_if_tool_ignores_field(signed_kernel):
     kernel, key, _clock, seen = signed_kernel
     result = kernel.submit(
         request({"amount": 1}), signed_permit(key, {"amount": 1, "unused": "ok"})
     )
-    assert result.decision is Decision.ALLOW
-    assert seen == [1]
+    assert result.decision is Decision.DENY
+    assert "PARAMS_MISMATCH" in (result.error or "")
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    "signed_params, submitted_params, allowed",
+    [
+        ({"marker": "approved"}, {"marker": "approved"}, True),
+        ({"marker": "approved"}, {}, False),
+        ({"marker": None}, {}, False),
+        ({"marker": 1}, {"marker": True}, False),
+        ({"marker": "approved"}, {"marker": "approved", "extra": "unexpected"}, False),
+    ],
+)
+def test_ed25519_variadic_tool_requires_exact_signed_params(
+    signed_kernel, signed_params, submitted_params, allowed
+):
+    kernel, key, _clock, _seen = signed_kernel
+    executed = []
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", lambda **kwargs: executed.append(kwargs))
+    result = kernel.submit(request(submitted_params), signed_permit(key, signed_params))
+    assert result.decision is (Decision.ALLOW if allowed else Decision.DENY)
+    assert executed == ([submitted_params] if allowed else [])
 
 
 def test_signed_permit_expiring_before_dispatch_is_denied(signed_kernel):
