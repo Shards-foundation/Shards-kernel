@@ -35,6 +35,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Exercise actual dispatch shell and negative-continuation gate
+        run: bash scripts/ci/check_release_dispatch_shell.sh
+
       - name: Verify release version
         run: |
           python - <<'PY'
