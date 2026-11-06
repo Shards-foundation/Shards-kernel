@@ -8,7 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
-- Serialize concurrent calls to the synchronous `BaseKernel.submit()` API through its full permit, execution and audit lifecycle. Concurrent requests are processed sequentially instead of raising lifecycle `StateError` under contention (SK-001); a running handler is not pre-empted and backpressure still requires an operator-managed queue or bounded ingress.
+- Add single-flight, non-blocking admission to synchronous `BaseKernel.submit()`: concurrent requests immediately receive audited `DENY` / `KERNEL_BUSY` receipts rather than uncontrolled lifecycle `StateError` or unbounded waiting (SK-001). Serialize hash-chain appends/exports, and record a queued operator halt before applying terminal `HALTED` after the in-flight outcome audit. An in-process handler cannot be forcibly interrupted; deployers must use bounded process supervision for stalled actions.
 
 ### Added
 
