@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import types
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
@@ -404,3 +405,189 @@ def test_maintenance_workflow_contract_is_read_only() -> None:
     assert "persist-credentials: false" in source
     assert "shell=True" not in source
     assert "continue-on-error: true" not in source
+
+
+@pytest.mark.parametrize("flags", [
+    ["--attempts", "0"], ["--attempts", "6"],
+    ["--max-pages", "0"], ["--timeout", "0"], ["--timeout", "nan"],
+    ["--lookback-hours", "0"], ["--stale-minutes", "0"],
+    ["--branch", "../unsafe"],
+])
+def test_actions_bounded_arguments_fail_closed(flags: list[str]) -> None:
+    with pytest.raises(actions.MonitorError):
+        actions.validate(actions.parse_args(flags))
+
+
+def test_actions_unknown_statuses_cannot_pass_as_success() -> None:
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    recent = (now - timedelta(minutes=2)).isoformat()
+    future = (now + timedelta(hours=1)).isoformat()
+    assert actions.classify({"created_at": future, "status": "completed",
+                             "conclusion": "success"}, now, 20) == "invalid_clock"
+    assert actions.classify({"created_at": recent, "status": "mystery",
+                             "conclusion": None}, now, 20) == "unknown_status"
+    assert actions.classify({"created_at": recent, "status": "completed",
+                             "conclusion": None}, now, 20) == "unknown_conclusion"
+    assert actions.classify({"created_at": recent, "status": "completed",
+                             "conclusion": "cancelled"}, now, 20) == "advisory"
+
+
+def test_actions_monitor_allows_known_advisory_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    run = {"id": 1, "name": "cancelled", "status": "completed",
+           "conclusion": "cancelled", "created_at": now.isoformat()}
+    monkeypatch.setattr(actions, "collect_runs", lambda *_args: ([run], True, 1))
+    options = actions.validate(actions.parse_args([]))
+    assert actions.monitor(options, None, [], now) == 0
+
+
+def test_actions_invalid_run_collection_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    monkeypatch.setattr(actions, "fetch_page",
+                        lambda *_args: {"workflow_runs": [None]})
+    options = actions.validate(actions.parse_args([]))
+    with pytest.raises(actions.MonitorError, match="github_run_shape_invalid"):
+        actions.collect_runs(options, None, now, [])
+
+
+def test_workflow_docker_digest_policy() -> None:
+    unpinned = workflows.analyse_workflow("steps:\n  - uses: docker://alpine:latest\n")
+    assert ("advisory", "docker_image_not_digest_pinned") in unpinned
+    pinned = workflows.analyse_workflow(
+        "steps:\n  - uses: docker://alpine@sha256:" + "a" * 64 + "\n"
+    )
+    assert ("advisory", "docker_image_not_digest_pinned") not in pinned
+
+
+def test_workflow_empty_directory_rejected(tmp_path: Path) -> None:
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    assert workflows.audit_workflows(tmp_path, False, []) == 2
+
+
+def test_workflow_oversized_input_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = tmp_path / ".github" / "workflows"
+    folder.mkdir(parents=True)
+    (folder / "build.yml").write_bytes(b"name: Test\n")
+    monkeypatch.setattr(workflows, "MAX_WORKFLOW_BYTES", 1)
+    assert workflows.audit_workflows(tmp_path, False, []) == 2
+
+
+def test_workflow_strict_advisory_fails(tmp_path: Path) -> None:
+    folder = tmp_path / ".github" / "workflows"
+    folder.mkdir(parents=True)
+    (folder / "build.yml").write_text(
+        "steps:\n  - uses: actions/checkout@v4\n", encoding="utf-8",
+    )
+    assert workflows.audit_workflows(tmp_path, False, []) == 0
+    assert workflows.audit_workflows(tmp_path, True, []) == 1
+
+
+def test_workflow_main_rejects_missing_root_and_allows_dry_run(
+    tmp_path: Path,
+) -> None:
+    assert workflows.main(["--repo", str(tmp_path / "missing")]) == 2
+    assert workflows.main(["--repo", str(tmp_path), "--dry-run"]) == 0
+
+
+def test_workflow_audit_honours_preexisting_interrupt(tmp_path: Path) -> None:
+    folder = tmp_path / ".github" / "workflows"
+    folder.mkdir(parents=True)
+    (folder / "build.yml").write_text("name: Test\n", encoding="utf-8")
+    assert workflows.audit_workflows(tmp_path, False, [workflows.signal.SIGINT]) == 130
+
+
+def test_hygiene_unknown_file_is_not_decoded(tmp_path: Path) -> None:
+    (tmp_path / "unreadable.bin").write_bytes(b"\xff\xfe")
+    assert hygiene.file_findings(tmp_path, Path("unreadable.bin"), 100) == []
+
+
+def test_hygiene_symlink_is_reviewed_without_following(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target.md"
+    target.write_text("content\n", encoding="utf-8")
+    link = tmp_path / "linked.md"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Host does not permit symlink creation")
+    assert hygiene.file_findings(tmp_path, Path("linked.md"), 100) == [
+        ("advisory", "tracked_symlink_requires_review")
+    ]
+
+
+def test_hygiene_non_regular_tracked_path_rejected(tmp_path: Path) -> None:
+    (tmp_path / "directory.py").mkdir()
+    assert hygiene.file_findings(tmp_path, Path("directory.py"), 100) == [
+        ("critical", "tracked_path_not_regular_file")
+    ]
+
+
+def test_hygiene_git_executable_inside_repo_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    untrusted = tmp_path / "git"
+    untrusted.write_bytes(b"not executable")
+    monkeypatch.setattr(hygiene.shutil, "which", lambda _name: str(untrusted))
+    with pytest.raises(hygiene.AuditError, match="untrusted_git_executable"):
+        hygiene.tracked_paths(tmp_path)
+
+
+def test_hygiene_git_list_rejects_error_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hygiene.subprocess, "run",
+                        lambda *_args, **_kwargs: types.SimpleNamespace(
+                            returncode=1, stdout=b"",
+                        ))
+    with pytest.raises(hygiene.AuditError, match="git_ls_files_failed"):
+        hygiene.tracked_paths(tmp_path)
+
+
+def test_hygiene_git_list_rejects_oversized_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hygiene, "MAX_GIT_OUTPUT", 2)
+    monkeypatch.setattr(hygiene.subprocess, "run",
+                        lambda *_args, **_kwargs: types.SimpleNamespace(
+                            returncode=0, stdout=b"long",
+                        ))
+    with pytest.raises(hygiene.AuditError, match="git_file_list_too_large"):
+        hygiene.tracked_paths(tmp_path)
+
+
+def test_hygiene_missing_tracked_files_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hygiene, "tracked_paths", lambda _root: [])
+    assert hygiene.audit(tmp_path, 100, False, []) == 2
+
+
+def test_hygiene_strict_advisory_returns_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "no_newline.md").write_bytes(b"abc")
+    monkeypatch.setattr(hygiene, "tracked_paths",
+                        lambda _root: [Path("no_newline.md")])
+    assert hygiene.audit(tmp_path, 100, False, []) == 0
+    assert hygiene.audit(tmp_path, 100, True, []) == 1
+
+
+def test_hygiene_invalid_cli_and_dry_run(tmp_path: Path) -> None:
+    assert hygiene.main(["--repo", str(tmp_path), "--max-file-mib", "0"]) == 2
+    assert hygiene.main(["--repo", str(tmp_path / "missing")]) == 2
+    assert hygiene.main(["--repo", str(tmp_path), "--dry-run"]) == 0
+
+
+def test_maintenance_json_formatters_include_status() -> None:
+    record = logging.LogRecord("synthetic", logging.WARNING, __file__, 0, "test", (), None)
+    for formatter in (actions.JsonFormatter(), hygiene.JsonFormatter(), workflows.JsonFormatter()):
+        data = formatter.format(record)
+        assert '"level":"WARNING"' in data
+        assert '"event":"test"' in data
