@@ -172,7 +172,7 @@ python -c "import shards_kernel"
 shards-kernel --help
 ```
 
-**Version 0.1.3 is the security and concurrency stabilisation release candidate**: exact signed-parameter scope, audited single-flight admission and unambiguous queued-halt receipts. Verified artifacts are published through [PyPI](https://pypi.org/project/shards-kernel/) only after protected merge, release acceptance and GitHub OIDC Trusted Publishing. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
+**Version 0.1.3 is the security and concurrency stabilisation release**: exact signed-parameter scope, audited single-flight admission and unambiguous queued-halt receipts. Verified artifacts are published through [PyPI](https://pypi.org/project/shards-kernel/) only after protected merge, release acceptance and GitHub OIDC Trusted Publishing. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
