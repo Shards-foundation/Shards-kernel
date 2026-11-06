@@ -72,7 +72,37 @@ def test_release_0_1_3_version_and_one_shot_protection():
     # the dispatcher is a separate job depending on successful release.
     assert "gh workflow run publish.yml" not in release_job
     assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("gh release edit v0.1.3")
-    assert release_job.index('tag_commit="$(git ls-remote') < release_job.index("gh release edit v0.1.3")
+    assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("target_commit=")
+    assert release_job.index("target_commit=") < release_job.index("gh api -X POST")
+    assert release_job.index("gh api -X POST") < release_job.index('gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --draft=false')
+    assert 'gh api -X POST "/repos/$GITHUB_REPOSITORY/git/refs"' in release_job
+    assert 'git merge-base --is-ancestor "$target_commit" "$GITHUB_SHA"' in release_job
+    assert 'gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"' in release_job
+    assert "Published release tag does not match verified commit" in release_job
+    # Reproduce the production regression with a real isolated Git remote:
+    # annotated tag-object hashes are not the referenced commit SHA.
+    tag_script = ROOT / "scripts" / "ci" / "check_release_tag_shell.sh"
+    assert tag_script.is_file()
+    assert "bash scripts/ci/check_release_tag_shell.sh" in current
+    ci_yaml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "bash scripts/ci/check_release_tag_shell.sh" in ci_yaml
+    assert "git tag -a v0.1.3" in tag_script.read_text(encoding="utf-8")
+    assert "release_tag_commit() {" in release_job
+    assert "refs/tags/v0.1.3^{}" in release_job
+    assert 'initial_tag_commit="$(release_tag_commit)"' in release_job
+    assert release_job.index('initial_tag_commit="$(release_tag_commit)"') < release_job.index("gh release delete-asset v0.1.3")
+    assert "Existing release tag conflicts with verified protected-main commit" in release_job
+    assert 'tag_commit="$(release_tag_commit)"' in release_job
+    assert 'test "$(release_tag_commit)" = "$GITHUB_SHA"' in release_job
+    assert release_job.count('test "$(release_tag_commit)" = "$GITHUB_SHA"') >= 3
+    assert 'git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)" = "$GITHUB_SHA"' not in release_job
+    assert "require_unpublished_draft() {" in release_job
+    assert "Release was promoted during recovery; refusing asset mutation" in release_job
+    assert release_job.count("require_unpublished_draft") >= 5
+    assert "verify_uploaded_assets() {" in release_job
+    assert release_job.count("verify_uploaded_assets") >= 4
+    assert release_job.index("verify_uploaded_assets\n            require_unpublished_draft") < release_job.index('gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --draft=false')
+
     assert "gh workflow run publish.yml" in dispatch_job
     assert '--field verified_run_id="$GITHUB_RUN_ID"' in dispatch_job
     for untrusted in ("expected_commit", "expected_wheel_sha256", "expected_sdist_sha256"):
@@ -88,7 +118,7 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert '.event == "push"' in publisher
     assert '.head_branch == "main"' in publisher
     assert '.head_sha == $sha' in publisher
-    assert "publish-v0.1.3.yml@refs/heads/main" in publisher
+    assert 'and .path == ".github/workflows/publish-v0.1.3.yml"' in publisher
     assert "jobs?per_page=100&filter=latest" in publisher
     assert "Verify v0.1.3 source and clean installed wheel" in publisher
     assert "Publish immutable v0.1.3 GitHub assets" in publisher
@@ -99,6 +129,11 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert "gh release create v0.1.3" in release_job
     assert "--draft" in release_job
     assert "gh release upload v0.1.3" in release_job
+    assert "gh release delete-asset v0.1.3" in release_job
+    assert "Refusing to repair draft targeting an unrelated commit" in release_job
+    assert "Unexpected existing release asset; refusing draft repair" in release_job
+    assert "Replacing unpublished draft asset with newly verified artifact" in release_job
+    assert release_job.index("gh release delete-asset v0.1.3") < release_job.index("cmp -- dist/SHA256SUMS")
     assert "--clobber" not in release_job
 
     for name in ("verify_candidate_wheel_concurrency.py", "verify_candidate_wheel_permit_scope.py"):

@@ -79,7 +79,7 @@ jobs:
               .event == "push"
               and .head_branch == "main"
               and .head_sha == $sha
-              and (.path | endswith(".github/workflows/publish-v0.1.3.yml@refs/heads/main"))
+              and .path == ".github/workflows/publish-v0.1.3.yml"
             ' "$RUNNER_TEMP/shards-verified-run.json" >/dev/null || {
               echo "Untrusted workflow run, main branch, or source revision" >&2
               exit 1
