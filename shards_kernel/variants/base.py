@@ -435,7 +435,9 @@ class BaseKernel(Kernel):
         self._pending_halt = reason
         if self._submit_lock.acquire(blocking=False):
             try:
-                self._halt_on_fault(reason)
+                if not self._halted:
+                    self._halt_on_fault(reason)
+                self._pending_halt = None
             finally:
                 self._submit_lock.release()
 
@@ -451,8 +453,10 @@ class BaseKernel(Kernel):
         ):
             raise StateError("Kernel not booted")
 
-        if self._halted or self._pending_halt is not None:
-            raise StateError("Kernel is halted or halt requested")
+        if self._halted:
+            raise StateError("Kernel is halted")
+        if self._pending_halt is not None:
+            return self._deny_busy(request)
         self._state_machine.assert_not_halted()
         self._state_machine.assert_state(KernelState.IDLE)
         self._execution_authorised = False
@@ -961,6 +965,8 @@ class BaseKernel(Kernel):
             try:
                 if not self._halted:
                     self._halt_locked(reason)
+                else:
+                    self._pending_halt = None
             finally:
                 self._submit_lock.release()
         return KernelReceipt(
