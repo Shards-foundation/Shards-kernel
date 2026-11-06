@@ -931,44 +931,51 @@ class BaseKernel(Kernel):
         return None
 
     def halt(self, reason: str) -> KernelReceipt:
-        """Request terminal halt without interrupting an in-flight audit.
+        """Atomically publish an operator halt before a new admission can start.
 
-        A busy kernel records an immediate HALT_QUEUED audit and returns a
-        pending receipt. The current submission records its outcome first,
-        then applies the queued halt before releasing its admission lock.
-        In-process handlers cannot be safely pre-empted; operators must use
-        OS supervision for permanently blocked or untrusted external effects.
+        A queued halt is committed to the ledger while holding the same
+        intent lock used by the active submitter's final check AND unlock.
+        Once published, later callers cannot dispatch before terminal halt.
+        An in-flight handler is not forcibly interrupted; its effect outcome
+        must be audited before the terminal transition.
         """
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
-        if self._submit_lock.acquire(blocking=False):
-            try:
-                with self._halt_intent_lock:
-                    return self._halt_locked(reason)
-            finally:
-                self._submit_lock.release()
 
-        state = self._state_machine.state
-        try:
-            entry = self._ledger.append(
-                request_id="HALT",
-                actor="SYSTEM",
-                intent=reason,
-                decision=Decision.HALT,
-                state_from=state,
-                state_to=state,
-                ts_ms=self.config.clock.now_ms(),
-                error="HALT_QUEUED",
-                audit_phase="halt",
-            )
-        except Exception:
-            self._quarantine_failed_admission_audit("Operator halt audit failure")
-            raise
-        # The intent lock is shared with submit's final check AND unlock.
-        # Even if the audit above finished just as the submission ended,
-        # the terminal transition can never be stranded in an idle kernel.
         with self._halt_intent_lock:
+            # Publish the stop intent *before* performing a potentially slow
+            # audit append. The in-flight submitter cannot finish and release
+            # admission ownership until this critical section exits.
             self._pending_halt = reason
+            if self._submit_lock.acquire(blocking=False):
+                try:
+                    return self._halt_locked(reason)
+                finally:
+                    self._submit_lock.release()
+
+            state = self._state_machine.state
+            try:
+                entry = self._ledger.append(
+                    request_id="HALT",
+                    actor="SYSTEM",
+                    intent=reason,
+                    decision=Decision.HALT,
+                    state_from=state,
+                    state_to=state,
+                    ts_ms=self.config.clock.now_ms(),
+                    error="HALT_QUEUED",
+                    audit_phase="halt",
+                )
+            except Exception:
+                # Preserve fail-closed admission even when the queued record
+                # cannot be persisted. The submitter's finalisation enforces
+                # terminal halt when it next acquires the intent lock.
+                self._pending_halt = "Operator halt audit failure"
+                raise
+
+            # If the submitter released admission between our first failed
+            # attempt and the audit commit, finalise the halt here. Otherwise
+            # the submitter finalises immediately after its own outcome audit.
             if self._submit_lock.acquire(blocking=False):
                 try:
                     if not self._halted:
@@ -977,16 +984,16 @@ class BaseKernel(Kernel):
                         self._pending_halt = None
                 finally:
                     self._submit_lock.release()
-        return KernelReceipt(
-            request_id="HALT",
-            status=ReceiptStatus.ACCEPTED,
-            state_from=state,
-            state_to=state,
-            ts_ms=self.config.clock.now_ms(),
-            decision=Decision.HALT,
-            error="HALT_QUEUED",
-            evidence_hash=entry.entry_hash,
-        )
+            return KernelReceipt(
+                request_id="HALT",
+                status=ReceiptStatus.ACCEPTED,
+                state_from=state,
+                state_to=state,
+                ts_ms=self.config.clock.now_ms(),
+                decision=Decision.HALT,
+                error="HALT_QUEUED",
+                evidence_hash=entry.entry_hash,
+            )
 
     def _halt_locked(self, reason: str) -> KernelReceipt:
         """Finalize terminal halt only while holding the admission lock."""
