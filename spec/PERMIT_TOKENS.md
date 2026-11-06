@@ -303,7 +303,7 @@ The kernel MUST verify all constraints before allowing execution. Any failure = 
 | 5 | Jurisdiction match | `JURISDICTION_MISMATCH` | Permit jurisdiction ≠ kernel jurisdiction |
 | 6 | Action allowed | `ACTION_NOT_ALLOWED` | Action not on allowlist for this jurisdiction |
 | 7 | Subject match | `SUBJECT_MISMATCH` | Permit subject ≠ request actor |
-| 8 | Params match | `PARAMS_MISMATCH` | Request params exceed permit params |
+| 8 | Params match | `PARAMS_MISMATCH` | Any mismatch in the effective tool argument mapping, including omitted, extra, changed or type-aliased values; compare against one private snapshot of the verified signed permit |
 | 9 | Nonce fresh | `REPLAY_DETECTED` | Nonce already used |
 | 10 | Execution count | `MAX_EXECUTIONS_EXCEEDED` | Permit already used max_executions times |
 | 11 | Constraints satisfied | `CONSTRAINT_VIOLATION` | Resource limits, allowlists, bounds violated |
