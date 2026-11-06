@@ -253,3 +253,4 @@ jobs:
           "$wheel_venv/bin/python" -c "import shards_kernel; from shards_kernel.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
           "$wheel_venv/bin/shards-kernel" --version
           "$wheel_venv/bin/shards-kernel" demo --json
+          "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_concurrency.py"
