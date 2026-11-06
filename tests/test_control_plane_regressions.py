@@ -402,15 +402,17 @@ def test_async_timeout_keeps_kernel_serialized_until_running_tool_finishes(signe
     asyncio.run(scenario())
 
 
-def test_concurrent_sync_submits_are_serialized_and_audited(signed_kernel):
-    """SK-001: simultaneous callers never see lifecycle StateError or overspend."""
+def test_concurrent_sync_submits_fail_fast_and_audit_every_request(signed_kernel):
+    """SK-001: contention is denied without waiting on the executing handler."""
     from concurrent.futures import ThreadPoolExecutor
-    from time import sleep
 
     kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
 
     def slow_probe(amount=99):
-        sleep(0.003)
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test timed out waiting for release")
         seen.append(amount)
         return amount
 
@@ -421,16 +423,100 @@ def test_concurrent_sync_submits_are_serialized_and_audited(signed_kernel):
     def invoke(index):
         return kernel.submit(
             request({"amount": 1}, request_id=f"concurrent-{index}"), permit
-        ).decision
+        )
 
     with ThreadPoolExecutor(max_workers=32) as executor:
-        results = list(executor.map(invoke, range(256)))
+        first = executor.submit(invoke, 0)
+        try:
+            assert started.wait(timeout=2)
+            others = [executor.submit(invoke, i) for i in range(1, 256)]
+            # A full set of contenders responds while the first handler remains
+            # active. An unbounded blocking lock fails this deterministic test.
+            busy = [f.result(timeout=3) for f in others[:31]]
+            assert all(x.decision is Decision.DENY for x in busy)
+            assert all("KERNEL_BUSY" in (x.error or "") for x in busy)
+        finally:
+            release.set()
+        results = [first.result(timeout=3)] + [f.result(timeout=3) for f in others]
 
-    assert results.count(Decision.ALLOW) == 1
-    assert results.count(Decision.DENY) == 255
+    assert sum(x.decision is Decision.ALLOW for x in results) == 1
+    assert sum(x.decision is Decision.DENY for x in results) == 255
     assert seen == [1]
-    entries = kernel.export_evidence().ledger_entries
-    assert len(entries) >= 256
+    bundle = kernel.export_evidence()
+    assert len(bundle.ledger_entries) == 257
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_nested_same_kernel_submit_is_denied_without_deadlock(signed_kernel):
+    kernel, key, _clock, seen = signed_kernel
+    nested = []
+
+    def reentrant_probe(amount=99):
+        nested.append(
+            kernel.submit(
+                request({"amount": 3}, request_id="nested"),
+                signed_permit(key, {"amount": 3}),
+            )
+        )
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", reentrant_probe)
+    result = kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+    assert result.decision is Decision.ALLOW
+    assert len(nested) == 1
+    assert nested[0].decision is Decision.DENY
+    assert "KERNEL_BUSY" in (nested[0].error or "")
+    assert seen == [1]
+
+
+def test_concurrent_halt_preserves_completed_effect_outcome_audit(signed_kernel):
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+    result_holder = []
+
+    def slow_probe(amount=99):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test timed out waiting for release")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", slow_probe)
+    submitter = Thread(
+        target=lambda: result_holder.append(
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        ),
+        daemon=True,
+    )
+    submitter.start()
+    try:
+        assert started.wait(timeout=2)
+        queued = kernel.halt("emergency operator request")
+        assert queued.decision is Decision.HALT
+        assert queued.error == "HALT_QUEUED"
+        assert kernel.get_state() is not KernelState.HALTED
+    finally:
+        release.set()
+    submitter.join(timeout=3)
+    assert not submitter.is_alive()
+    assert len(result_holder) == 1
+    assert result_holder[0].decision is Decision.ALLOW
+    assert seen == [1]
+    assert kernel.get_state() is KernelState.HALTED
+    bundle = kernel.export_evidence()
+    entries = [e for e in bundle.ledger_entries if e.request_id == "request"]
+    assert any(e.audit_phase == "intent" for e in entries)
+    assert any(e.audit_phase == "outcome" and e.decision is Decision.ALLOW for e in entries)
+    assert any(e.error == "HALT_QUEUED" for e in bundle.ledger_entries)
+    assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
 
 
 def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypatch):
@@ -446,7 +532,7 @@ def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypa
     assert kernel.get_state() is KernelState.HALTED
     assert seen == []
 
-    # A different thread must immediately recover ownership of the RLock
+    # A different thread must immediately recover ownership of the admission lock
     # and observe the terminal halted state, never hang on the first caller.
     done = Event()
     observed = []
