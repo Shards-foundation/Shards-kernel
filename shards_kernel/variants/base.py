@@ -6,7 +6,7 @@ provides common functionality that variants can extend.
 
 import copy
 from abc import ABC, abstractmethod
-from threading import RLock
+from threading import Lock
 from typing import Any, Callable, Optional
 
 from shards_kernel.common.codec import equal_json_values
@@ -138,8 +138,9 @@ class BaseKernel(Kernel):
                 list_entries. Restored entries are verified before use;
                 storage failures must prevent tool execution.
         """
-        # Serialize concurrent synchronous submissions across the full audit/effect lifecycle.
-        self._submit_lock = RLock()
+        # Non-blocking, single-flight admission avoids unbounded request waiters.
+        self._submit_lock = Lock()
+        self._pending_halt: Optional[str] = None
         self._config: Optional[KernelConfig] = None
         self._state_machine: Optional[StateMachine] = None
         self._ledger: Optional[AuditLedger] = None
@@ -377,13 +378,53 @@ class BaseKernel(Kernel):
     ) -> KernelReceipt:
         """Submit a request for processing.
 
-        Concurrent synchronous calls are serialized; each receives an audited result.
-        An unexpected exception halts the kernel. A tool call is not run
-        unless its parameters were bound and an intent audit record was
-        appended first.
+        Only one request enters the state machine at a time. Concurrent
+        callers receive an independently audited KERNEL_BUSY denial, rather
+        than blocking behind an unbounded handler or corrupting the lifecycle.
         """
-        with self._submit_lock:
+        if not self._submit_lock.acquire(blocking=False):
+            return self._deny_busy(request)
+        try:
             return self._submit_serialized(request, permit_token)
+        finally:
+            try:
+                if self._pending_halt is not None and not self._halted:
+                    self._halt_locked(self._pending_halt)
+            finally:
+                self._submit_lock.release()
+
+    def _deny_busy(self, request: KernelRequest) -> KernelReceipt:
+        """Audited pre-admission refusal; no permit verification or tool dispatch.
+
+        A BUSY record is not a valid ALLOW/DENY policy evaluation: it records
+        rejection at the admission boundary while the state machine is owned
+        by an in-flight request. The audit ledger serializes concurrent appends.
+        """
+        if self._state_machine is None or self._ledger is None or self._config is None:
+            raise StateError("Kernel not booted")
+        state = self._state_machine.state
+        error = "KERNEL_BUSY: single-flight admission in progress"
+        entry = self._ledger.append(
+            request_id=request.request_id,
+            actor=request.actor,
+            intent=request.intent,
+            decision=Decision.DENY,
+            state_from=state,
+            state_to=state,
+            ts_ms=self.config.clock.now_ms(),
+            error=error,
+            audit_phase="outcome",
+        )
+        return KernelReceipt(
+            request_id=request.request_id,
+            status=ReceiptStatus.REJECTED,
+            state_from=state,
+            state_to=state,
+            ts_ms=self.config.clock.now_ms(),
+            decision=Decision.DENY,
+            error=error,
+            evidence_hash=entry.entry_hash,
+        )
 
     def _submit_serialized(
         self, request: KernelRequest, permit_token: Optional[PermitToken]
@@ -868,10 +909,59 @@ class BaseKernel(Kernel):
         return None
 
     def halt(self, reason: str) -> KernelReceipt:
-        """Halt the kernel."""
+        """Request terminal halt without interrupting an in-flight audit.
+
+        A busy kernel records an immediate HALT_QUEUED audit and returns a
+        pending receipt. The current submission records its outcome first,
+        then applies the queued halt before releasing its admission lock.
+        In-process handlers cannot be safely pre-empted; operators must use
+        OS supervision for permanently blocked or untrusted external effects.
+        """
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
+        if self._submit_lock.acquire(blocking=False):
+            try:
+                return self._halt_locked(reason)
+            finally:
+                self._submit_lock.release()
 
+        state = self._state_machine.state
+        entry = self._ledger.append(
+            request_id="HALT",
+            actor="SYSTEM",
+            intent=reason,
+            decision=Decision.HALT,
+            state_from=state,
+            state_to=state,
+            ts_ms=self.config.clock.now_ms(),
+            error="HALT_QUEUED",
+            audit_phase="halt",
+        )
+        self._pending_halt = reason
+        # Close the race where the submission completed while the request
+        # audit was committed: if the owner has gone, perform the halt now.
+        if self._submit_lock.acquire(blocking=False):
+            try:
+                if not self._halted:
+                    self._halt_locked(reason)
+            finally:
+                self._submit_lock.release()
+        return KernelReceipt(
+            request_id="HALT",
+            status=ReceiptStatus.ACCEPTED,
+            state_from=state,
+            state_to=state,
+            ts_ms=self.config.clock.now_ms(),
+            decision=Decision.HALT,
+            error="HALT_QUEUED",
+            evidence_hash=entry.entry_hash,
+        )
+
+    def _halt_locked(self, reason: str) -> KernelReceipt:
+        """Finalize terminal halt only while holding the admission lock."""
+        if self._state_machine is None or self._ledger is None:
+            raise StateError("Kernel not booted")
+        self._pending_halt = None
         self._halted = True
         state_from = self._state_machine.state
         self._state_machine.halt()
