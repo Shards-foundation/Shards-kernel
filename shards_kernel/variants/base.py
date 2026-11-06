@@ -140,6 +140,8 @@ class BaseKernel(Kernel):
         """
         # Non-blocking, single-flight admission avoids unbounded request waiters.
         self._submit_lock = Lock()
+        # Serialises admission vs. halt publication, without waiting on tool execution.
+        self._admission_lock = Lock()
         # Coordinate halt-intent writes with the end of single-flight admission:
         # no halt may be stranded between the owner's final check and unlock.
         self._halt_intent_lock = Lock()
@@ -385,7 +387,9 @@ class BaseKernel(Kernel):
         callers receive an independently audited KERNEL_BUSY denial, rather
         than blocking behind an unbounded handler or corrupting the lifecycle.
         """
-        if not self._submit_lock.acquire(blocking=False):
+        with self._admission_lock:
+            admitted = self._submit_lock.acquire(blocking=False)
+        if not admitted:
             return self._deny_busy(request)
         try:
             return self._submit_serialized(request, permit_token)
@@ -394,6 +398,8 @@ class BaseKernel(Kernel):
                 try:
                     if self._pending_halt is not None and not self._halted:
                         self._halt_locked(self._pending_halt)
+                    elif self._halted:
+                        self._pending_halt = None
                 finally:
                     self._submit_lock.release()
 
@@ -436,8 +442,9 @@ class BaseKernel(Kernel):
 
     def _quarantine_failed_admission_audit(self, reason: str) -> None:
         """Prevent future execution when a pre-admission audit could not commit."""
-        with self._halt_intent_lock:
+        with self._admission_lock:
             self._pending_halt = reason
+        with self._halt_intent_lock:
             if self._submit_lock.acquire(blocking=False):
                 try:
                     if not self._halted:
@@ -946,11 +953,26 @@ class BaseKernel(Kernel):
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
 
-        with self._halt_intent_lock:
-            # Publish the stop intent *before* performing a potentially slow
-            # audit append. The in-flight submitter cannot finish and release
-            # admission ownership until this critical section exits.
+        # First publish the halt through the same lock that admits new work.
+        # A pending halt stays visible even if another submitter currently owns
+        # the finalisation lock; later admission can only fail closed.
+        with self._admission_lock:
+            if self._halted:
+                raise StateError("Kernel is halted")
             self._pending_halt = reason
+
+        with self._halt_intent_lock:
+            if self._halted:
+                return KernelReceipt(
+                    request_id="HALT",
+                    status=ReceiptStatus.ACCEPTED,
+                    state_from=KernelState.HALTED,
+                    state_to=KernelState.HALTED,
+                    ts_ms=self.config.clock.now_ms(),
+                    decision=Decision.HALT,
+                    error="HALT_ALREADY_EFFECTIVE",
+                    evidence_hash=self._ledger.root_hash,
+                )
             if self._submit_lock.acquire(blocking=False):
                 try:
                     return self._halt_locked(reason)
