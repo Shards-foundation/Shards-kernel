@@ -615,6 +615,58 @@ def test_failed_concurrent_admission_audit_quarantines_kernel(
     )[0]
 
 
+def test_audit_failure_quarantine_when_owner_already_released():
+    """Lost audit while idle must halt immediately, not strand pending halt."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("unowned-audit", "strict", clock=VirtualClock(1000)))
+    kernel._quarantine_failed_admission_audit("no audit persistence")
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt == "no audit persistence"
+    assert any(
+        entry.decision is Decision.HALT for entry in kernel.export_evidence().ledger_entries
+    )
+
+
+def test_pending_halt_prevents_new_submission_even_before_terminal_transition():
+    """The admission gate rejects a pending halt; subsequent finalization is terminal."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("pending-admission", "strict", clock=VirtualClock(1000)))
+    kernel._pending_halt = "operator pending"
+    with pytest.raises(StateError, match="halt requested"):
+        kernel.submit(request({"amount": 1}))
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+
+
+def test_queued_halt_skips_second_halt_after_racing_fault(monkeypatch):
+    """Do not write a duplicate terminal event if the owner already halted."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("halt-fault-race", "strict", clock=VirtualClock(1000)))
+    ledger = kernel._ledger
+    assert ledger is not None
+    kernel._submit_lock.acquire()
+    original_append = ledger.append
+
+    def append_and_fault(*args, **kwargs):
+        entry = original_append(*args, **kwargs)
+        if kwargs.get("error") == "HALT_QUEUED":
+            kernel._submit_lock.release()
+            kernel._halt_on_fault("synthetic racing terminal failure")
+        return entry
+
+    monkeypatch.setattr(ledger, "append", append_and_fault)
+    queued = kernel.halt("requested")
+    assert queued.decision is Decision.HALT
+    assert queued.error == "HALT_QUEUED"
+    assert kernel.get_state() is KernelState.HALTED
+    bundle = kernel.export_evidence()
+    assert len(bundle.ledger_entries) == 2
+    assert [e.decision for e in bundle.ledger_entries] == [Decision.HALT, Decision.HALT]
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
 def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypatch):
     """A failed submit cannot strand a lock or allow subsequent tool execution."""
     kernel, key, _clock, seen = signed_kernel
