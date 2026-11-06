@@ -326,10 +326,24 @@ def test_policy_preflight_restores_handlers_on_unexpected_exception(tmp_path, mo
 
     monkeypatch.setattr(policy_preflight.signal, "signal", intercept)
     monkeypatch.setattr(policy_preflight, "preflight", unexpected)
-    with pytest.raises(RuntimeError, match="synthetic unexpectedly"):
-        policy_preflight.main(["--policy", str(tmp_path / "missing.json")])
+    assert policy_preflight.main(["--policy", str(tmp_path / "missing.json")]) == 2
     assert calls.count(policy_preflight.signal.SIGINT) == 2
     assert calls.count(policy_preflight.signal.SIGTERM) == 2
+
+
+
+@pytest.mark.parametrize("state", [["IDLE"], {"malicious": "object"}, True])
+def test_unhashable_health_states_fail_closed(local_operator, state):
+    LocalTestHandler.health = {"status": "healthy", "kernel_state": state}
+    with pytest.raises(probe_operator.ProbeFailure, match="unhealthy_kernel"):
+        probe_operator.probe_once(config(local_operator), threading.Event())
+
+
+@pytest.mark.parametrize("state", [["IDLE"], {"malicious": "object"}, False])
+def test_unhashable_authenticated_states_fail_closed(local_operator, state):
+    LocalTestHandler.status["state"] = state
+    with pytest.raises(probe_operator.ProbeFailure, match="invalid_kernel_status"):
+        probe_operator.probe_once(config(local_operator, "--check-status"), threading.Event())
 
 
 def test_policy_preflight_missing_trust_root_no_disclosure(tmp_path, monkeypatch, capsys):
