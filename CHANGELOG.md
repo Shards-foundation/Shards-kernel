@@ -8,7 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
-- Require exact, type-aware equality for every signed permit parameter at execution. Previously a request could omit a signed parameter under subset matching and still invoke a defaulted or variadic handler (SK-002). Signers must explicitly include resolved handler defaults; this intentionally tightens the permit contract. Existing published `0.1.2` wheels remain unchanged until a separately verified security release.
+- Snapshot mutable signed permit fields before verification and preserve that snapshot through final dispatch, preventing callers from altering nested permit mappings between signature validation and scope checks. Require exact, type-aware equality for every signed permit parameter at execution. Previously a request could omit a signed parameter under subset matching and still invoke a defaulted or variadic handler (SK-002). Signers must explicitly include resolved handler defaults; this intentionally tightens the permit contract. Existing published `0.1.2` wheels remain unchanged until a separately verified security release.
 
 ### Added
 
