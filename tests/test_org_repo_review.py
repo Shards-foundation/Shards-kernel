@@ -11,7 +11,7 @@ import urllib.error
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest import mock
+from unittest.mock import patch
 
 from scripts import org_repo_review as review
 
@@ -101,8 +101,8 @@ class TestOrgSafety(unittest.TestCase):
     def test_503_retry_is_bounded(self) -> None:
         opener = FakeOpener([urllib.error.HTTPError("https://api.github.com", 503, "unavailable", {}, None),
                              [make_repo()]])
-        with mock.patch.object(review.time, "sleep", return_value=None), \
-                mock.patch.object(review.time, "monotonic", side_effect=[0.0, 9.0]):
+        with patch.object(review.time, "sleep", return_value=None), \
+                patch.object(review.time, "monotonic", side_effect=[0.0, 9.0]):
             repos, _pages, complete = review.collect_repos(opener, self.settings, None, [])
         self.assertEqual(len(repos), 1)
         self.assertEqual(len(opener.requests), 2)
@@ -115,7 +115,7 @@ class TestOrgSafety(unittest.TestCase):
 
     def test_missing_repo_is_not_success(self) -> None:
         opener = FakeOpener([[]])
-        with mock.patch.object(review, "make_opener", return_value=opener):
+        with patch.object(review, "make_opener", return_value=opener):
             with self.assertRaisesRegex(review.InventoryError, "no_repositories_visible"):
                 review.report_inventory(self.settings, None, [])
 
@@ -143,8 +143,8 @@ class TestOrgSafety(unittest.TestCase):
         api = FakeOpener([[make_repo()], urllib.error.HTTPError(
             "https://api.github.com", 404, "missing", {}, None,
         )])
-        with mock.patch.object(review, "make_opener", return_value=api), \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+        with patch.object(review, "make_opener", return_value=api), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
             outcome = review.report_inventory(settings, None, [])
         self.assertEqual(outcome, 2)
         self.assertEqual(json.loads(out.getvalue())["assessment"], "NOT_VERIFIED")
@@ -152,8 +152,8 @@ class TestOrgSafety(unittest.TestCase):
     def test_explicit_unprotected_branch_is_nonzero(self) -> None:
         settings = review.validate(review.parse_args(["--org", "Shards-foundation", "--check-branches"]))
         api = FakeOpener([[make_repo()], {"protected": False}])
-        with mock.patch.object(review, "make_opener", return_value=api), \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+        with patch.object(review, "make_opener", return_value=api), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
             outcome = review.report_inventory(settings, None, [])
         self.assertEqual(outcome, 1)
         self.assertEqual(json.loads(out.getvalue())["assessment"], "UNPROTECTED")
@@ -181,13 +181,13 @@ class TestOrgSafety(unittest.TestCase):
             root = Path(folder)
             untouched = root / "important.txt"
             untouched.write_text("DO NOT TOUCH", encoding="utf-8")
-            with mock.patch.object(review, "make_opener", side_effect=AssertionError("network")), \
-                    mock.patch.object(review, "report_inventory", side_effect=AssertionError("network")):
+            with patch.object(review, "make_opener", side_effect=AssertionError("network")), \
+                    patch.object(review, "report_inventory", side_effect=AssertionError("network")):
                 self.assertEqual(review.main(["--org", "Shards-foundation", "--dry-run"]), 0)
             self.assertEqual(untouched.read_text(encoding="utf-8"), "DO NOT TOUCH")
 
     def test_removed_legacy_options_do_not_silently_run(self) -> None:
-        with mock.patch("sys.stderr", new_callable=io.StringIO):
+        with patch("sys.stderr", new_callable=io.StringIO):
             with self.assertRaises(SystemExit) as ctx:
                 review.parse_args(["--org", "Shards-foundation", "--workspace", "unused-test-directory"])
         self.assertNotEqual(ctx.exception.code, 0)
@@ -202,8 +202,8 @@ class TestOrgSafety(unittest.TestCase):
         opener = FakeOpener([[make_repo("A"), make_repo("B")]])
         repos, pages, complete = review.collect_repos(opener, settings, None, [])
         self.assertEqual((len(repos), pages, complete), (1, 1, False))
-        with mock.patch.object(review, "make_opener", return_value=FakeOpener([[make_repo("A"), make_repo("B")]])), \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+        with patch.object(review, "make_opener", return_value=FakeOpener([[make_repo("A"), make_repo("B")]])), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
             result = review.report_inventory(settings, None, [])
         self.assertEqual(result, 2)
         self.assertFalse(json.loads(out.getvalue())["complete"])
@@ -226,8 +226,8 @@ class TestOrgSafety(unittest.TestCase):
     def test_strict_mode_stale_repo_is_nonzero(self) -> None:
         settings = review.validate(review.parse_args(["--org", "Shards-foundation", "--strict"]))
         opener = FakeOpener([[make_repo(pushed_at="2021-01-01T00:00:00Z")]])
-        with mock.patch.object(review, "make_opener", return_value=opener), \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+        with patch.object(review, "make_opener", return_value=opener), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
             result = review.report_inventory(settings, None, [])
         self.assertEqual(result, 1)
         self.assertEqual(json.loads(output.getvalue())["assessment"], "ADVISORY")
@@ -246,7 +246,7 @@ class TestOrgSafety(unittest.TestCase):
     def test_response_size_limit_and_malformed_json_fail_closed(self) -> None:
         settings = self.settings
         opener = FakeOpener([[make_repo()]])
-        with mock.patch.object(review, "MAX_RESPONSE_BYTES", 8):
+        with patch.object(review, "MAX_RESPONSE_BYTES", 8):
             with self.assertRaisesRegex(review.InventoryError, "github_response_too_large"):
                 review.read_api(opener, "/orgs/Shards-foundation/repos", settings, None, [])
         class InvalidOpener:
@@ -286,8 +286,8 @@ class TestOrgSafety(unittest.TestCase):
                 callbacks[signum](signum, None)
                 return 0
             with self.subTest(signum=signum), \
-                    mock.patch.object(review.signal, "signal", capture), \
-                    mock.patch.object(review, "report_inventory", run):
+                    patch.object(review.signal, "signal", capture), \
+                    patch.object(review, "report_inventory", run):
                 self.assertEqual(review.main(["--org", "Shards-foundation"]), expected)
 
     def test_interruption_during_retry_is_nonzero(self) -> None:
@@ -296,17 +296,17 @@ class TestOrgSafety(unittest.TestCase):
         ticks = itertools.count(0.0, 0.0)
         def stop_on_sleep(_seconds):
             stopped.append(signal.SIGINT)
-        with mock.patch.object(review.time, "monotonic", side_effect=lambda: next(ticks)), \
-                mock.patch.object(review.time, "sleep", side_effect=stop_on_sleep):
+        with patch.object(review.time, "monotonic", side_effect=lambda: next(ticks)), \
+                patch.object(review.time, "sleep", side_effect=stop_on_sleep):
             with self.assertRaisesRegex(review.InventoryError, "interrupted"):
                 review.collect_repos(opener, self.settings, None, stopped)
 
     def test_real_inventory_never_invokes_subprocesses_or_filesystem_writes(self) -> None:
         opener = FakeOpener([[make_repo()]])
-        with mock.patch.object(review, "make_opener", return_value=opener), \
-                mock.patch("subprocess.run", side_effect=AssertionError("subprocess")), \
-                mock.patch("pathlib.Path.write_text", side_effect=AssertionError("filesystem write")), \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+        with patch.object(review, "make_opener", return_value=opener), \
+                patch("subprocess.run", side_effect=AssertionError("subprocess")), \
+                patch("pathlib.Path.write_text", side_effect=AssertionError("filesystem write")), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
             self.assertEqual(review.report_inventory(self.settings, None, []), 0)
         self.assertTrue(json.loads(output.getvalue())["complete"])
 
