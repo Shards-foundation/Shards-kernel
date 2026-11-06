@@ -82,40 +82,46 @@ def tracked_paths(root: Path) -> List[Path]:
     return [Path(name) for name in names]
 
 
-def file_findings(root: Path, relative: Path, max_bytes: int) -> List[Tuple[str, str]]:
-    """Find bounded text-hygiene problems without following symlinks."""
-    findings: List[Tuple[str, str]] = []
-    target = root / relative
+def _metadata_finding(root: Path, relative: Path, max_bytes: int) -> Optional[Tuple[str, str]]:
+    """Reject unsafe or missing tracked files before reading their contents."""
     for ancestor in relative.parents:
         if ancestor == Path("."):
             break
         if (root / ancestor).is_symlink():
-            return [("critical", "symlinked_tracked_directory")]
+            return ("critical", "symlinked_tracked_directory")
     try:
-        metadata = target.lstat()
+        metadata = (root / relative).lstat()
     except OSError:
-        return [("critical", "tracked_file_missing")]
+        return ("critical", "tracked_file_missing")
     if stat.S_ISLNK(metadata.st_mode):
-        return [("advisory", "tracked_symlink_requires_review")]
+        return ("advisory", "tracked_symlink_requires_review")
     if not stat.S_ISREG(metadata.st_mode):
-        return [("critical", "tracked_path_not_regular_file")]
+        return ("critical", "tracked_path_not_regular_file")
     if metadata.st_size > max_bytes:
-        return [("advisory", "file_above_scan_limit")]
-    if relative.suffix.lower() not in TEXT_SUFFIXES and relative.name not in SPECIAL_NAMES:
-        return findings
+        return ("advisory", "file_above_scan_limit")
+    return None
+
+
+def _bounded_text(path: Path, max_bytes: int) -> Tuple[Optional[str], bytes, Optional[str]]:
+    """Return a size-limited UTF-8 file read, or a safe rejection code."""
     try:
-        with target.open("rb") as stream:
+        with path.open("rb") as stream:
             content = stream.read(max_bytes + 1)
     except OSError:
-        return [("critical", "tracked_file_unreadable")]
+        return None, b"", "tracked_file_unreadable"
     if len(content) > max_bytes:
-        return [("advisory", "file_above_scan_limit")]
+        return None, b"", "file_above_scan_limit"
     if b"\x00" in content:
-        return [("critical", "nul_byte_in_text")]
+        return None, b"", "nul_byte_in_text"
     try:
-        decoded = content.decode("utf-8")
+        return content.decode("utf-8"), content, None
     except UnicodeDecodeError:
-        return [("critical", "text_not_utf8")]
+        return None, b"", "text_not_utf8"
+
+
+def _text_findings(decoded: str, content: bytes, relative: Path) -> List[Tuple[str, str]]:
+    """Check text-level hygiene independently of filesystem validation."""
+    findings: List[Tuple[str, str]] = []
     if content and not content.endswith(b"\n"):
         findings.append(("advisory", "no_terminal_newline"))
     if b"\r\n" in content:
@@ -133,6 +139,22 @@ def file_findings(root: Path, relative: Path, max_bytes: int) -> List[Tuple[str,
         except (SyntaxError, ValueError, TypeError):
             findings.append(("critical", "python_syntax_invalid"))
     return findings
+
+
+def file_findings(root: Path, relative: Path, max_bytes: int) -> List[Tuple[str, str]]:
+    """Audit one tracked file; no write, symlink traversal or unbounded read."""
+    metadata_problem = _metadata_finding(root, relative, max_bytes)
+    if metadata_problem is not None:
+        return [metadata_problem]
+    if relative.suffix.lower() not in TEXT_SUFFIXES and relative.name not in SPECIAL_NAMES:
+        return []
+    decoded, content, error = _bounded_text(root / relative, max_bytes)
+    if error is not None:
+        severity = "advisory" if error == "file_above_scan_limit" else "critical"
+        return [(severity, error)]
+    if decoded is None:
+        return [("critical", "text_decode_failed")]
+    return _text_findings(decoded, content, relative)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
