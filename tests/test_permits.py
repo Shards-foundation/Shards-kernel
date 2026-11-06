@@ -1296,8 +1296,8 @@ class TestPermitVerificationPositive(unittest.TestCase):
         self.assertEqual(result.status, Decision.ALLOW)
         self.assertEqual(len(result.reasons), 0)
 
-    def test_allow_subset_params(self) -> None:
-        """Allow request with subset of permit params."""
+    def test_deny_omitted_signed_params(self) -> None:
+        """Omitting a signed parameter denies authorisation."""
         from dataclasses import replace
 
         permit = replace(
@@ -1319,10 +1319,11 @@ class TestPermitVerificationPositive(unittest.TestCase):
             current_jurisdiction="test-jurisdiction",
             allowed_actions=frozenset(["echo"]),
             request_actor="worker1",
-            request_params={"text": "hello"},  # Subset of permit params
+            request_params={"text": "hello"},  # Signed extra field omitted
         )
 
-        self.assertEqual(result.status, Decision.ALLOW)
+        self.assertEqual(result.status, Decision.DENY)
+        self.assertIn("PARAMS_MISMATCH", result.reasons)
 
     def test_allow_multi_use_permit(self) -> None:
         """Allow multi-use permit for multiple executions."""
@@ -1364,6 +1365,17 @@ class TestPermitVerificationPositive(unittest.TestCase):
             request_params={"text": "hello"},
         )
         self.assertEqual(r2.status, Decision.ALLOW)
+
+
+def test_exact_scope_rejects_non_mappings_and_json_type_aliases() -> None:
+    """Cover malformed boundaries as well as valid exact signed arguments."""
+    from shards_kernel.permits import _params_satisfy_permit
+
+    assert _params_satisfy_permit({"value": [1, {"ok": None}]}, {"value": [1, {"ok": None}]})
+    assert not _params_satisfy_permit(None, {"value": 1})
+    assert not _params_satisfy_permit({"value": 1}, None)
+    assert not _params_satisfy_permit({"value": True}, {"value": 1})
+    assert not _params_satisfy_permit({}, {"value": None})
 
 
 if __name__ == "__main__":
