@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 from datetime import datetime, timedelta, timezone
+from urllib.error import HTTPError
 from pathlib import Path
 
 import pytest
@@ -173,6 +174,22 @@ def test_actions_monitor_reports_failed_run(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(actions, "collect_runs",
                         lambda *_args: ([run], True, 1))
     assert actions.monitor(options, None, [], now) == 1
+
+
+def test_actions_unauthorized_fails_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    class UnauthorizedOpener:
+        calls = 0
+
+        def open(self, request, timeout):
+            self.calls += 1
+            raise HTTPError(request.full_url, 401, "Unauthorized", {}, None)
+
+    opener = UnauthorizedOpener()
+    monkeypatch.setattr(actions.urllib.request, "build_opener", lambda *_args: opener)
+    options = actions.validate(actions.parse_args(["--attempts", "3"]))
+    with pytest.raises(actions.MonitorError, match="github_http_401"):
+        actions.fetch_page(options, 1, "synthetic-test-token", [])
+    assert opener.calls == 1
 
 
 def test_actions_dry_run_never_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
