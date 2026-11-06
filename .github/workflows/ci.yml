@@ -254,3 +254,4 @@ jobs:
           "$wheel_venv/bin/shards-kernel" --version
           "$wheel_venv/bin/shards-kernel" demo --json
           "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_concurrency.py"
+          "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_permit_scope.py"
