@@ -2,8 +2,8 @@ name: Publish verified release to PyPI
 
 # Matches the pending PyPI trusted publisher:
 # Shards-foundation / Shards-kernel / publish.yml / environment pypi.
-# The already published GitHub release v0.1.0 can be published using
-# Actions > Publish verified release to PyPI > Run workflow (main, tag v0.1.0).
+# Only dispatch from the exact immutable, published vX.Y.Z tag.
+# The tag must be a protected-main ancestor and the release assets must match.
 on:
   workflow_dispatch:
     inputs:
@@ -28,7 +28,7 @@ jobs:
     if: >-
       github.repository == 'Shards-foundation/Shards-kernel' &&
       (
-        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == format('refs/tags/{0}', inputs.release_tag)) ||
         (github.event_name == 'release' && github.event.release.prerelease == false)
       )
     runs-on: ubuntu-24.04
@@ -49,6 +49,14 @@ jobs:
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Only final semantic-version tags (vX.Y.Z) may be published" >&2
+            exit 1
+          }
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG" || {
+            echo "Publisher must execute at the immutable release tag" >&2
+            exit 1
+          }
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" || {
+            echo "Publisher checkout differs from release tag commit" >&2
             exit 1
           }
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)" = "$RELEASE_TAG"

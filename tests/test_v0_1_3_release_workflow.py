@@ -20,6 +20,18 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert "gh release create v0.1.3" in current
     assert "gh workflow run publish.yml" in current
     assert "--field release_tag=v0.1.3" in current
+    assert "--ref v0.1.3" in current
+    assert "--ref main" not in current
+    assert "Verify published PyPI artifacts and fresh installation" in current
+    assert "https://pypi.org/pypi/shards-kernel/" in current
+    assert "Published PyPI artifact hash differs from verified GitHub release" in current
+    assert "shards-kernel[crypto]==0.1.3" in current
+    assert "--index-url https://pypi.org/simple" in current
+    publisher = (ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    assert "github.ref == format('refs/tags/{0}', inputs.release_tag)" in publisher
+    assert 'test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"' in publisher
+    assert "Publisher checkout differs from release tag commit" in publisher
+    assert "github.ref == 'refs/heads/main'" not in publisher
     assert "sha256sum -c SHA256SUMS" in current
     assert "sha256sum --check --strict SHA256SUMS" in current
     assert "cmp -- dist/SHA256SUMS" in current
