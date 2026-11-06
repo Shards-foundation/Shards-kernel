@@ -653,6 +653,65 @@ def test_pending_halt_prevents_new_submission_even_before_terminal_transition():
     assert kernel._pending_halt is None
 
 
+def test_audit_quarantine_is_not_stranded_at_submission_unlock(monkeypatch):
+    """A failing audit cannot race the owner's final halt check and unlock."""
+    from threading import Lock
+
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("unlock-race", "strict", clock=VirtualClock(1000)))
+    entered_release, finish_release, quarantine_entered = Event(), Event(), Event()
+
+    class PausingLock:
+        def __init__(self):
+            self.lock = Lock()
+            self.paused = False
+
+        def acquire(self, blocking=True):
+            return self.lock.acquire(blocking=blocking)
+
+        def release(self):
+            if not self.paused:
+                self.paused = True
+                entered_release.set()
+                if not finish_release.wait(3):
+                    raise RuntimeError("Timed out at controlled admission unlock")
+            self.lock.release()
+
+    kernel._submit_lock = PausingLock()
+    submit_outcome = []
+    submitting = Thread(
+        target=lambda: submit_outcome.append(kernel.submit(request({}))),
+        daemon=True,
+    )
+    submitting.start()
+    assert entered_release.wait(2)
+
+    def quarantine():
+        quarantine_entered.set()
+        kernel._quarantine_failed_admission_audit("synthetic write failure")
+
+    fault_thread = Thread(target=quarantine, daemon=True)
+    fault_thread.start()
+    try:
+        assert quarantine_entered.wait(2)
+        # While the first thread is in the final check/release critical section,
+        # the quarantine writer must not finish and leave an IDLE pending halt.
+        assert fault_thread.is_alive()
+    finally:
+        finish_release.set()
+    submitting.join(3)
+    fault_thread.join(3)
+    assert not submitting.is_alive()
+    assert not fault_thread.is_alive()
+    assert len(submit_outcome) == 1
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    bundle = kernel.export_evidence()
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
 def test_queued_halt_skips_second_halt_after_racing_fault(monkeypatch):
     """Do not write a duplicate terminal event if the owner already halted."""
     kernel = StrictKernel()
