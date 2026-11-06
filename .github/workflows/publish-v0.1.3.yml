@@ -1,0 +1,570 @@
+name: Publish Shards-Kernel v0.1.3
+
+# One-shot security and concurrency stabilisation release; no new external-tool privileges.
+# This file is first added by the final release PR and triggers only on that
+# merged push to main; later pushes do not run it unless this file changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-v0.1.3.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shards-kernel-v0.1.3-github-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify v0.1.3 source and clean installed wheel
+    if: github.repository == 'Shards-foundation/Shards-kernel'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact protected main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Exercise actual dispatch shell and negative-continuation gate
+        run: bash scripts/ci/check_release_dispatch_shell.sh
+
+      - name: Exercise annotated and lightweight Git tag recovery
+        run: bash scripts/ci/check_release_tag_shell.sh
+
+      - name: Verify release version
+        run: |
+          python - <<'PY'
+          from shards_kernel._version import __version__
+          if __version__ != "0.1.3":
+              raise SystemExit("Expected Shards-Kernel v0.1.3 release")
+          print("Release version: v" + __version__)
+          PY
+
+      - name: Install package and release tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,crypto,mcp]"
+          python -m pip install build twine pip-audit bandit
+
+      - name: Verify lint
+        run: ruff check . --select E,F --ignore E501
+
+      - name: Mandatory real-process local E2E gate
+        run: python scripts/ci/run_e2e_gate.py
+
+      - name: Verify complete branch-aware test coverage and governance
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest --cov=shards_kernel --cov=implementations \
+            --cov=scripts.ci.run_e2e_gate --cov-branch \
+            --cov-report=term-missing --cov-report=json:coverage.json \
+            --cov-fail-under=90
+          python - <<'PY'
+          import json
+          import math
+          with open("coverage.json", encoding="utf-8") as report:
+              coverage = float(json.load(report)["totals"]["percent_covered"])
+          if not math.isfinite(coverage) or coverage < 90.0:
+              raise SystemExit("Release failed the unrounded 90% coverage gate")
+          print(f"Unrounded release coverage: {coverage:.6f}%")
+          PY
+          python scripts/ci/check_governance_coverage.py coverage.json
+
+      - name: Smoke tests and documented demos
+        run: |
+          ./scripts/smoke.sh
+          python examples/01_minimal_request.py
+          python examples/02_verify_evidence.py
+          python examples/03_fail_closed_ambiguity.py
+          python examples/04_sqlite_persistent_ledger.py
+
+      - name: Audit declared dependencies and Python security
+        run: |
+          python -m pip check
+          pip-audit .
+          bandit -r shards_kernel implementations -ll
+
+      - name: Build and validate distribution artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m build
+          python scripts/ci/check_wheel_identity.py dist/*.whl
+          twine check dist/*.whl dist/*.tar.gz
+          (
+            cd dist
+            sha256sum ./*.whl ./*.tar.gz > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Verify installed wheel in a fresh virtual environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_venv="$RUNNER_TEMP/shards-kernel-release-wheel"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
+          (cd "$RUNNER_TEMP" && "$wheel_venv/bin/python" -c 'import shards_kernel; from shards_kernel.api import StrictKernel; print("Verified release wheel imports")')
+          "$wheel_venv/bin/shards-kernel" --help
+
+      - name: Verify installed-wheel signed-permit and concurrency safety gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_venv="$RUNNER_TEMP/shards-kernel-release-wheel"
+          wheel="$(find "$GITHUB_WORKSPACE/dist" -maxdepth 1 -type f -name 'shards_kernel-0.1.3-*.whl' -print -quit)"
+          test -n "$wheel"
+          "$wheel_venv/bin/python" -m pip install "$wheel[crypto,mcp]"
+          "$wheel_venv/bin/python" -m pip check
+          (
+            cd "$RUNNER_TEMP"
+            "$wheel_venv/bin/shards-kernel" demo --json
+            "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_concurrency.py"
+            "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_permit_scope.py"
+          )
+
+      - name: Verify PyPI README description is embedded in wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from email import policy
+          from email.parser import BytesParser
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          readme = Path("README.md").read_text(encoding="utf-8")
+          wheels = list(Path("dist").glob("shards_kernel-0.1.3-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("Expected exactly one v0.1.3 wheel")
+          with ZipFile(wheels[0]) as wheel:
+              metadata_paths = [
+                  name for name in wheel.namelist()
+                  if name.endswith(".dist-info/METADATA")
+              ]
+              if len(metadata_paths) != 1:
+                  raise SystemExit("Wheel must contain exactly one METADATA")
+              metadata = BytesParser(policy=policy.default).parsebytes(
+                  wheel.read(metadata_paths[0])
+              )
+          payload = metadata.get_payload(decode=True)
+          if not isinstance(payload, bytes):
+              raise SystemExit("Expected UTF-8 README bytes in wheel metadata")
+          description = payload.decode("utf-8", errors="strict")
+          if readme.strip() != description.strip():
+              raise SystemExit("Published description differs from committed README")
+          for required in (
+              "Shards-Kernel branded banner",
+              "docs/images/shards-kernel-banner.svg",
+              "License: MIT",
+              "## When to use Shards-Kernel",
+              "shards-kernel demo --json",
+              "shards-kernel[crypto]==0.1.3",
+          ):
+              if required not in description:
+                  raise SystemExit("Missing PyPI README text: " + required)
+          if metadata.get("Version") != "0.1.3":
+              raise SystemExit("Wrong wheel metadata version")
+          print("Verified exact PyPI long description and version 0.1.3")
+          PY
+
+      - name: Upload exact verified build to isolated release job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shards-kernel-v0.1.3-verified
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish immutable v0.1.3 GitHub assets
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact protected main commit without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download isolated verified distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: shards-kernel-v0.1.3-verified
+          path: dist
+
+      - name: Revalidate exact verified artifact set
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
+          test -f dist/shards_kernel-0.1.3-py3-none-any.whl
+          test -f dist/shards_kernel-0.1.3.tar.gz
+          (cd dist && sha256sum --check --strict SHA256SUMS)
+
+      - name: Publish GitHub Release with checksummed wheel and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A rerun can resume an existing draft, but it must never overwrite
+          # an existing release asset. Every asset is checked against the
+          # verified build before publication or publisher dispatch.
+          if gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Verifying existing v0.1.3 release for safe resume"
+          else
+          # A transport/authentication failure must NOT be mistaken for an absent tag.
+          # ls-remote without --exit-code returns success with empty output for no match.
+          tag_matches="$(git ls-remote --tags --refs origin refs/tags/v0.1.3)" || {
+            echo "Cannot verify absence of v0.1.3 tag; refusing release" >&2
+            exit 1
+          }
+          if [ -n "$tag_matches" ]; then
+            echo "Refusing to replace the existing v0.1.3 tag" >&2
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          # Shards-Kernel v0.1.3
+
+          Security and concurrency stabilisation for the self-hosted AI-agent authorisation and audit library.
+
+          - SK-002: reject signed-permit parameter omissions, unexpected fields, nested type mismatches and mutable-permit substitution; match exact effective tool arguments.
+          - SK-001: bounded single-flight admission, audited busy denials and synchronized evidence snapshots.
+          - Operator halt: explicitly distinguish queued (HTTP 202, nonterminal) from confirmed HALTED (HTTP 200); audit in-flight outcomes before finalisation.
+          - Verify Python 3.9–3.15 CI, local multi-process E2E, PostgreSQL test integration, clean installed-wheel security probes and release checks before publication.
+          - Retain the signed local reference operator for narrowly scoped echo/add tools; local official MCP v2 agent integration requires Python 3.11+.
+
+          **Supported boundary:** local, self-hosted reference control plane and Python library integrating trusted tool handlers; not an OS sandbox, remote MCP gateway, trading executor, or guarantee of exactly-once external effects.
+          **Migration:** previously published v0.1.2 does not enforce the corrected parameter and concurrency boundaries. Permit issuers must sign the exact effective parameters including handler defaults.
+
+          Includes independently checksummed Python wheel and source distribution.
+          NOTES
+          gh release create v0.1.3 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Shards-Kernel v0.1.3" \
+            --draft \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            dist/*.whl dist/*.tar.gz dist/SHA256SUMS
+          fi
+
+      # GITHUB_TOKEN-originated release events do not trigger release:published
+      # workflows. workflow_dispatch is exempt; this explicit dispatch runs
+      # the separate checksum/metadata verification and PyPI OIDC publisher.
+      - name: Verify published GitHub release before PyPI handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # For annotated tags, ^{} resolves the COMMIT rather than the tag
+          # object's SHA. For lightweight tags, the peeled ref is absent and
+          # the exact direct ref resolves to the commit. Refuse transport errors.
+          release_tag_commit() {
+            local peeled
+            peeled="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)" || return 1
+            if [ -n "$peeled" ]; then
+              printf '%s\n' "$peeled"
+            else
+              git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1
+            fi
+          }
+          require_unpublished_draft() {
+            test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = true || {
+              echo "Release was promoted during recovery; refusing asset mutation" >&2
+              return 1
+            }
+          }
+          # Reject pre-existing incorrect tags BEFORE ANY draft mutation.
+          # The mutable draft may have been left behind by an earlier run.
+          initial_tag_commit="$(release_tag_commit)"
+          if [ -n "$initial_tag_commit" ] && [ "$initial_tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Existing release tag conflicts with verified protected-main commit" >&2
+            exit 1
+          fi
+          # A successful create request is not sufficient: verify the published
+          # release identity and the exact three checksum-protected assets.
+          # GitHub draft assets are not yet immutable. A retry may rebuild
+          # different sdist bytes (e.g. after correcting workflow tests). Only
+          # repair the unpublished draft, never replace a published asset.
+          # The new bytes must have passed THIS run's read-only verification.
+          if [ "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "true" ]; then
+            require_unpublished_draft
+            draft_target="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
+            [[ "$draft_target" =~ ^[a-f0-9]{40}$ ]] || {
+              echo "Draft is not tied to a full commit SHA" >&2
+              exit 1
+            }
+            git merge-base --is-ancestor "$draft_target" "$GITHUB_SHA" || {
+              echo "Refusing to repair draft targeting an unrelated commit" >&2
+              exit 1
+            }
+            actual_names="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            while IFS= read -r existing_name; do
+              [ -z "$existing_name" ] && continue
+              case "$existing_name" in
+                SHA256SUMS|shards_kernel-0.1.3-py3-none-any.whl|shards_kernel-0.1.3.tar.gz) ;;
+                *) echo "Unexpected existing release asset; refusing draft repair" >&2; exit 1 ;;
+              esac
+            done <<< "$actual_names"
+            for artifact in dist/*.whl dist/*.tar.gz dist/SHA256SUMS; do
+              name="$(basename "$artifact")"
+              if printf '%s\n' "$actual_names" | grep -Fxq "$name"; then
+                staged_dir="$(mktemp -d "$RUNNER_TEMP/shards-draft-asset.XXXXXX")"
+                gh release download v0.1.3 --repo "$GITHUB_REPOSITORY" --dir "$staged_dir" --pattern "$name"
+                if ! cmp -s -- "$artifact" "$staged_dir/$name"; then
+                  echo "Replacing unpublished draft asset with newly verified artifact: $name"
+                  require_unpublished_draft
+                  gh release delete-asset v0.1.3 "$name" --repo "$GITHUB_REPOSITORY" --yes
+                  require_unpublished_draft
+                  gh release upload v0.1.3 "$artifact" --repo "$GITHUB_REPOSITORY"
+                fi
+              else
+                require_unpublished_draft
+                gh release upload v0.1.3 "$artifact" --repo "$GITHUB_REPOSITORY"
+              fi
+            done
+          fi
+          verified="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isPrerelease,assets \
+            --jq '.tagName == "v0.1.3" and (.isPrerelease | not) and (([.assets[].name] | sort) == (["SHA256SUMS", "shards_kernel-0.1.3-py3-none-any.whl", "shards_kernel-0.1.3.tar.gz"] | sort))')"
+          if [ "$verified" != "true" ]; then
+            echo "GitHub release v0.1.3 is not verified; refusing PyPI dispatch" >&2
+            exit 1
+          fi
+
+          # Compare the uploaded asset bytes with locally built, verified
+          # artifacts. GitHub's asset names alone are not an integrity proof,
+          # and a substituted checksum file must not validate itself.
+          verify_uploaded_assets() {
+            verify_dir="$(mktemp -d "$RUNNER_TEMP/shards-release-assets.XXXXXX")"
+            gh release download v0.1.3 \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir "$verify_dir" \
+              --pattern 'shards_kernel-0.1.3-*.whl' \
+              --pattern 'shards_kernel-0.1.3.tar.gz' \
+              --pattern 'SHA256SUMS'
+            test "$(find "$verify_dir" -maxdepth 1 -type f | wc -l)" -eq 3
+            cmp -- dist/SHA256SUMS "$verify_dir/SHA256SUMS"
+            (
+              cd "$verify_dir"
+              sha256sum --check --strict SHA256SUMS
+            )
+            for local_artifact in dist/*.whl dist/*.tar.gz; do
+              cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"
+            done
+          }
+          verify_uploaded_assets
+          # Draft GitHub releases do not always create a Git ref until they
+          # are promoted. Authenticate the draft's original target before any
+          # promotion, and never treat an absent draft tag as a wrong SHA.
+          release_is_draft="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+          target_commit="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
+          [[ "$target_commit" =~ ^[a-f0-9]{40}$ ]] || {
+            echo "Release has no unambiguous full-SHA target" >&2
+            exit 1
+          }
+          if [ "$release_is_draft" = "true" ]; then
+            # Recovery may come from an earlier verified push to main. Only
+            # advance an unpublished draft to the CURRENTLY verified main SHA,
+            # and only after the exact draft assets have passed byte comparison.
+            git merge-base --is-ancestor "$target_commit" "$GITHUB_SHA" || {
+              echo "Draft release target is not an ancestor of verified main" >&2
+              exit 1
+            }
+            if [ "$target_commit" != "$GITHUB_SHA" ]; then
+              gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"
+            fi
+            test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$GITHUB_SHA" || {
+              echo "Draft target revision mismatch" >&2
+              exit 1
+            }
+          else
+            test "$target_commit" = "$GITHUB_SHA" || {
+              echo "Published release target differs from verified protected-main commit" >&2
+              exit 1
+            }
+          fi
+
+          # Atomically create the missing Git tag BEFORE publishing. If another
+          # actor wins the tag race, fail closed rather than publishing against
+          # an untrusted tag; on rerun the pre-existing SHA must match.
+          tag_commit="$(release_tag_commit)"
+          if [ -n "$tag_commit" ] && [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Release tag points to another commit" >&2
+            exit 1
+          fi
+          if [ -z "$tag_commit" ]; then
+            test "$release_is_draft" = "true" || {
+              echo "Published release has no immutable Git tag" >&2
+              exit 1
+            }
+            require_unpublished_draft
+            gh api -X POST "/repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref=refs/tags/v0.1.3 \
+              -f sha="$GITHUB_SHA" >/dev/null || {
+              echo "Cannot create exact verified Git tag; refusing release" >&2
+              exit 1
+            }
+          fi
+          tag_commit="$(release_tag_commit)"
+          test "$tag_commit" = "$GITHUB_SHA" || {
+            echo "Release tag does not point to verified protected-main commit" >&2
+            exit 1
+          }
+
+          # Revalidate state, tag and ALL asset bytes immediately before
+          # promotion. This serializes competing Actions runs via workflow
+          # concurrency; these checks reject detectable external draft edits.
+          # GitHub does not provide atomic CAS for manual release mutations.
+          if [ "$release_is_draft" = "true" ]; then
+            require_unpublished_draft
+            test "$(release_tag_commit)" = "$GITHUB_SHA" || {
+              echo "Release tag changed before draft promotion" >&2
+              exit 1
+            }
+            test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$GITHUB_SHA" || {
+              echo "Release target changed before promotion" >&2
+              exit 1
+            }
+            verify_uploaded_assets
+            require_unpublished_draft
+            test "$(release_tag_commit)" = "$GITHUB_SHA" || {
+              echo "Release tag changed before publication" >&2
+              exit 1
+            }
+            gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --draft=false
+          fi
+          test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = false
+          test "$(release_tag_commit)" = "$GITHUB_SHA" || {
+            echo "Published release tag does not match verified commit" >&2
+            exit 1
+          }
+          verify_uploaded_assets
+          echo "Verified tag and uploaded bytes, published final GitHub release"
+
+  dispatch:
+    name: Dispatch trusted PyPI publisher from validated workflow run
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      # This job cannot run until the exact build was verified and the release
+      # job finished successfully. The publisher does NOT trust these dispatch
+      # inputs: it fetches run provenance and immutable artifacts via API.
+      - name: Dispatch using trusted workflow run identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run publish.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref v0.1.3 \
+            --field release_tag=v0.1.3 \
+            --field verified_run_id="$GITHUB_RUN_ID"
+
+  verify-pypi:
+    name: Verify published PyPI v0.1.3 artifacts and installed runtime
+    needs: dispatch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Download exact verified build for independent PyPI comparison
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: shards-kernel-v0.1.3-verified
+          path: dist
+
+      - name: Verify published PyPI artifacts and fresh installation
+        shell: bash
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          version = "0.1.3"
+          expected = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in Path("dist").iterdir()
+              if path.name.startswith(f"shards_kernel-{version}")
+          }
+          wheel_name = f"shards_kernel-{version}-py3-none-any.whl"
+          source_name = f"shards_kernel-{version}.tar.gz"
+          if set(expected) != {wheel_name, source_name}:
+              raise SystemExit("Incorrect verified local artifact set")
+          url = f"https://pypi.org/pypi/shards-kernel/{version}/json"
+          for attempt in range(48):
+              try:
+                  with urllib.request.urlopen(
+                      urllib.request.Request(url, headers={"Cache-Control": "no-cache"}),
+                      timeout=15,
+                  ) as response:
+                      published = json.load(response)
+              except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                  print(f"PyPI publication not visible yet: {type(exc).__name__}", flush=True)
+              else:
+                  metadata = published.get("info") or {}
+                  files = {
+                      item.get("filename"): item.get("digests", {}).get("sha256")
+                      for item in published.get("urls") or []
+                  }
+                  if metadata.get("name", "").lower().replace("_", "-") != "shards-kernel":
+                      raise SystemExit("PyPI project identity mismatch")
+                  if metadata.get("version") != version:
+                      raise SystemExit("PyPI package version mismatch")
+                  if set(expected).issubset(files):
+                      if any(files[name] != digest for name, digest in expected.items()):
+                          raise SystemExit("Published PyPI artifact hash differs from verified GitHub release")
+                      print("Verified published PyPI wheel and source hashes", flush=True)
+                      break
+              if attempt == 47:
+                  raise SystemExit("PyPI v0.1.3 publication did not become verifiable in time")
+              time.sleep(10)
+          PY
+          verified_venv="$RUNNER_TEMP/shards-kernel-published-pypi-venv"
+          python -m venv "$verified_venv"
+          "$verified_venv/bin/python" -m pip install --no-cache-dir \
+            --index-url https://pypi.org/simple \
+            "shards-kernel[crypto]==0.1.3"
+          "$verified_venv/bin/python" -m pip check
+          (
+            cd "$RUNNER_TEMP"
+            "$verified_venv/bin/python" -c 'import shards_kernel; assert shards_kernel.__version__ == "0.1.3"'
+            "$verified_venv/bin/shards-kernel" --version
+            "$verified_venv/bin/shards-kernel" demo --json
+          )

@@ -18,7 +18,7 @@ A **kernel** is a deterministic state machine that governs AI agent execution vi
 Install the published package with the optional cryptographic demo support, verify the Python namespace and CLI, and run a **local, offline** permit-and-audit demonstration:
 
 ```bash
-python -m pip install "shards-kernel[crypto]==0.1.2"
+python -m pip install "shards-kernel[crypto]==0.1.3"
 python -c "import shards_kernel; print(shards_kernel.__version__)"
 shards-kernel --version
 shards-kernel info --variant strict
@@ -97,7 +97,7 @@ A compliant kernel MUST satisfy:
 | INV-HASH-CHAIN | Chain integrity | Audit entries chain to previous hash |
 | INV-FAIL-CLOSED | Deny on ambiguity | Ambiguity/malformed/unhandled ⇒ `DENY` or `HALT` |
 | INV-DETERMINISM | Reproducibility | Identical inputs + initial state ⇒ identical outputs |
-| INV-HALT | Halt availability | Immediate halt from any state; terminal for session |
+| INV-HALT | Halt availability | Halt intent blocks new admission immediately; terminal `HALTED` follows the in-flight outcome audit |
 | INV-EVIDENCE | Exportability | Decisions exportable as verifiable evidence bundle |
 | INV-NO-IMPLICIT-ALLOW | Explicit permission | "Not denied" ≠ allowed; explicit `ALLOW` required |
 
@@ -145,6 +145,10 @@ If a module is not reachable via `shards_kernel.api`, it is **not** a supported 
 
 ---
 
+### Direct synchronous concurrency
+
+`kernel.submit()` uses **single-flight, non-blocking admission**: exactly one submission owns an instance's state machine; simultaneous calls immediately return an audited `Decision.DENY` / `KERNEL_BUSY` receipt before permit verification or tool dispatch. A busy denial does **not** consume a permit, prove signature validity, or mean the request was evaluated against policy. The audit ledger serializes concurrent append/export. An operator calling `halt()` during an active handler receives `ReceiptStatus.QUEUED`, `HALT_QUEUED` and a nonterminal `state_to`; the session moves to `HALTED` only after the handler's outcome is audited. The authenticated Flask/FastAPI `POST /halt` endpoints return **HTTP 202** with `status: halt_queued`, `receipt_status: QUEUED`, `halt_confirmed: false` and receipt/audit metadata. Clients must poll the authenticated `GET /status` until `HALTED`; **HTTP 200** with `halt_confirmed: true` confirms the terminal halt was completed before the response (including an in-flight request that finished during the halt audit). A queued receipt is never proof of effect cancellation. Because Python threads cannot safely pre-empt running tools, stalled effects require external process supervision. This is **not** a queue, hard timeout, cross-process lock or universal exactly-once guarantee. Use PostgreSQL authority for shared permits and provider-level idempotency and reconciliation for external effects.
+
 ## Kernel Variants
 
 Variants tune posture while preserving invariants:
@@ -163,12 +167,12 @@ Variants tune posture while preserving invariants:
 The PyPI distribution name is `shards-kernel`, the import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install "shards-kernel==0.1.2"
+python -m pip install "shards-kernel==0.1.3"
 python -c "import shards_kernel"
 shards-kernel --help
 ```
 
-**Version 0.1.2 is the documentation-focused patch release** distributed through [PyPI](https://pypi.org/project/shards-kernel/0.1.2/) using GitHub OIDC Trusted Publishing after release verification. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
+**Version 0.1.3 is the security and concurrency stabilisation release**: exact signed-parameter scope, audited single-flight admission and unambiguous queued-halt receipts. Verified artifacts are published through [PyPI](https://pypi.org/project/shards-kernel/) only after protected merge, release acceptance and GitHub OIDC Trusted Publishing. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"

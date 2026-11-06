@@ -83,6 +83,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Evidence bundles for `python -m kernels.cli.verify`: the command reads `ledger_entries`. The LangChain, Hugging Face, generic, LangGraph, CrewAI, AutoGPT, and Moltbook adapters still export `entries`. Rename `entries` to `ledger_entries` in the bundle, or build the bundle with `evidence_to_mapping`. There is no CLI flag or alias for `entries`.
 - Scripts that parse `verify --json` output: until the separately tracked fix lands, stdout holds the text report followed by the JSON object, so do not pass it directly to a JSON parser.
 
+## [0.1.3] - 2026-11-06
+
+### Security
+
+- Snapshot mutable signed permit fields before verification and preserve that snapshot through final dispatch, preventing callers from altering nested permit mappings between signature validation and scope checks. Require exact, type-aware equality for every signed permit parameter at execution. Previously a request could omit a signed parameter under subset matching and still invoke a defaulted or variadic handler (SK-002). Signers must explicitly include resolved handler defaults; this intentionally tightens the permit contract. Previously published `0.1.2` wheels do not contain the security correction; use verified `0.1.3` release artifacts.
+
+### Fixed
+
+- Distinguish queued operator halt (`ReceiptStatus.QUEUED`, `HALT_QUEUED`) from terminal halt. Flask/FastAPI `POST /halt` now return HTTP 202 with explicit `halt_confirmed: false` for a deferred halt, and HTTP 200 on confirmed terminal `HALTED`; clients can poll authenticated `GET /status` for completion.
+- Add single-flight, non-blocking admission to synchronous `BaseKernel.submit()`: concurrent requests immediately receive audited `DENY` / `KERNEL_BUSY` receipts rather than uncontrolled lifecycle `StateError` or unbounded waiting (SK-001). Serialize hash-chain appends/exports, and record a queued operator halt before applying terminal `HALTED` after the in-flight outcome audit. An in-process handler cannot be forcibly interrupted; deployers must use bounded process supervision for stalled actions.
+
 ## [0.1.2] - 2026-11-04
 
 ### Documentation

@@ -35,6 +35,18 @@ A caller without a valid token receives HTTP 401 on `/status`, `/policy`,
 `/evidence`, `/submit` and `/halt`. Only `/` and `/health` are public.
 The default server supplies no cross-origin browser permission.
 
+For the Flask and FastAPI adapters, an authenticated `POST /halt` returns
+**HTTP 202** with `status: halt_queued`, `receipt_status: QUEUED`,
+`halt_confirmed: false`, `state_to` and an audit evidence hash when an active
+handler has not completed. This is a deferred acknowledgement, **not** proof
+that `HALTED` is effective or that any external action was cancelled.
+The operator MUST poll authenticated `GET /status` for `HALTED` and reconcile
+ambiguous external effects separately. If terminal halt was reached before
+returning, `POST /halt` returns **HTTP 200**, `status: halted`,
+`receipt_status: ACCEPTED`, `halt_confirmed: true` and `state_to: HALTED`.
+The returned `kernel_state` is an observation which may advance concurrently;
+`receipt_status` and `state_to` describe what this particular receipt confirms.
+
 ## Programmatic access
 
 ```python

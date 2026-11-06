@@ -28,6 +28,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,crypto,mcp]"
 
+      - name: Exercise exact Bash release dispatcher without credentials
+        run: bash scripts/ci/check_release_dispatch_shell.sh
+
+      - name: Exercise annotated and lightweight Git tag recovery
+        run: bash scripts/ci/check_release_tag_shell.sh
+
       - name: Run strict multi-process E2E acceptance gate
         run: python scripts/ci/run_e2e_gate.py
 
@@ -253,3 +259,5 @@ jobs:
           "$wheel_venv/bin/python" -c "import shards_kernel; from shards_kernel.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"
           "$wheel_venv/bin/shards-kernel" --version
           "$wheel_venv/bin/shards-kernel" demo --json
+          "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_concurrency.py"
+          "$wheel_venv/bin/python" "$GITHUB_WORKSPACE/scripts/ci/verify_candidate_wheel_permit_scope.py"

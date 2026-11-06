@@ -16,6 +16,8 @@ from shards_kernel.common.types import (
     KernelConfig,
     KernelReceipt,
     KernelRequest,
+    KernelState,
+    ReceiptStatus,
     ToolCall,
     VirtualClock,
 )
@@ -170,6 +172,30 @@ def receipt_to_mapping(receipt: KernelReceipt) -> dict[str, Any]:
         "state_to": receipt.state_to.value,
         "ts_ms": receipt.ts_ms,
         "result": receipt.tool_result,
+        "error": receipt.error,
+        "evidence_hash": receipt.evidence_hash,
+    }
+
+
+def halt_receipt_to_mapping(receipt: KernelReceipt, observed_state: KernelState) -> dict[str, Any]:
+    """Expose halt acceptance separately from terminal completion.
+
+    QUEUED is an acknowledged request to stop future admission, not proof
+    that the in-flight handler has finished or the final HALTED audit exists.
+    The caller must query /status for eventual completion after a queued halt.
+    """
+    queued = receipt.status is ReceiptStatus.QUEUED
+    return {
+        "status": "halt_queued" if queued else "halted",
+        "kernel_state": observed_state.value,
+        "receipt_status": receipt.status.value,
+        "decision": receipt.decision.value,
+        "state_from": receipt.state_from.value,
+        "state_to": receipt.state_to.value,
+        "halt_confirmed": (
+            receipt.status is ReceiptStatus.ACCEPTED
+            and receipt.state_to is KernelState.HALTED
+        ),
         "error": receipt.error,
         "evidence_hash": receipt.evidence_hash,
     }

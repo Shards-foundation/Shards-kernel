@@ -213,7 +213,8 @@ Examples:
 | Jurisdiction error| REJECTED       | DENY     |
 | Ambiguity error   | REJECTED       | DENY     |
 | Tool error        | FAILED         | DENY     |
-| Halt              | ACCEPTED       | HALT     |
+| Halt queued (in-flight tool) | QUEUED   | HALT     |
+| Halt completed             | ACCEPTED | HALT     |
 
 ## 7. Implementation Requirements
 
