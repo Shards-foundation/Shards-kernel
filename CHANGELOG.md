@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Security
+
+- Require exact, type-aware equality for every signed permit parameter at execution. Previously a request could omit a signed parameter under subset matching and still invoke a defaulted or variadic handler (SK-002). Signers must explicitly include resolved handler defaults; this intentionally tightens the permit contract. Existing published `0.1.2` wheels remain unchanged until a separately verified security release.
+
 ### Added
 
 - Added `shards-kernel mcp-call`: one-shot official MCP v2 stdio client for an independently enrolled local agent, using an operator-issued private signed permit file; refuses arbitrary tools/destinations and treats every non-ALLOW receipt as a failure. The relay supplies only an agent-scoped bearer, never an operator or signing key.
