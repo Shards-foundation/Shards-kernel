@@ -1,5 +1,34 @@
 # Shards-Kernel — Deterministic Control Planes for AI Systems
 
+<style>
+  .responsive-video-container {
+    position: relative;
+    padding-bottom: 56.25%; /* 16:9 aspect ratio */
+    height: 0;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .responsive-video-container iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+
+<div class="responsive-video-container">
+  <iframe 
+    src="https://www.youtube.com/embed/lU9HhusLSe8" 
+    title="Deterministic governance and execution control for autonomous AI agents" 
+    frameborder="0" 
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+    allowfullscreen>
+  </iframe>
+</div>
+
+
 ![Shards-Kernel branded banner: deterministic control plane for autonomous AI systems](https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/main/docs/images/shards-kernel-banner.svg)
 
 [![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
