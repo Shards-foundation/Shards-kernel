@@ -145,27 +145,32 @@ def main(argv: Optional[list[str]] = None) -> int:
         previous_term = signal.signal(signal.SIGTERM, handle_signal)
     result = 0
     try:
-        report = preflight(
-            args.policy,
-            trusted_key=os.environ.get("SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX", ""),
-            min_ttl_seconds=args.min_ttl_seconds,
-            minimum_revision=args.minimum_revision,
-            expected_kernel_id=args.expected_kernel_id,
-        )
-        LOG.info("policy_verified", extra={"data": report})
-    except (ValueError, OSError, ImportError, TypeError, KeyError) as exc:
-        result = 2
-        # Errors from imported parsers can echo policy text/paths. Redact them.
-        reason = "DEPENDENCY_MISSING_INSTALL_SHARDS_KERNEL_CRYPTO" if isinstance(exc, ImportError) else "POLICY_REJECTED"
-        LOG.error("policy_rejected", extra={"data": {"reason": reason}})
-    LOG.info("summary", extra={"data": {
-        "checked": 1, "failed": int(result != 0),
-        "duration_seconds": round(time.monotonic() - started, 3),
-        "scope": "read_only_preflight_not_production_certificate",
-    }})
-    signal.signal(signal.SIGINT, previous_interrupt)
-    if previous_term is not None:
-        signal.signal(signal.SIGTERM, previous_term)
+        try:
+            report = preflight(
+                args.policy,
+                trusted_key=os.environ.get("SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX", ""),
+                min_ttl_seconds=args.min_ttl_seconds,
+                minimum_revision=args.minimum_revision,
+                expected_kernel_id=args.expected_kernel_id,
+            )
+            LOG.info("policy_verified", extra={"data": report})
+        except (ValueError, OSError, ImportError, TypeError, KeyError) as exc:
+            result = 2
+            # External parser exceptions may disclose paths or document contents.
+            reason = ("DEPENDENCY_MISSING_INSTALL_SHARDS_KERNEL_CRYPTO"
+                      if isinstance(exc, ImportError) else "POLICY_REJECTED")
+            LOG.error("policy_rejected", extra={"data": {"reason": reason}})
+        LOG.info("summary", extra={"data": {
+            "checked": 1, "failed": int(result != 0),
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "scope": "read_only_preflight_not_production_certificate",
+        }})
+    finally:
+        # Restore signal handlers on *all* outcomes, including an unexpected
+        # verifier exception; never leave a supervising process modified.
+        signal.signal(signal.SIGINT, previous_interrupt)
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
     return (130 if exit_signal[0] == signal.SIGINT else 143) if exit_signal else result
 
 
