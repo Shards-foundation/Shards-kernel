@@ -38,6 +38,11 @@ MAX_RESPONSE_BYTES = 8192
 MAX_BACKOFF_SECONDS = 5.0
 MIN_API_KEY_LENGTH = 32
 RETRIABLE_HTTP = frozenset({408, 429, 500, 502, 503, 504})
+# Authoritative KernelState enum: reject BOOTING, HALTED and unknown values.
+# In-flight states remain healthy while work is being processed.
+OPERATIONAL_STATES = frozenset({
+    "IDLE", "VALIDATING", "ARBITRATING", "EXECUTING", "AUDITING", "COMPLETED",
+})
 LOG = logging.getLogger("shards.ops.probe")
 
 
@@ -160,7 +165,7 @@ def validate(args: argparse.Namespace, environ: Dict[str, str]) -> Configuration
     api_key = environ.get("SHARDS_KERNEL_API_KEY") if args.check_status else None
     if args.check_status and (
         not api_key or len(api_key) < MIN_API_KEY_LENGTH or api_key.strip() != api_key
-        or "\r" in api_key or "\n" in api_key
+        or any(not 33 <= ord(char) <= 126 for char in api_key)
     ):
         raise ValueError("--check-status requires a valid SHARDS_KERNEL_API_KEY environment variable")
     return Configuration(
@@ -209,15 +214,14 @@ def probe_once(config: Configuration, stop: threading.Event) -> None:
             raise ProbeFailure("interrupted")
         try:
             health = request_json(opener, config, "/health", authenticated=False)
-            if (health.get("status") != "healthy" or
-                not isinstance(health.get("kernel_state"), str) or
-                health["kernel_state"] == "HALTED"):
+            if (health.get("status") != "healthy"
+                    or health.get("kernel_state") not in OPERATIONAL_STATES):
                 raise ProbeFailure("unhealthy_kernel")
             if config.check_status:
                 status = request_json(opener, config, "/status", authenticated=True)
-                if not isinstance(status.get("kernel_id"), str) or not isinstance(
-                    status.get("state"), str
-                ) or status["state"] == "HALTED":
+                if (not isinstance(status.get("kernel_id"), str)
+                        or not status["kernel_id"]
+                        or status.get("state") not in OPERATIONAL_STATES):
                     raise ProbeFailure("invalid_kernel_status")
                 if config.expected_kernel_id and status["kernel_id"] != config.expected_kernel_id:
                     raise ProbeFailure("wrong_kernel_identity")
