@@ -131,6 +131,13 @@ The bearer credential is checked separately from Ed25519 permit authorization.
 - `GET /health` reports **process-level status** only.
 - `GET /status`, `GET /policy`, `GET /evidence`,
   `POST /submit`, `POST /halt` require HTTP bearer auth.
+  When a trusted handler is executing, the Flask/FastAPI compatibility adapters can
+  acknowledge `POST /halt` with HTTP 202 (`status: halt_queued`, `receipt_status:
+  QUEUED`, `halt_confirmed: false`); do not treat acknowledgement as proof of
+  terminal halt or cancellation of an external effect. Poll authenticated
+  `GET /status` for `HALTED`. HTTP 200 and `halt_confirmed: true` indicate
+  immediate terminal confirmation. The standalone operator service may use
+  a separate wire protocol and must preserve the same semantic distinction.
 - `POST /submit` additionally needs a narrowly scoped Ed25519 v2 permit
   signed by the **external issuer** with `audience="operator-local"`.
   Missing permits, spoofed actors, wrong action/parameters and replay are
