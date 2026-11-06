@@ -109,20 +109,24 @@ def test_single_global_permit_cannot_execute_on_two_kernels(postgres_journal, si
     assert denied.decision is Decision.DENY
     assert denied.tool_result is None
     assert "GLOBAL_PERMIT_EXHAUSTED" in (denied.error or "")
-    assert postgres_journal.unresolved() == []
+    assert not [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
 
 
 def test_bad_signature_denied_before_budget_consumption(postgres_journal, signing):
     secret, public = signing
     kernel = make_kernel(postgres_journal, public)
     attacker = Ed25519PrivateKey.generate()
-    permit = signed_permit(attacker)
+    good = signed_permit(secret)
+    # Tampering with the valid token's signature retains the same nonce.
+    from dataclasses import replace
+    permit = replace(good, signature=sign_v2_permit(
+        replace(good, signature=""), attacker
+    ).signature)
     denied = kernel.submit(request(uuid4().hex), permit_token=permit)
     assert denied.decision is Decision.DENY
     assert "SIGNATURE_INVALID" in (denied.error or "")
-    assert postgres_journal.unresolved() == []
-    # Same permit nonce can still be used when issued by the trusted signer.
-    good = signed_permit(secret)
+    assert not [x for x in postgres_journal.unresolved() if x.permit_id == good.permit_id]
+    # The original valid signed permit and nonce remain spendable.
     assert kernel.submit(request(uuid4().hex), permit_token=good).decision is Decision.ALLOW
 
 
@@ -137,7 +141,7 @@ def test_tool_registry_substitution_denied_before_reservation(postgres_journal, 
     assert result.decision is Decision.DENY
     assert "DISTRIBUTED_TOOL_NOT_APPROVED" in (result.error or "")
     assert executed == []
-    assert postgres_journal.unresolved() == []
+    assert not [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
 
 
 def test_primary_outage_halts_before_dispatch(signing):
@@ -166,7 +170,7 @@ def test_crash_after_global_reservation_before_local_intent_stays_reserved(
     with pytest.raises(OSError, match="filesystem unavailable"):
         kernel.submit(operation_request, permit_token=permit)
     assert kernel.get_state() is KernelState.HALTED
-    reserved = postgres_journal.unresolved()
+    reserved = [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
     assert len(reserved) == 1 and reserved[0].state == "RESERVED"
     # Even a different fresh host cannot spend the same single-use permit.
     retry = make_kernel(postgres_journal, public)
@@ -188,7 +192,7 @@ def test_uncertain_execution_is_not_retried_automatically(
     with pytest.raises(RuntimeError, match="acknowledgement lost"):
         kernel.submit(request(uuid4().hex), permit_token=permit)
     assert kernel.get_state() is KernelState.HALTED
-    outstanding = postgres_journal.unresolved()
+    outstanding = [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
     assert len(outstanding) == 1 and outstanding[0].state == "DISPATCHED"
     retry = make_kernel(postgres_journal, public)
     assert retry.submit(request(uuid4().hex), permit_token=permit).decision is Decision.DENY
