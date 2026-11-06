@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import types
 from datetime import datetime, timedelta, timezone
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 
 import pytest
@@ -231,3 +231,172 @@ def test_json_log_output_does_not_echo_token(monkeypatch: pytest.MonkeyPatch, ca
     monkeypatch.setenv("GITHUB_TOKEN", "SENSITIVE_TOKEN_SHOULD_NOT_APPEAR")
     assert actions.main(["--dry-run"]) == 0
     assert "SENSITIVE_TOKEN_SHOULD_NOT_APPEAR" not in capsys.readouterr().out
+
+
+class _SyntheticApiResponse:
+    """Small synthetic API response, never requiring network access."""
+
+    def __init__(self, body: bytes, status: int = 200) -> None:
+        self._body = body
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self, _limit: int) -> bytes:
+        return self._body
+
+
+def test_actions_transient_transport_failure_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FlakyOpener:
+        calls = 0
+
+        def open(self, request, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                raise URLError("synthetic transient outage")
+            return _SyntheticApiResponse(b'{"workflow_runs":[]}')
+
+    opener = FlakyOpener()
+    ticks = iter([0.0, 99.0])
+    monkeypatch.setattr(actions.urllib.request, "build_opener", lambda *_args: opener)
+    monkeypatch.setattr(actions.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(actions.time, "sleep", lambda _seconds: None)
+    options = actions.validate(actions.parse_args(["--attempts", "2"]))
+    assert actions.fetch_page(options, 1, None, []) == {"workflow_runs": []}
+    assert opener.calls == 2
+
+
+@pytest.mark.parametrize("body", [b"not-json", b"[]", b'{"workflow_runs":{}}'])
+def test_actions_malformed_api_payload_rejected(
+    monkeypatch: pytest.MonkeyPatch, body: bytes,
+) -> None:
+    class StaticOpener:
+        def open(self, request, timeout):
+            return _SyntheticApiResponse(body)
+
+    monkeypatch.setattr(actions.urllib.request, "build_opener", lambda *_args: StaticOpener())
+    options = actions.validate(actions.parse_args(["--attempts", "1"]))
+    with pytest.raises(actions.MonitorError):
+        actions.fetch_page(options, 1, None, [])
+
+
+def test_actions_oversized_api_response_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    class OversizedOpener:
+        def open(self, request, timeout):
+            return _SyntheticApiResponse(b"X" * 16)
+
+    monkeypatch.setattr(actions, "MAX_RESPONSE_BYTES", 15)
+    monkeypatch.setattr(actions.urllib.request, "build_opener", lambda *_args: OversizedOpener())
+    options = actions.validate(actions.parse_args(["--attempts", "1"]))
+    with pytest.raises(actions.MonitorError, match="github_response_too_large"):
+        actions.fetch_page(options, 1, None, [])
+
+
+def test_actions_unexpected_response_status_is_not_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnexpectedOpener:
+        def open(self, request, timeout):
+            return _SyntheticApiResponse(b'{"workflow_runs":[]}', status=418)
+
+    monkeypatch.setattr(actions.urllib.request, "build_opener", lambda *_args: UnexpectedOpener())
+    options = actions.validate(actions.parse_args([]))
+    with pytest.raises(actions.MonitorError, match="github_unexpected_http_status"):
+        actions.fetch_page(options, 1, None, [])
+
+
+def test_workflow_invalid_encoding_returns_nonzero(tmp_path: Path) -> None:
+    folder = tmp_path / ".github" / "workflows"
+    folder.mkdir(parents=True)
+    (folder / "ci.yml").write_bytes(b"\xff")
+    assert workflows.audit_workflows(tmp_path, False, []) == 2
+
+
+def test_hygiene_invalid_encoding_is_critical(tmp_path: Path) -> None:
+    (tmp_path / "broken.md").write_bytes(b"\xff")
+    assert ("critical", "text_not_utf8") in hygiene.file_findings(
+        tmp_path, Path("broken.md"), 100,
+    )
+
+
+def test_hygiene_git_subprocess_io_error_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_run(*_args, **_kwargs):
+        raise OSError("synthetic runner failure")
+
+    monkeypatch.setattr(hygiene.subprocess, "run", fail_run)
+    with pytest.raises(hygiene.AuditError, match="git_unavailable_or_timed_out"):
+        hygiene.tracked_paths(tmp_path)
+
+
+def test_actions_interruption_is_130(monkeypatch: pytest.MonkeyPatch) -> None:
+    callbacks = {}
+
+    def capture(signum, callback):
+        callbacks[signum] = callback
+        return lambda *_args: None
+
+    def interrupt(_options, _token, _stopped):
+        callbacks[actions.signal.SIGINT](actions.signal.SIGINT, None)
+        return 0
+
+    monkeypatch.setattr(actions.signal, "signal", capture)
+    monkeypatch.setattr(actions, "monitor", interrupt)
+    assert actions.main([]) == 130
+
+
+def test_hygiene_interruption_is_143(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    callbacks = {}
+
+    def capture(signum, callback):
+        callbacks[signum] = callback
+        return lambda *_args: None
+
+    def interrupt(_root, _max_bytes, _strict, _interrupted):
+        callbacks[hygiene.signal.SIGTERM](hygiene.signal.SIGTERM, None)
+        return 143
+
+    monkeypatch.setattr(hygiene.signal, "signal", capture)
+    monkeypatch.setattr(hygiene, "audit", interrupt)
+    assert hygiene.main(["--repo", str(tmp_path)]) == 143
+
+
+def test_workflow_interruption_is_130(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    callbacks = {}
+
+    def capture(signum, callback):
+        callbacks[signum] = callback
+        return lambda *_args: None
+
+    def interrupt(_root, _strict, _interrupted):
+        callbacks[workflows.signal.SIGINT](workflows.signal.SIGINT, None)
+        return 130
+
+    monkeypatch.setattr(workflows.signal, "signal", capture)
+    monkeypatch.setattr(workflows, "audit_workflows", interrupt)
+    assert workflows.main(["--repo", str(tmp_path)]) == 130
+
+
+def test_maintenance_workflow_contract_is_read_only() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / ".github" / "workflows" / "repository-maintenance.yml"
+    ).read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in source
+    assert "schedule:" in source
+    assert "pull_request:" in source
+    assert "permissions:\n  contents: read\n  actions: read" in source
+    assert "github-actions-observability:" in source
+    assert "tracked-file-hygiene:" in source
+    assert "workflow-safety:" in source
+    assert "python scripts/maintenance/repo_hygiene.py --repo ." in source
+    assert "python scripts/maintenance/workflow_safety.py --repo ." in source
+    assert "python scripts/maintenance/github_actions_watch.py" in source
+    assert "persist-credentials: false" in source
+    assert "shell=True" not in source
+    assert "continue-on-error: true" not in source
