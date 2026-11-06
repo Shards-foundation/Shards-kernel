@@ -60,8 +60,16 @@ def test_git_list_is_explicit_argv_not_shell(tmp_path: Path, monkeypatch: pytest
 
     monkeypatch.setattr(hygiene.subprocess, "run", fake_run)
     assert hygiene.tracked_paths(tmp_path) == [Path("src/a.py"), Path("README.md")]
-    assert observed[0][0] == ["git", "ls-files", "--cached", "-z"]
+    assert Path(observed[0][0][0]).is_absolute()
+    assert Path(observed[0][0][0]).name.lower().startswith("git")
+    assert observed[0][0][1:] == ["ls-files", "--cached", "-z"]
     assert "shell" not in observed[0][1]
+
+
+def test_hygiene_denies_missing_git_binary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hygiene.shutil, "which", lambda _name: None)
+    with pytest.raises(hygiene.AuditError, match="git_unavailable"):
+        hygiene.tracked_paths(tmp_path)
 
 
 def test_workflow_pinned_action_passes() -> None:
