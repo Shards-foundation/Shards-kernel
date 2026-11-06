@@ -1012,7 +1012,7 @@ class BaseKernel(Kernel):
                     self._submit_lock.release()
             return KernelReceipt(
                 request_id="HALT",
-                status=ReceiptStatus.ACCEPTED,
+                status=ReceiptStatus.QUEUED,
                 state_from=state,
                 state_to=state,
                 ts_ms=self.config.clock.now_ms(),
