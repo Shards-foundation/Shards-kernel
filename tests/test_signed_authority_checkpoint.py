@@ -216,3 +216,35 @@ def test_snapshot_rollback_and_unproved_future_history_denied(identity):
             checkpoint=replace(cp, root="c" * 64),
             trusted_keys=identity[1], expected_environment="staging-a",
         )
+
+
+@pytest.mark.parametrize(
+    "field,invalid",
+    [
+        ("environment", None),
+        ("environment", 42),
+        ("environment", b"staging-a"),
+        ("environment", ["staging-a"]),
+        ("key_id", None),
+        ("key_id", 42),
+        ("key_id", b"offline-operator"),
+        ("key_id", {"key": "offline-operator"}),
+    ],
+)
+def test_nonstring_identity_fields_fail_with_integrity_exception(
+    identity, field, invalid,
+):
+    signed = make_checkpoint(identity)
+    tampered = replace(signed, **{field: invalid})
+    with pytest.raises(CheckpointIntegrityError, match="Malformed checkpoint"):
+        tampered.validate()
+    # Parsing externally supplied JSON must have the same strict contract.
+    payload = json.loads(signed.as_json())
+    if isinstance(invalid, bytes):
+        payload[field] = invalid.decode()
+        # Bytes are not a representable JSON scalar: direct object coverage
+        # above enforces the Python caller boundary.
+    else:
+        payload[field] = invalid
+        with pytest.raises(CheckpointIntegrityError, match="Malformed checkpoint"):
+            SignedAuthorityCheckpoint.from_json(json.dumps(payload))
