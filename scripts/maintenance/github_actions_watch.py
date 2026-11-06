@@ -201,7 +201,6 @@ def fetch_page(
             if interrupted:
                 raise MonitorError("interrupted")
             time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
-    raise MonitorError("github_retry_exhausted")
 
 
 def collect_runs(
