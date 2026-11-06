@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Fixed
+
+- Serialize concurrent calls to the synchronous `BaseKernel.submit()` API through its full permit, execution and audit lifecycle. Concurrent requests are processed sequentially instead of raising lifecycle `StateError` under contention (SK-001); a running handler is not pre-empted and backpressure still requires an operator-managed queue or bounded ingress.
+
 ### Added
 
 - Added `shards-kernel mcp-call`: one-shot official MCP v2 stdio client for an independently enrolled local agent, using an operator-issued private signed permit file; refuses arbitrary tools/destinations and treats every non-ALLOW receipt as a failure. The relay supplies only an agent-scoped bearer, never an operator or signing key.
