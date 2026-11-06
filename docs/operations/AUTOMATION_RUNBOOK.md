@@ -29,6 +29,15 @@ request or written to logs. With --expected-kernel-id, a mismatched service
 fails closed. --checks 0 watches continuously until an unhealthy response
 or signal; it does not automatically restart a failed service.
 
+Probe success requires the kernel to report one of the authoritative operational
+states: `IDLE`, `VALIDATING`, `ARBITRATING`, `EXECUTING`, `AUDITING` or
+`COMPLETED`. `BOOTING`, `HALTED`, unknown and malformed states fail closed,
+including when the authenticated `/status` endpoint is checked. Since requests
+may race with normal state transitions, operational states are accepted without
+requiring `/health` and `/status` to report the same momentary state. Bearer keys
+containing control characters, DEL, non-ASCII or whitespace are rejected before
+constructing an HTTP header.
+
 A healthy response is **local process-status evidence only**. It does not
 prove action authorisation, multi-host durability, revocation, audit-chain
 integrity, ledger restoration or external effect reconciliation.
