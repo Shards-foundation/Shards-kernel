@@ -279,7 +279,7 @@ jobs:
             local peeled
             peeled="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)" || return 1
             if [ -n "$peeled" ]; then
-              printf '%s\\n' "$peeled"
+              printf '%s\n' "$peeled"
             else
               git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1
             fi
