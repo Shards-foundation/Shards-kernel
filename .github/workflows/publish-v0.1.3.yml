@@ -274,12 +274,39 @@ jobs:
           set -euo pipefail
           # A successful create request is not sufficient: verify the published
           # release identity and the exact three checksum-protected assets.
-          # Recover only *missing* assets of an existing draft. An existing
-          # mismatched asset cannot be silently replaced or clobbered.
+          # GitHub draft assets are not yet immutable. A retry may rebuild
+          # different sdist bytes (e.g. after correcting workflow tests). Only
+          # repair the unpublished draft, never replace a published asset.
+          # The new bytes must have passed THIS run's read-only verification.
           if [ "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "true" ]; then
+            draft_target="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
+            [[ "$draft_target" =~ ^[a-f0-9]{40}$ ]] || {
+              echo "Draft is not tied to a full commit SHA" >&2
+              exit 1
+            }
+            git merge-base --is-ancestor "$draft_target" "$GITHUB_SHA" || {
+              echo "Refusing to repair draft targeting an unrelated commit" >&2
+              exit 1
+            }
+            actual_names="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            while IFS= read -r existing_name; do
+              [ -z "$existing_name" ] && continue
+              case "$existing_name" in
+                SHA256SUMS|shards_kernel-0.1.3-py3-none-any.whl|shards_kernel-0.1.3.tar.gz) ;;
+                *) echo "Unexpected existing release asset; refusing draft repair" >&2; exit 1 ;;
+              esac
+            done <<< "$actual_names"
             for artifact in dist/*.whl dist/*.tar.gz dist/SHA256SUMS; do
               name="$(basename "$artifact")"
-              if ! gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+              if printf '%s\n' "$actual_names" | grep -Fxq "$name"; then
+                staged_dir="$(mktemp -d "$RUNNER_TEMP/shards-draft-asset.XXXXXX")"
+                gh release download v0.1.3 --repo "$GITHUB_REPOSITORY" --dir "$staged_dir" --pattern "$name"
+                if ! cmp -s -- "$artifact" "$staged_dir/$name"; then
+                  echo "Replacing unpublished draft asset with newly verified artifact: $name"
+                  gh release delete-asset v0.1.3 "$name" --repo "$GITHUB_REPOSITORY" --yes
+                  gh release upload v0.1.3 "$artifact" --repo "$GITHUB_REPOSITORY"
+                fi
+              else
                 gh release upload v0.1.3 "$artifact" --repo "$GITHUB_REPOSITORY"
               fi
             done
