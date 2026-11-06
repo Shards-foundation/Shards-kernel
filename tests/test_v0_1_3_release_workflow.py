@@ -38,6 +38,53 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert "verify_candidate_wheel_concurrency.py" in current
     assert "verify_candidate_wheel_permit_scope.py" in current
     assert 'pip install "$wheel[crypto,mcp]"' in current
+
+    # Only the short-lived release job may receive write permissions; pip
+    # installs and tests must run in the previous read-only job.
+    verify_pos = current.index("  verify:\n")
+    release_pos = current.index("  release:\n")
+    pypi_pos = current.index("  verify-pypi:\n")
+    assert verify_pos < release_pos < pypi_pos
+    verify_job = current[verify_pos:release_pos]
+    release_job = current[release_pos:pypi_pos]
+    published_job = current[pypi_pos:]
+    assert "permissions:\n  contents: read" in current[:verify_pos]
+    assert "contents: write" not in verify_job
+    assert "actions: write" not in verify_job
+    assert "python -m pip install" in verify_job
+    assert "actions/upload-artifact@" in verify_job
+    assert "needs: verify" in release_job
+    assert "contents: write" in release_job
+    assert "actions: write" in release_job
+    assert "actions/download-artifact@" in release_job
+    assert "python -m pip install" not in release_job
+    assert "needs: release" in published_job
+    assert "contents: write" not in published_job
+    assert "actions/download-artifact@" in published_job
+
+    # Verification must precede dispatch. Bind the downstream publisher to
+    # the exact checked main SHA and verified SHA256 digests, not a mutable
+    # GitHub Release checksum file or floating main branch.
+    assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("gh workflow run publish.yml")
+    assert release_job.index('tag_commit="$(git ls-remote') < release_job.index("gh workflow run publish.yml")
+    assert release_job.index("gh release edit v0.1.3") < release_job.index("gh workflow run publish.yml")
+    for field in ("expected_commit", "expected_wheel_sha256", "expected_sdist_sha256"):
+        assert "--field " + field + "=" in release_job
+        assert field in publisher
+    assert 'Publisher wheel differs from exact verified artifact' in publisher
+    assert 'Publisher source differs from exact verified artifact' in publisher
+    assert 'Publisher checkout differs from verified release commit' in publisher
+    assert "gh release create v0.1.3" in release_job
+    assert "--draft" in release_job
+    assert "gh release upload v0.1.3" in release_job
+    assert "--clobber" not in release_job
+
+    # Security acceptance probes are existing repository scripts, not names
+    # asserted without checking that executable test files actually exist.
+    for name in ("verify_candidate_wheel_concurrency.py", "verify_candidate_wheel_permit_scope.py"):
+        assert (ROOT / "scripts" / "ci" / name).is_file()
+        assert name in verify_job
+
     assert "continue-on-error: true" not in current
     assert "if: always()" not in current
     assert "name: Publish Shards-Kernel v0.1.2" in historical
