@@ -393,6 +393,9 @@ def test_maintenance_workflow_contract_is_read_only() -> None:
     assert "pull_request:" in source
     assert "permissions:\n  contents: read\n  actions: read" in source
     assert "github-actions-observability:" in source
+    assert "maintenance-regression:" in source
+    assert "--cov=scripts.maintenance --cov-branch" in source
+    assert "name: maintenance-coverage" in source
     assert "tracked-file-hygiene:" in source
     assert "workflow-safety:" in source
     assert "python scripts/maintenance/repo_hygiene.py --repo ." in source
