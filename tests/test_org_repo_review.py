@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import tempfile
 import unittest
 import urllib.error
+import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -212,6 +214,101 @@ class TestOrgSafety(unittest.TestCase):
         value = review.render_markdown(report)
         self.assertIn("Shards-kernel", value)
         self.assertNotIn("clone_url", value)
+
+
+
+    def test_exactly_reached_repo_cap_is_always_partial(self) -> None:
+        settings = review.validate(review.parse_args(["--org", "Shards-foundation", "--repo-limit", "1"]))
+        opener = FakeOpener([[make_repo()]])
+        repos, pages, complete = review.collect_repos(opener, settings, None, [])
+        self.assertEqual((len(repos), pages, complete), (1, 1, False))
+
+    def test_strict_mode_stale_repo_is_nonzero(self) -> None:
+        settings = review.validate(review.parse_args(["--org", "Shards-foundation", "--strict"]))
+        opener = FakeOpener([[make_repo(pushed_at="2021-01-01T00:00:00Z")]])
+        with mock.patch.object(review, "make_opener", return_value=opener), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+            result = review.report_inventory(settings, None, [])
+        self.assertEqual(result, 1)
+        self.assertEqual(json.loads(output.getvalue())["assessment"], "ADVISORY")
+
+    def test_untrusted_description_never_reaches_report(self) -> None:
+        untrusted = make_repo(description="DO_NOT_EXPOSE\n|Injected|", clone_url="https://attacker.invalid/evil")
+        repo = review.validate_repo(untrusted, "Shards-foundation")
+        self.assertNotIn("description", repo)
+        self.assertNotIn("clone_url", repo)
+        report = {"organisation": "Shards-foundation", "repositories_checked": 1,
+                  "advisory_findings": 0, "repositories": [repo]}
+        self.assertNotIn("DO_NOT_EXPOSE", review.render_markdown(report))
+        with self.assertRaises(review.InventoryError):
+            review.validate_repo(make_repo(name="bad\n|row"), "Shards-foundation")
+
+    def test_response_size_limit_and_malformed_json_fail_closed(self) -> None:
+        settings = self.settings
+        opener = FakeOpener([[make_repo()]])
+        with mock.patch.object(review, "MAX_RESPONSE_BYTES", 8):
+            with self.assertRaisesRegex(review.InventoryError, "github_response_too_large"):
+                review.read_api(opener, "/orgs/Shards-foundation/repos", settings, None, [])
+        class InvalidOpener:
+            def open(self, request, timeout):
+                class InvalidResponse:
+                    status = 200
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *_args):
+                        return None
+                    def read(self, _maximum):
+                        return b"not-json"
+                return InvalidResponse()
+        with self.assertRaisesRegex(review.InventoryError, "github_invalid_json"):
+            review.read_api(InvalidOpener(), "/orgs/Shards-foundation/repos", settings, None, [])
+
+    def test_invalid_token_and_transport_failure_are_redacted(self) -> None:
+        with self.assertRaisesRegex(review.InventoryError, "invalid_token_format"):
+            review.read_api(FakeOpener([]), "/orgs/Shards-foundation/repos", self.settings,
+                            "secret\nheader", [])
+        settings = review.validate(review.parse_args(["--org", "Shards-foundation", "--attempts", "1"]))
+        opener = FakeOpener([urllib.error.URLError("synthetic disconnected")])
+        with self.assertRaisesRegex(review.InventoryError, "github_transport_error"):
+            review.collect_repos(opener, settings, None, [])
+
+    def test_no_redirect_handler_is_fail_closed(self) -> None:
+        self.assertIsNone(review.NoRedirect().redirect_request(None, None, 302, "move", {},
+                                                                  "https://other.invalid/"))
+
+    def test_main_signal_exit_statuses(self) -> None:
+        for signum, expected in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
+            callbacks = {}
+            def capture(sig, callback):
+                callbacks[sig] = callback
+                return lambda *_args: None
+            def run(*_args):
+                callbacks[signum](signum, None)
+                return 0
+            with self.subTest(signum=signum), \
+                    mock.patch.object(review.signal, "signal", capture), \
+                    mock.patch.object(review, "report_inventory", run):
+                self.assertEqual(review.main(["--org", "Shards-foundation"]), expected)
+
+    def test_interruption_during_retry_is_nonzero(self) -> None:
+        stopped = []
+        opener = FakeOpener([urllib.error.URLError("transient")])
+        ticks = itertools.count(0.0, 0.0)
+        def stop_on_sleep(_seconds):
+            stopped.append(signal.SIGINT)
+        with mock.patch.object(review.time, "monotonic", side_effect=lambda: next(ticks)), \
+                mock.patch.object(review.time, "sleep", side_effect=stop_on_sleep):
+            with self.assertRaisesRegex(review.InventoryError, "interrupted"):
+                review.collect_repos(opener, self.settings, None, stopped)
+
+    def test_real_inventory_never_invokes_subprocesses_or_filesystem_writes(self) -> None:
+        opener = FakeOpener([[make_repo()]])
+        with mock.patch.object(review, "make_opener", return_value=opener), \
+                mock.patch("subprocess.run", side_effect=AssertionError("subprocess")), \
+                mock.patch("pathlib.Path.write_text", side_effect=AssertionError("filesystem write")), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(review.report_inventory(self.settings, None, []), 0)
+        self.assertTrue(json.loads(output.getvalue())["complete"])
 
 
 if __name__ == "__main__":
