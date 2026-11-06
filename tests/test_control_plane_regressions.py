@@ -803,8 +803,9 @@ def test_async_retry_rejects_negative_retry_count():
 
 def test_evidence_export_waits_for_atomic_hash_chain_append():
     ledger = AuditLedger("concurrent", "strict")
-    appended, release, exported = Event(), Event(), Event()
-    snapshots = []
+    appended, release = Event(), Event()
+    snapshots = {}
+    finished = {name: Event() for name in ("export", "entries", "root_hash", "length")}
 
     class PausingEntries(list):
         def append(self, entry):
@@ -826,27 +827,44 @@ def test_evidence_export_waits_for_atomic_hash_chain_append():
         ),
         daemon=True,
     )
-    reader = Thread(
-        target=lambda: (snapshots.append(ledger.export(1000)), exported.set()),
-        daemon=True,
-    )
+
+    def snapshot(name, getter):
+        snapshots[name] = getter()
+        finished[name].set()
+
+    getters = {
+        "export": lambda: ledger.export(1000),
+        "entries": lambda: ledger.entries,
+        "root_hash": lambda: ledger.root_hash,
+        "length": lambda: ledger.length,
+    }
+    readers = [
+        Thread(target=snapshot, args=(name, getter), daemon=True)
+        for name, getter in getters.items()
+    ]
     worker.start()
     try:
         assert appended.wait(2)
-        reader.start()
-        # Export cannot see _entries changed before the append hash/head commits.
-        assert not exported.wait(0.05)
+        for reader in readers:
+            reader.start()
+        # No snapshot can observe _entries before its hash-chain head commits.
+        assert all(not done.wait(0.05) for done in finished.values())
     finally:
         release.set()
         worker.join(2)
-        if reader.ident is not None:
-            reader.join(2)
+        for reader in readers:
+            if reader.ident is not None:
+                reader.join(2)
     assert not worker.is_alive()
-    assert exported.is_set()
-    assert len(snapshots) == 1
+    assert all(not reader.is_alive() for reader in readers)
+    assert all(done.is_set() for done in finished.values())
+    bundle = snapshots["export"]
+    assert snapshots["entries"] == bundle.ledger_entries
+    assert snapshots["root_hash"] == bundle.root_hash
+    assert snapshots["length"] == len(bundle.ledger_entries) == 1
     payload = {
-        "ledger_entries": [audit_entry_to_dict(entry) for entry in snapshots[0].ledger_entries],
-        "root_hash": snapshots[0].root_hash,
+        "ledger_entries": [audit_entry_to_dict(entry) for entry in bundle.ledger_entries],
+        "root_hash": bundle.root_hash,
     }
     assert verify_evidence_bundle(payload).is_valid
 
