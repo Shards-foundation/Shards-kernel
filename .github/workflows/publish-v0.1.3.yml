@@ -311,22 +311,79 @@ jobs:
           for local_artifact in dist/*.whl dist/*.tar.gz; do
             cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"
           done
-          # Resolve annotated tags to their peeled commit; lightweight tags
-          # directly name their commit. Refuse a pre-created or moved tag.
+          # Draft GitHub releases do not always create a Git ref until they
+          # are promoted. Authenticate the draft's original target before any
+          # promotion, and never treat an absent draft tag as a wrong SHA.
+          release_is_draft="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+          target_commit="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
+          [[ "$target_commit" =~ ^[a-f0-9]{40}$ ]] || {
+            echo "Release has no unambiguous full-SHA target" >&2
+            exit 1
+          }
+          if [ "$release_is_draft" = "true" ]; then
+            # Recovery may come from an earlier verified push to main. Only
+            # advance an unpublished draft to the CURRENTLY verified main SHA,
+            # and only after the exact draft assets have passed byte comparison.
+            git merge-base --is-ancestor "$target_commit" "$GITHUB_SHA" || {
+              echo "Draft release target is not an ancestor of verified main" >&2
+              exit 1
+            }
+            if [ "$target_commit" != "$GITHUB_SHA" ]; then
+              gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"
+            fi
+            test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$GITHUB_SHA" || {
+              echo "Draft target revision mismatch" >&2
+              exit 1
+            }
+          else
+            test "$target_commit" = "$GITHUB_SHA" || {
+              echo "Published release target differs from verified protected-main commit" >&2
+              exit 1
+            }
+          fi
+
+          # Atomically create the missing Git tag BEFORE publishing. If another
+          # actor wins the tag race, fail closed rather than publishing against
+          # an untrusted tag; on rerun the pre-existing SHA must match.
           tag_commit="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)"
           if [ -z "$tag_commit" ]; then
             tag_commit="$(git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)"
           fi
-          if [ "$tag_commit" != "$GITHUB_SHA" ]; then
-            echo "Release tag does not point to verified protected-main commit" >&2
+          if [ -n "$tag_commit" ] && [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Release tag points to another commit" >&2
             exit 1
           fi
-          # Publishing is the final, non-reversible step. Only byte-verified
-          # draft releases may be promoted to a public final release.
-          if [ "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "true" ]; then
+          if [ -z "$tag_commit" ]; then
+            test "$release_is_draft" = "true" || {
+              echo "Published release has no immutable Git tag" >&2
+              exit 1
+            }
+            gh api -X POST "/repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref=refs/tags/v0.1.3 \
+              -f sha="$GITHUB_SHA" >/dev/null || {
+              echo "Cannot create exact verified Git tag; refusing release" >&2
+              exit 1
+            }
+          fi
+          tag_commit="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)"
+          if [ -z "$tag_commit" ]; then
+            tag_commit="$(git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)"
+          fi
+          test "$tag_commit" = "$GITHUB_SHA" || {
+            echo "Release tag does not point to verified protected-main commit" >&2
+            exit 1
+          }
+
+          # Publishing is the final, non-reversible step, only after exact
+          # bytes and an existing exact-SHA tag are independently verified.
+          if [ "$release_is_draft" = "true" ]; then
             gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --draft=false
           fi
           test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = false
+          test "$(git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)" = "$GITHUB_SHA" || {
+            echo "Published release tag does not match verified commit" >&2
+            exit 1
+          }
           echo "Verified tag and uploaded bytes, published final GitHub release"
 
   dispatch:
