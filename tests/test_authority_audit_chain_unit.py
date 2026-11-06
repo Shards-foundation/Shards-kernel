@@ -173,6 +173,69 @@ def test_verifier_empty_clean_state_and_missing_head():
         AuthorityAuditChain.verify(conn)
 
 
+def _rewrite_forged_event(conn: MemoryConnection, change: str) -> MemoryConnection:
+    """Re-hash a deliberately malformed event so semantic checks run first."""
+    rows = list(conn.rows)
+    is_reserved = change == "bad_budget"
+    index = 0 if is_reserved else 1
+    event_type = "RESERVED" if is_reserved else "DISPATCHED"
+    bad_fields = {
+        "empty_fields": None,
+        "empty_identity": {**fields(), "permit_id": ""},
+        "bad_budget": {**fields(), "use_count": 0},
+    }[change]
+    previous = rows[index][4]
+    canonical = AuthorityAuditChain._canonical({
+        "event": event_type, "operation_id": "op", "fields": bad_fields,
+    })
+    digest = AuthorityAuditChain._hash(index + 1, previous, canonical)
+    rows[index] = (index + 1, "op", event_type, canonical, previous, digest)
+    if is_reserved:
+        second = rows[1]
+        second_digest = AuthorityAuditChain._hash(2, digest, second[3])
+        rows[1] = (2, "op", "DISPATCHED", second[3], digest, second_digest)
+        conn.head = (2, second_digest)
+    else:
+        conn.head = (2, digest)
+    conn.rows = rows
+    return conn
+
+
+def _corrupted_chain(change: str) -> MemoryConnection:
+    """Build each malformed case without a long branch-heavy test function."""
+    if change == "identity":
+        return build_chain(overrides={2: {"permit_id": "evil"}})
+    if change == "skip":
+        return build_chain(("RESERVED", "SUCCEEDED"))
+    conn = build_chain()
+    if change in {"empty_fields", "empty_identity", "bad_budget"}:
+        return _rewrite_forged_event(conn, change)
+
+    row = conn.rows[1]
+    mutations = {
+        "seq": (9, *row[1:]),
+        "prev": (*row[:4], "f" * 64, row[5]),
+        "event": (row[0], row[1], "BROKEN", *row[3:]),
+        "bad_json": (*row[:3], "{bad", *row[4:]),
+        "payload": (*row[:3], json.dumps({"event": "WRONG"}), *row[4:]),
+        "digest": (*row[:5], "f" * 64),
+    }
+    if change in mutations:
+        conn.rows[1] = mutations[change]
+    elif change == "head":
+        conn.head = (2, "f" * 64)
+    elif change == "state":
+        conn.operations = [operation("UNKNOWN")]
+    elif change == "legacy":
+        conn.operations.append((
+            "legacy", "RESERVED", "permit", "a" * 64,
+            "issuer", "subject", "nonce",
+        ))
+    else:
+        raise ValueError("Unsupported adversarial test case")
+    return conn
+
+
 @pytest.mark.parametrize("change,reason", [
     ("seq", "order or link"),
     ("prev", "order or link"),
@@ -190,63 +253,5 @@ def test_verifier_empty_clean_state_and_missing_head():
     ("bad_budget", "Malformed permit reservation evidence"),
 ])
 def test_semantic_and_cryptographic_failures(change, reason):
-    conn = build_chain()
-    rows = list(conn.rows)
-    seq, op, kind, canon, prev, digest = rows[1]
-    if change == "seq":
-        rows[1] = (9, op, kind, canon, prev, digest)
-    elif change == "prev":
-        rows[1] = (seq, op, kind, canon, "f" * 64, digest)
-    elif change == "event":
-        rows[1] = (seq, op, "BROKEN", canon, prev, digest)
-    elif change == "bad_json":
-        rows[1] = (seq, op, kind, "{bad", prev, digest)
-    elif change == "payload":
-        rows[1] = (seq, op, kind, json.dumps({"event": "WRONG"}), prev, digest)
-    elif change == "digest":
-        rows[1] = (seq, op, kind, canon, prev, "f" * 64)
-    elif change == "head":
-        conn.head = (2, "f" * 64)
-    elif change == "state":
-        conn.operations = [operation("UNKNOWN")]
-    elif change == "legacy":
-        conn.operations.append(("legacy", "RESERVED", "permit", "a" * 64,
-                                "issuer", "subject", "nonce"))
-    elif change == "identity":
-        conn = build_chain(overrides={2: {"permit_id": "evil"}})
-    elif change == "skip":
-        conn = build_chain(("RESERVED", "SUCCEEDED"))
-    elif change in ("empty_fields", "empty_identity", "bad_budget"):
-        field_value = (
-            None if change == "empty_fields"
-            else {**fields(), "permit_id": ""} if change == "empty_identity"
-            else {**fields(), "use_count": 0}
-        )
-        if change != "bad_budget":
-            target_index = 2
-            target_kind = "DISPATCHED"
-            target_fields = field_value
-        else:
-            target_index = 1
-            target_kind = "RESERVED"
-            target_fields = field_value
-        idx = target_index - 1
-        old = rows[idx]
-        forged = AuthorityAuditChain._canonical({
-            "event": target_kind, "operation_id": "op",
-            "fields": target_fields,
-        })
-        prev_hash = old[4]
-        revised_digest = AuthorityAuditChain._hash(target_index, prev_hash, forged)
-        rows[idx] = (target_index, "op", target_kind, forged, prev_hash, revised_digest)
-        # Update subsequent links so only the intended semantic check fails.
-        if idx == 0:
-            next_old = rows[1]
-            next_digest = AuthorityAuditChain._hash(2, revised_digest, next_old[3])
-            rows[1] = (2, "op", "DISPATCHED", next_old[3], revised_digest, next_digest)
-            conn.head = (2, next_digest)
-        else:
-            conn.head = (2, revised_digest)
-    conn.rows = rows if change not in ("identity", "skip") else conn.rows
     with pytest.raises(AuthorityAuditIntegrityError, match=reason):
-        AuthorityAuditChain.verify(conn)
+        AuthorityAuditChain.verify(_corrupted_chain(change))
