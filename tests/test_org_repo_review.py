@@ -187,7 +187,7 @@ class TestOrgSafety(unittest.TestCase):
     def test_removed_legacy_options_do_not_silently_run(self) -> None:
         with mock.patch("sys.stderr", new_callable=io.StringIO):
             with self.assertRaises(SystemExit) as ctx:
-                review.parse_args(["--org", "Shards-foundation", "--workspace", "/tmp"])
+                review.parse_args(["--org", "Shards-foundation", "--workspace", "unused-test-directory"])
         self.assertNotEqual(ctx.exception.code, 0)
 
     def test_github_bad_page_fails_closed(self) -> None:
