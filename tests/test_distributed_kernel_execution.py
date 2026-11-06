@@ -402,3 +402,130 @@ def test_failed_reconciliation_halts_without_releasing_budget(
     assert len(outstanding) == 1 and outstanding[0].state == "DISPATCHED"
     second = make_kernel(postgres_journal, public)
     assert second.submit(request(uuid4().hex), permit_token=permit).decision is Decision.DENY
+
+
+def test_global_strict_admission_boundary_without_database_is_unit_testable(
+    signing, monkeypatch
+):
+    """Exercise code-path coverage in every Python CI version.
+
+    Real PostgreSQL concurrency and persistence tests remain in the dedicated
+    acceptance job; this fake is NOT evidence of distributed correctness.
+    """
+    secret, public = signing
+    journal = PostgresPermitJournal(lambda: None)
+    calls = []
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: calls.append(("reserve", kwargs)) or True)
+    monkeypatch.setattr(journal, "mark_dispatched", lambda op: calls.append(("dispatch", op)) or True)
+    monkeypatch.setattr(
+        journal, "reconcile",
+        lambda op, **kwargs: calls.append(("reconcile", (op, kwargs))) or True,
+    )
+    kernel = make_kernel(journal, public)
+    receipt = kernel.submit(request("unit-shared-success"), permit_token=signed_permit(secret))
+    assert receipt.decision is Decision.ALLOW and receipt.tool_result == "approved"
+    assert [x[0] for x in calls] == ["reserve", "dispatch", "reconcile"]
+    assert calls[0][1]["request_sha256"]
+    assert calls[2][1][1]["evidence_ref"] == receipt.evidence_hash
+
+
+def test_global_strict_budget_denial_is_pre_execution(signing, monkeypatch):
+    secret, public = signing
+    journal = PostgresPermitJournal(lambda: None)
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: False)
+    kernel = make_kernel(journal, public)
+    receipt = kernel.submit(request("unit-exhausted"), permit_token=signed_permit(secret))
+    assert receipt.decision is Decision.DENY
+    assert "GLOBAL_PERMIT_EXHAUSTED" in (receipt.error or "")
+    assert receipt.tool_result is None
+
+
+def test_global_strict_requires_pinned_ed25519_not_legacy_hmac(signing):
+    journal = PostgresPermitJournal(lambda: None)
+    kernel = StrictKernel()
+    kernel.enable_shared_permit_accounting(journal)
+    kernel.boot(KernelConfig(kernel_id=AUDIENCE, variant="strict", clock=VirtualClock(1000)))
+    kernel.set_policy(JurisdictionPolicy(
+        allowed_actors=frozenset({"alice"}), allowed_tools=frozenset({"echo"})
+    ))
+    keyring = {"legacy": b"test-hmac-key-for-local-tests-32x"}
+    kernel.set_keyring(keyring)
+    permit = (
+        PermitBuilder().issuer("operator").subject("alice")
+        .jurisdiction("default").action("echo").params({"text": "approved"})
+        .max_executions(1).valid_from_ms(0).valid_until_ms(2000)
+        .proposal_hash("reject-hmac").build(keyring, "legacy")
+    )
+    receipt = kernel.submit(request("unit-reject-hmac"), permit_token=permit)
+    assert receipt.decision is Decision.DENY
+    assert "DISTRIBUTED_REQUIRES_ED25519" in (receipt.error or "")
+
+
+def test_global_strict_refuses_registry_substitution_with_unit_journal(
+    signing, monkeypatch
+):
+    secret, public = signing
+    journal = PostgresPermitJournal(lambda: None)
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: pytest.fail("unapproved reserve"))
+    kernel = make_kernel(journal, public)
+    kernel._dispatcher.registry.unregister("echo")
+    kernel._dispatcher.registry.register("echo", lambda text: "forged")
+    receipt = kernel.submit(request("unit-tool-swap"), permit_token=signed_permit(secret))
+    assert receipt.decision is Decision.DENY
+    assert "DISTRIBUTED_TOOL_NOT_APPROVED" in (receipt.error or "")
+
+
+def test_global_strict_dispatch_and_reconcile_faults_halt_with_unit_journal(
+    signing, monkeypatch
+):
+    secret, public = signing
+    for fault in ("dispatch", "reconcile"):
+        journal = PostgresPermitJournal(lambda: None)
+        monkeypatch.setattr(journal, "reserve", lambda **kwargs: True)
+        monkeypatch.setattr(journal, "mark_dispatched", lambda op: fault != "dispatch")
+        monkeypatch.setattr(
+            journal, "reconcile", lambda *args, **kwargs: fault != "reconcile"
+        )
+        kernel = make_kernel(journal, public)
+        with pytest.raises(Exception, match="gate refused|reconcile committed builtin"):
+            kernel.submit(request("unit-" + fault), permit_token=signed_permit(secret))
+        assert kernel.get_state() is KernelState.HALTED
+
+
+def test_global_strict_runtime_failure_marks_unknown_in_unit_journal(
+    signing, monkeypatch
+):
+    from types import SimpleNamespace
+    secret, public = signing
+    journal = PostgresPermitJournal(lambda: None)
+    calls = []
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: True)
+    monkeypatch.setattr(journal, "mark_dispatched", lambda op: True)
+    monkeypatch.setattr(journal, "mark_unknown", lambda op: calls.append(op) or True)
+    kernel = make_kernel(journal, public)
+    fake_failure = SimpleNamespace(
+        dispatcher_result=SimpleNamespace(success=False, error="network uncertain")
+    )
+    monkeypatch.setattr(kernel._runtime, "execute", lambda *args, **kwargs: fake_failure)
+    result = kernel.submit(request("unit-runtime-error"), permit_token=signed_permit(secret))
+    assert result.decision is Decision.DENY
+    assert len(calls) == 1
+
+
+def test_global_strict_failed_unknown_transition_halts(
+    signing, monkeypatch
+):
+    from types import SimpleNamespace
+    secret, public = signing
+    journal = PostgresPermitJournal(lambda: None)
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: True)
+    monkeypatch.setattr(journal, "mark_dispatched", lambda op: True)
+    monkeypatch.setattr(journal, "mark_unknown", lambda op: False)
+    kernel = make_kernel(journal, public)
+    fake_failure = SimpleNamespace(
+        dispatcher_result=SimpleNamespace(success=False, error="network uncertain")
+    )
+    monkeypatch.setattr(kernel._runtime, "execute", lambda *args, **kwargs: fake_failure)
+    with pytest.raises(Exception, match="mark failed operation UNKNOWN"):
+        kernel.submit(request("unit-failed-unknown"), permit_token=signed_permit(secret))
+    assert kernel.get_state() is KernelState.HALTED
