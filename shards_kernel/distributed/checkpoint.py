@@ -9,6 +9,7 @@ trusted source for the verifier's keyring or its minimum accepted checkpoint.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
@@ -65,7 +66,7 @@ class SignedAuthorityCheckpoint:
             raise CheckpointIntegrityError("Malformed checkpoint signature")
         try:
             decoded = base64.b64decode(self.signature, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
+        except (ValueError, binascii.Error) as exc:
             raise CheckpointIntegrityError("Malformed checkpoint signature") from exc
         if len(decoded) != 64:
             raise CheckpointIntegrityError("Invalid checkpoint signature length")
@@ -208,7 +209,7 @@ def verify_checkpoint_chain(
         verify_checkpoint(
             checkpoint, trusted_keys=trusted_keys,
             expected_environment=expected_environment,
-            minimum_sequence=minimum_sequence,
+            minimum_sequence=0,
         )
         expected_previous = (
             previous.digest() if previous is not None
@@ -222,8 +223,10 @@ def verify_checkpoint_chain(
         ):
             raise CheckpointIntegrityError("Checkpoint chain sequence or time rollback")
         previous = checkpoint
-    assert previous is not None  # already guarded by nonempty list
-    return previous
+    latest = checkpoints[-1]
+    if latest.sequence < minimum_sequence:
+        raise CheckpointIntegrityError("Checkpoint rollback below pinned minimum")
+    return latest
 
 
 def verify_snapshot_against_checkpoint(
@@ -231,14 +234,22 @@ def verify_snapshot_against_checkpoint(
     sequence: int,
     root: str,
     checkpoint: SignedAuthorityCheckpoint,
+    trusted_keys: Mapping[str, bytes],
+    expected_environment: str,
+    minimum_sequence: int = 0,
 ) -> None:
-    """Fail closed until a current snapshot exactly matches the trusted anchor.
+    """Compare the live authority to an *independently verified* signed root.
 
-    Newer database histories need a historical inclusion verifier (not part
-    of this stand-alone module). Do not treat an unverified 'ahead' snapshot
-    as consistent merely because its sequence is larger than the checkpoint.
+    Never accept a caller-supplied unauthenticated checkpoint or derive trust
+    keys from the database being checked. A newer database history must
+    provide a separately verified historical inclusion witness.
     """
-    checkpoint.validate()
+    verify_checkpoint(
+        checkpoint,
+        trusted_keys=trusted_keys,
+        expected_environment=expected_environment,
+        minimum_sequence=minimum_sequence,
+    )
     if type(sequence) is not int or sequence < checkpoint.sequence:
         raise CheckpointIntegrityError("Authority database rolled back")
     if sequence != checkpoint.sequence:
