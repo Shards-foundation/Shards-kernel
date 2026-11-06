@@ -78,6 +78,19 @@ Negative-path tests cover injection attempts, malicious clone URLs,
 credentials, network retries, invalid pagination, branch protection unknowns,
 empty results, dry-run, removed legacy mutation options and Markdown output.
 
+## Measured branch coverage gate
+
+`.github/workflows/org-inventory-quality.yml` now runs the inventory's
+negative-path regression tests on Python 3.12, records branch-aware
+coverage and fails if the unrounded result falls below **95%**.
+It archives the `coverage-org-inventory.json` report for 14 days.
+
+Before enabling the 95% floor, the expanded suite passed 44 tests
+and 32 subtests with 98% branch-aware coverage (rounded) in GitHub CI.
+Coverage is a scope-specific quality metric, not evidence of actual
+branch-protection enforcement, availability of private repositories, or
+production readiness of Shards-Kernel itself.
+
 The existing Python 3.9–3.15 quality matrix, strict real-process E2E gate,
 PostgreSQL accounting checks and independent exact-head approval remain
 mandatory before merging.
