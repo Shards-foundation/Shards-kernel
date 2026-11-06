@@ -147,7 +147,7 @@ If a module is not reachable via `shards_kernel.api`, it is **not** a supported 
 
 ### Direct synchronous concurrency
 
-`kernel.submit()` serializes simultaneous submissions to one kernel instance: one request executes at a time, each accepted or denied request follows the normal permit and audit path. Do **not** interpret serialization as a tool timeout, preemption guarantee, distributed queue, or cross-process safety; use the authenticated operator and PostgreSQL shared permit authority where those are required. An in-flight external effect still requires its own idempotency and reconciliation policy.
+`kernel.submit()` uses **single-flight, non-blocking admission**: exactly one submission owns an instance's state machine; simultaneous calls immediately return an audited `Decision.DENY` / `KERNEL_BUSY` receipt before permit verification or tool dispatch. A busy denial does **not** consume a permit, prove signature validity, or mean the request was evaluated against policy. The audit ledger serializes concurrent append/export. An operator calling `halt()` during an active handler receives `HALT_QUEUED` with a nonterminal `state_to`; the session moves to `HALTED` only after that handler's outcome is audited. Because Python threads cannot safely pre-empt running tools, stalled effects require external process supervision. This is **not** a queue, hard timeout, cross-process lock or universal exactly-once guarantee. Use PostgreSQL authority for shared permits and provider-level idempotency and reconciliation for external effects.
 
 ## Kernel Variants
 
