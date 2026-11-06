@@ -74,7 +74,7 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("gh release edit v0.1.3")
     assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("target_commit=")
     assert release_job.index("target_commit=") < release_job.index("gh api -X POST")
-    assert release_job.index("gh api -X POST") < release_job.index("gh release edit v0.1.3 --repo \\"$GITHUB_REPOSITORY\\" --draft=false")
+    assert release_job.index("gh api -X POST") < release_job.index('gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --draft=false')
     assert 'gh api -X POST "/repos/$GITHUB_REPOSITORY/git/refs"' in release_job
     assert 'git merge-base --is-ancestor "$target_commit" "$GITHUB_SHA"' in release_job
     assert 'gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"' in release_job
