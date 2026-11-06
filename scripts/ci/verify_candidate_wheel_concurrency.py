@@ -51,6 +51,56 @@ def check_installed_wheel() -> str:
     return str(package_path)
 
 
+def assess_busy_audit(
+    contention: list[dict[str, object]],
+    outcomes: list[dict[str, object]],
+    ledger_rows: list[dict[str, object]],
+) -> tuple[bool, bool, int]:
+    """Require genuine KERNEL_BUSY denials, each backed by its own audit hash.
+
+    A generic DENY, empty evidence set, or reused/unverified audit record must
+    never satisfy the installed-wheel contention acceptance gate.
+    """
+    def is_busy_denial(item: dict[str, object]) -> bool:
+        error = item.get("error")
+        return (
+            item.get("decision") == Decision.DENY.value
+            and isinstance(error, str)
+            and error.startswith("KERNEL_BUSY:")
+            and isinstance(item.get("request_id"), str)
+            and isinstance(item.get("evidence_hash"), str)
+        )
+
+    # Contended calls must terminate *while the first handler is blocked*.
+    # Any generic policy/permit denial is a hard failure, even if audited.
+    contended_valid = (
+        len(contention) == WORKERS - 1
+        and all(is_busy_denial(receipt) for receipt in contention)
+    )
+    busy_receipts = [item for item in outcomes if is_busy_denial(item)]
+    busy_audits = [
+        row for row in ledger_rows
+        if row.get("decision") == Decision.DENY.value
+        and row.get("audit_phase") == "outcome"
+        and isinstance(row.get("error"), str)
+        and str(row["error"]).startswith("KERNEL_BUSY:")
+    ]
+    by_id = {row.get("request_id"): row for row in busy_audits}
+    audited_busy = (
+        bool(busy_receipts)
+        and bool(busy_audits)
+        and len(busy_receipts) == len(busy_audits) == len(by_id)
+        and all(
+            (row := by_id.get(item["request_id"])) is not None
+            and row.get("entry_hash") == item["evidence_hash"]
+            and row.get("actor") == ACTOR
+            and row.get("error") == item["error"]
+            for item in busy_receipts
+        )
+    )
+    return contended_valid, audited_busy, len(busy_audits)
+
+
 def scenario(limit: int) -> dict[str, object]:
     signing_key = Ed25519PrivateKey.generate()
     public_key = signing_key.public_key().public_bytes(
@@ -147,38 +197,19 @@ def scenario(limit: int) -> dict[str, object]:
         [audit_entry_to_dict(entry) for entry in evidence.ledger_entries],
         evidence.root_hash,
     )
-    # The hash chain alone is insufficient: require a one-to-one, authenticated
-    # outcome record for every returned KERNEL_BUSY denial, including its exact
-    # receipt evidence hash. This rejects silently omitted denial audits.
-    busy_receipts = [
-        item for item in outcomes
-        if item.get("decision") == Decision.DENY.value
-        and "KERNEL_BUSY" in str(item.get("error") or "")
-    ]
     ledger_rows = [audit_entry_to_dict(entry) for entry in evidence.ledger_entries]
-    busy_audits = [
-        row for row in ledger_rows
-        if row.get("decision") == Decision.DENY.value
-        and row.get("audit_phase") == "outcome"
-        and "KERNEL_BUSY" in str(row.get("error") or "")
-    ]
-    busy_by_id = {row["request_id"]: row for row in busy_audits}
-    audited_busy = (
-        len(busy_receipts) == len(busy_audits) == len(busy_by_id)
-        and all(
-            (row := busy_by_id.get(item["request_id"])) is not None
-            and row["entry_hash"] == item["evidence_hash"]
-            and row["actor"] == ACTOR
-            and row["error"] == item["error"]
-            for item in busy_receipts
-        )
+    contended_valid, audited_busy, busy_audit_count = assess_busy_audit(
+        contention, outcomes, ledger_rows
     )
     contended_denials = sum(
-        item.get("decision") == Decision.DENY.value for item in contention
+        item.get("decision") == Decision.DENY.value
+        and str(item.get("error") or "").startswith("KERNEL_BUSY:")
+        for item in contention
     )
     passed = (
         handler_started_observed
         and contended_denials == WORKERS - 1
+        and contended_valid
         and positive.get("decision") == Decision.ALLOW.value
         and not exceptions
         and allowed + denied == ATTEMPTS
@@ -200,7 +231,8 @@ def scenario(limit: int) -> dict[str, object]:
         "exception_samples": exceptions[:3],
         "audit_verified": verified,
         "busy_denials_audited": audited_busy,
-        "busy_denial_audit_count": len(busy_audits),
+        "busy_denial_audit_count": busy_audit_count,
+        "contended_busy_denials_valid": contended_valid,
         "audit_error_samples": audit_errors[:3],
         "passed": passed,
     }
