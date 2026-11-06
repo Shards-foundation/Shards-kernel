@@ -161,3 +161,75 @@ def test_busy_audit_rejects_generic_denials_and_empty_evidence():
     corrupted = [dict(row) for row in verified_audits]
     corrupted[0]["entry_hash"] = "mismatched"
     assert assess_busy_audit(contention, all_receipts, corrupted)[1] is False
+
+
+def test_dispatch_shell_invocation(tmp_path):
+    """Execute the actual YAML Bash block with a fake gh executable.
+
+    This catches accidental double-backslashes, misplaced continuations and
+    dropped/shifted arguments without dispatching any real GitHub workflow.
+    """
+    import os
+    import subprocess
+
+    source = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    marker = "      - name: Dispatch using trusted workflow run identity"
+    start = source.index("        run: |", source.index(marker)) + 1
+    commands = []
+    for line in source[start:]:
+        if line.startswith("          "):
+            commands.append(line[10:])
+        elif line.strip():
+            break
+    assert commands
+    script = "\n".join(commands) + "\n"
+    continuations = [line for line in commands if line.endswith("\\")]
+    assert len(continuations) == 4
+    assert all(not line.endswith("\\\\") for line in continuations)
+
+    mock_dir = tmp_path / "mock-bin"
+    mock_dir.mkdir()
+    record = tmp_path / "gh-arguments.txt"
+    fake_gh = mock_dir / "gh"
+    fake_gh.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$GH_ARGS_PATH"\n',
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o700)
+    env = {
+        **os.environ,
+        "PATH": str(mock_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "GITHUB_REPOSITORY": "Shards-foundation/Shards-kernel",
+        "GITHUB_RUN_ID": "987654321",
+        "GH_ARGS_PATH": str(record),
+        "GH_TOKEN": "test-fixture-only",
+    }
+
+    def execute(payload):
+        return subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", payload],
+            cwd=tmp_path,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    result = execute(script)
+    assert result.returncode == 0, result.stderr
+    assert record.read_text(encoding="utf-8").splitlines() == [
+        "workflow", "run", "publish.yml",
+        "--repo", "Shards-foundation/Shards-kernel",
+        "--ref", "v0.1.3",
+        "--field", "release_tag=v0.1.3",
+        "--field", "verified_run_id=987654321",
+    ]
+
+    # Demonstrate that the original double-backslash defect makes Bash abort.
+    broken = script.replace(
+        "gh workflow run publish.yml " + "\\" + "\n",
+        "gh workflow run publish.yml " + "\\\\" + "\n",
+        1,
+    )
+    assert broken != script
+    assert execute(broken).returncode != 0
