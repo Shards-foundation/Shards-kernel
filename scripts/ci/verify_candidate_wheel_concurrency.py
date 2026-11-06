@@ -112,11 +112,13 @@ def scenario(limit: int) -> dict[str, object]:
         try:
             receipt = kernel.submit(request, permit)
             return {
+                "request_id": request.request_id,
                 "decision": receipt.decision.value,
                 "error": receipt.error,
+                "evidence_hash": receipt.evidence_hash,
             }
         except Exception as exc:
-            return {"exception": type(exc).__name__}
+            return {"request_id": request.request_id, "exception": type(exc).__name__}
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         first = pool.submit(attempt, 0)
@@ -145,6 +147,32 @@ def scenario(limit: int) -> dict[str, object]:
         [audit_entry_to_dict(entry) for entry in evidence.ledger_entries],
         evidence.root_hash,
     )
+    # The hash chain alone is insufficient: require a one-to-one, authenticated
+    # outcome record for every returned KERNEL_BUSY denial, including its exact
+    # receipt evidence hash. This rejects silently omitted denial audits.
+    busy_receipts = [
+        item for item in outcomes
+        if item.get("decision") == Decision.DENY.value
+        and "KERNEL_BUSY" in str(item.get("error") or "")
+    ]
+    ledger_rows = [audit_entry_to_dict(entry) for entry in evidence.ledger_entries]
+    busy_audits = [
+        row for row in ledger_rows
+        if row.get("decision") == Decision.DENY.value
+        and row.get("audit_phase") == "outcome"
+        and "KERNEL_BUSY" in str(row.get("error") or "")
+    ]
+    busy_by_id = {row["request_id"]: row for row in busy_audits}
+    audited_busy = (
+        len(busy_receipts) == len(busy_audits) == len(busy_by_id)
+        and all(
+            (row := busy_by_id.get(item["request_id"])) is not None
+            and row["entry_hash"] == item["evidence_hash"]
+            and row["actor"] == ACTOR
+            and row["error"] == item["error"]
+            for item in busy_receipts
+        )
+    )
     contended_denials = sum(
         item.get("decision") == Decision.DENY.value for item in contention
     )
@@ -158,6 +186,7 @@ def scenario(limit: int) -> dict[str, object]:
         and len(executed) == allowed
         and set(executed) == {7}
         and verified
+        and audited_busy
     )
     return {
         "limit": limit,
@@ -170,6 +199,8 @@ def scenario(limit: int) -> dict[str, object]:
         "uncontrolled_exceptions": len(exceptions),
         "exception_samples": exceptions[:3],
         "audit_verified": verified,
+        "busy_denials_audited": audited_busy,
+        "busy_denial_audit_count": len(busy_audits),
         "audit_error_samples": audit_errors[:3],
         "passed": passed,
     }
