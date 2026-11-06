@@ -6,6 +6,7 @@ provides common functionality that variants can extend.
 
 import copy
 from abc import ABC, abstractmethod
+from threading import Lock
 from typing import Any, Callable, Optional
 
 from shards_kernel.common.codec import equal_json_values
@@ -137,6 +138,14 @@ class BaseKernel(Kernel):
                 list_entries. Restored entries are verified before use;
                 storage failures must prevent tool execution.
         """
+        # Non-blocking, single-flight admission avoids unbounded request waiters.
+        self._submit_lock = Lock()
+        # Serialises admission vs. halt publication, without waiting on tool execution.
+        self._admission_lock = Lock()
+        # Coordinate halt-intent writes with the end of single-flight admission:
+        # no halt may be stranded between the owner's final check and unlock.
+        self._halt_intent_lock = Lock()
+        self._pending_halt: Optional[str] = None
         self._config: Optional[KernelConfig] = None
         self._state_machine: Optional[StateMachine] = None
         self._ledger: Optional[AuditLedger] = None
@@ -374,10 +383,80 @@ class BaseKernel(Kernel):
     ) -> KernelReceipt:
         """Submit a request for processing.
 
-        An unexpected exception halts the kernel. A tool call is not run
-        unless its parameters were bound and an intent audit record was
-        appended first.
+        Only one request enters the state machine at a time. Concurrent
+        callers receive an independently audited KERNEL_BUSY denial, rather
+        than blocking behind an unbounded handler or corrupting the lifecycle.
         """
+        with self._admission_lock:
+            admitted = self._submit_lock.acquire(blocking=False)
+        if not admitted:
+            return self._deny_busy(request)
+        try:
+            return self._submit_serialized(request, permit_token)
+        finally:
+            with self._halt_intent_lock:
+                try:
+                    if self._pending_halt is not None and not self._halted:
+                        self._halt_locked(self._pending_halt)
+                    elif self._halted:
+                        self._pending_halt = None
+                finally:
+                    self._submit_lock.release()
+
+    def _deny_busy(self, request: KernelRequest) -> KernelReceipt:
+        """Audited pre-admission refusal; no permit verification or tool dispatch.
+
+        A BUSY record is not a valid ALLOW/DENY policy evaluation: it records
+        rejection at the admission boundary while the state machine is owned
+        by an in-flight request. The audit ledger serializes concurrent appends.
+        """
+        if self._state_machine is None or self._ledger is None or self._config is None:
+            raise StateError("Kernel not booted")
+        state = self._state_machine.state
+        error = "KERNEL_BUSY: single-flight admission in progress"
+        try:
+            entry = self._ledger.append(
+                request_id=request.request_id,
+                actor=request.actor,
+                intent=request.intent,
+                decision=Decision.DENY,
+                state_from=state,
+                state_to=state,
+                ts_ms=self.config.clock.now_ms(),
+                error=error,
+                audit_phase="outcome",
+            )
+        except Exception:
+            self._quarantine_failed_admission_audit("Admission rejection audit failure")
+            raise
+        return KernelReceipt(
+            request_id=request.request_id,
+            status=ReceiptStatus.REJECTED,
+            state_from=state,
+            state_to=state,
+            ts_ms=self.config.clock.now_ms(),
+            decision=Decision.DENY,
+            error=error,
+            evidence_hash=entry.entry_hash,
+        )
+
+    def _quarantine_failed_admission_audit(self, reason: str) -> None:
+        """Prevent future execution when a pre-admission audit could not commit."""
+        with self._admission_lock:
+            self._pending_halt = reason
+        with self._halt_intent_lock:
+            if self._submit_lock.acquire(blocking=False):
+                try:
+                    if not self._halted:
+                        self._halt_on_fault(reason)
+                    self._pending_halt = None
+                finally:
+                    self._submit_lock.release()
+
+    def _submit_serialized(
+        self, request: KernelRequest, permit_token: Optional[PermitToken]
+    ) -> KernelReceipt:
+        """Process a single submission while the caller holds the lock."""
         if (
             self._state_machine is None
             or self._dispatcher is None
@@ -388,11 +467,17 @@ class BaseKernel(Kernel):
 
         if self._halted:
             raise StateError("Kernel is halted")
+        if self._pending_halt is not None:
+            return self._deny_busy(request)
         self._state_machine.assert_not_halted()
         self._state_machine.assert_state(KernelState.IDLE)
         self._execution_authorised = False
         try:
-            return self._submit_bound(request, permit_token)
+            # PermitToken's nested JSON mappings remain mutable despite the
+            # frozen dataclass. Pin one private snapshot before signature
+            # verification and preserve it through the final dispatch gate.
+            signed_snapshot = copy.deepcopy(permit_token) if permit_token is not None else None
+            return self._submit_bound(request, signed_snapshot)
         except Exception:
             self._halt_on_fault("Unhandled exception during request processing")
             raise
@@ -857,10 +942,101 @@ class BaseKernel(Kernel):
         return None
 
     def halt(self, reason: str) -> KernelReceipt:
-        """Halt the kernel."""
+        """Atomically publish an operator halt before a new admission can start.
+
+        A queued halt is committed to the ledger while holding the same
+        intent lock used by the active submitter's final check AND unlock.
+        Once published, later callers cannot dispatch before terminal halt.
+        An in-flight handler is not forcibly interrupted; its effect outcome
+        must be audited before the terminal transition.
+        """
         if self._state_machine is None or self._ledger is None:
             raise StateError("Kernel not booted")
 
+        # First publish the halt through the same lock that admits new work.
+        # A pending halt stays visible even if another submitter currently owns
+        # the finalisation lock; later admission can only fail closed.
+        with self._admission_lock:
+            if self._halted:
+                raise StateError("Kernel is halted")
+            self._pending_halt = reason
+
+        with self._halt_intent_lock:
+            if self._halted:
+                return KernelReceipt(
+                    request_id="HALT",
+                    status=ReceiptStatus.ACCEPTED,
+                    state_from=KernelState.HALTED,
+                    state_to=KernelState.HALTED,
+                    ts_ms=self.config.clock.now_ms(),
+                    decision=Decision.HALT,
+                    error="HALT_ALREADY_EFFECTIVE",
+                    evidence_hash=self._ledger.root_hash,
+                )
+            if self._submit_lock.acquire(blocking=False):
+                try:
+                    return self._halt_locked(reason)
+                finally:
+                    self._submit_lock.release()
+
+            state = self._state_machine.state
+            try:
+                entry = self._ledger.append(
+                    request_id="HALT",
+                    actor="SYSTEM",
+                    intent=reason,
+                    decision=Decision.HALT,
+                    state_from=state,
+                    state_to=state,
+                    ts_ms=self.config.clock.now_ms(),
+                    error="HALT_QUEUED",
+                    audit_phase="halt",
+                )
+            except Exception:
+                # Preserve fail-closed admission even when the queued record
+                # cannot be persisted. The submitter's finalisation enforces
+                # terminal halt when it next acquires the intent lock.
+                self._pending_halt = "Operator halt audit failure"
+                raise
+
+            # If the submitter released admission between our first failed
+            # attempt and the audit commit, finalise the halt here. Otherwise
+            # the submitter finalises immediately after its own outcome audit.
+            if self._submit_lock.acquire(blocking=False):
+                try:
+                    if not self._halted:
+                        # The in-flight request released admission before we
+                        # returned: report terminal completion, not deferral.
+                        return self._halt_locked(reason)
+                    self._pending_halt = None
+                    return KernelReceipt(
+                        request_id="HALT",
+                        status=ReceiptStatus.ACCEPTED,
+                        state_from=KernelState.HALTED,
+                        state_to=KernelState.HALTED,
+                        ts_ms=self.config.clock.now_ms(),
+                        decision=Decision.HALT,
+                        error="HALT_ALREADY_EFFECTIVE",
+                        evidence_hash=self._ledger.root_hash,
+                    )
+                finally:
+                    self._submit_lock.release()
+            return KernelReceipt(
+                request_id="HALT",
+                status=ReceiptStatus.QUEUED,
+                state_from=state,
+                state_to=state,
+                ts_ms=self.config.clock.now_ms(),
+                decision=Decision.HALT,
+                error="HALT_QUEUED",
+                evidence_hash=entry.entry_hash,
+            )
+
+    def _halt_locked(self, reason: str) -> KernelReceipt:
+        """Finalize terminal halt only while holding the admission lock."""
+        if self._state_machine is None or self._ledger is None:
+            raise StateError("Kernel not booted")
+        self._pending_halt = None
         self._halted = True
         state_from = self._state_machine.state
         self._state_machine.halt()

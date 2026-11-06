@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 try:
-    from fastapi import FastAPI, Depends, HTTPException, Request
+    from fastapi import FastAPI, Depends, HTTPException, Request, Response
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 
@@ -22,6 +22,7 @@ from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
     boot_service_kernel,
     evidence_to_mapping,
+    halt_receipt_to_mapping,
     policy_to_mapping,
     receipt_to_mapping,
     request_from_mapping,
@@ -213,14 +214,19 @@ def create_fastapi_app(
         """Get current policy."""
         return policy_to_mapping(k)
 
-    @app.post("/halt", tags=["Control"], dependencies=[Depends(authenticate)])
-    async def halt(k: BaseKernel = Depends(get_kernel)):
-        """Halt the kernel."""
-        k.halt("operator halt")
-        return {
-            "status": "halted",
-            "kernel_state": k.get_state().value,
-        }
+    @app.post(
+        "/halt",
+        tags=["Control"],
+        dependencies=[Depends(authenticate)],
+        responses={202: {"description": "Halt queued; in-flight outcome not yet audited"}},
+    )
+    async def halt(response: Response, k: BaseKernel = Depends(get_kernel)):
+        """Acknowledge a halt request; 202 means terminal HALTED is not confirmed."""
+        receipt = k.halt("operator halt")
+        mapped = halt_receipt_to_mapping(receipt, k.get_state())
+        if not mapped["halt_confirmed"]:
+            response.status_code = 202
+        return mapped
 
     return app
 

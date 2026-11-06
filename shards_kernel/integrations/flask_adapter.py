@@ -21,6 +21,7 @@ from shards_kernel.integrations.auth import bearer_authorized, resolve_api_key
 from shards_kernel.integrations.wire import (
     boot_service_kernel,
     evidence_to_mapping,
+    halt_receipt_to_mapping,
     policy_to_mapping,
     receipt_to_mapping,
     request_from_mapping,
@@ -133,15 +134,11 @@ def create_flask_app(
 
     @app.route("/halt", methods=["POST"])
     def halt():
-        """Halt the kernel."""
+        """Acknowledge a halt request; 202 means terminal HALTED is not confirmed."""
         k = app.config["kernel"]
-        k.halt("operator halt")
-        return jsonify(
-            {
-                "status": "halted",
-                "kernel_state": k.get_state().value,
-            }
-        )
+        receipt = k.halt("operator halt")
+        mapped = halt_receipt_to_mapping(receipt, k.get_state())
+        return jsonify(mapped), (200 if mapped["halt_confirmed"] else 202)
 
     return app
 

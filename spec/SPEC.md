@@ -56,7 +56,7 @@ Given identical inputs and initial state, the kernel MUST produce identical outp
 
 ### INV-HALT
 
-The kernel MUST support immediate halt from any non-terminal state. Halt MUST be irrevocable within a session.
+The kernel MUST immediately close admission to new executions when an operator halt is requested. Halt MUST be irrevocable within a session. If a trusted handler is already executing, its outcome MUST be audited before the terminal `HALTED` transition; a queued halt acknowledgement MUST NOT be represented as terminal completion.
 
 ### INV-EVIDENCE
 
@@ -90,7 +90,7 @@ An enumeration of possible decisions.
 |-------|------------------------------------------------|
 | ALLOW | Request is permitted; execution may proceed    |
 | DENY  | Request is rejected; no execution occurs       |
-| HALT  | Kernel enters terminal state                   |
+| HALT  | Stop requested; terminal transition may be deferred until the in-flight outcome is audited |
 
 ### 3.3 ReceiptStatus
 
@@ -98,7 +98,8 @@ An enumeration of receipt statuses.
 
 | Value    | Description                                   |
 |----------|-----------------------------------------------|
-| ACCEPTED | Request was processed successfully            |
+| ACCEPTED | Request was processed successfully; a halt with `state_to=HALTED` is terminal |
+| QUEUED   | Operator halt acknowledged while a tool remains in-flight; not yet confirmed `HALTED` |
 | REJECTED | Request was denied by policy or validation    |
 | FAILED   | Request processing encountered an error       |
 
@@ -215,7 +216,7 @@ Advance the kernel by one step. MUST return receipt if step was taken, None if i
 halt(reason: str) -> KernelReceipt
 ```
 
-Halt the kernel. MUST transition to HALTED from any non-terminal state. MUST produce audit entry.
+Request an irrevocable halt and stop new admission immediately. When no tool is in flight, return `ReceiptStatus.ACCEPTED` with terminal `state_to=HALTED`. During an in-flight execution, record `HALT_QUEUED` and return `ReceiptStatus.QUEUED` with nonterminal `state_to`, unless terminal completion occurs before the response. The existing tool's outcome MUST be audited before the terminal `HALTED` transition. Clients MUST NOT interpret `Decision.HALT` or a queued receipt alone as proof of completed termination or effect cancellation; query current state and independently reconcile external effects.
 
 ### 4.6 export_evidence
 

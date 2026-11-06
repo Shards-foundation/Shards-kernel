@@ -46,7 +46,7 @@ request = KernelRequest(
 @dataclass(frozen=True)
 class KernelReceipt:
     request_id: str
-    status: ReceiptStatus          # ACCEPTED, REJECTED, FAILED
+    status: ReceiptStatus          # ACCEPTED, QUEUED, REJECTED, FAILED
     state_from: KernelState
     state_to: KernelState
     ts_ms: int
@@ -56,7 +56,7 @@ class KernelReceipt:
     tool_result: Optional[Any] = None
 ```
 
-`Receipt` is an alias of `KernelReceipt`. The tool value is `tool_result`.
+`Receipt` is an alias of `KernelReceipt`. The tool value is `tool_result`. For an operator halt during an active handler, `halt(reason)` may return `ReceiptStatus.QUEUED`, `Decision.HALT`, `error="HALT_QUEUED"` and a **nonterminal** `state_to`. This is an acknowledgement of the request, not confirmation of `HALTED`, tool cancellation or effect recovery. Once the active outcome has been audited, the kernel transitions to `HALTED`. A halt completed synchronously returns `ReceiptStatus.ACCEPTED` with `state_to=HALTED`. Consumers MUST check the status and state rather than infer completion from `Decision.HALT` alone.
 
 ```python
 receipt = kernel.submit(request, permit_token=permit)
@@ -77,7 +77,7 @@ class ToolCall:
 
 ### 1.4 Decision and KernelState
 
-`Decision` is `ALLOW`, `DENY`, or `HALT`.
+`Decision` is `ALLOW`, `DENY`, or `HALT`. `Decision.HALT` denotes a stop decision; it does not itself certify the terminal transition, which may be deferred.
 
 `KernelState` is `BOOTING`, `IDLE`, `VALIDATING`, `ARBITRATING`, `EXECUTING`, `AUDITING`, `COMPLETED`, `HALTED`. A successful tool call visits `COMPLETED` and then returns to `IDLE`. `HALTED` is the only terminal state.
 

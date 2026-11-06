@@ -8,6 +8,8 @@ The kernel must treat storage or recovery errors as fatal to execution.
 
 from __future__ import annotations
 
+from functools import wraps
+from threading import RLock
 from typing import Any, Optional
 
 from shards_kernel.common.types import (
@@ -26,6 +28,16 @@ from shards_kernel.audit.replay import replay_and_verify
 from shards_kernel.common.codec import serialize_for_audit, audit_entry_to_dict
 
 
+def _synchronized(method: Any) -> Any:
+    """Serialize hash-chain mutations and snapshots across admission threads."""
+    @wraps(method)
+    def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return guarded
+
+
 class AuditLedger:
     """Append-only audit ledger with hash-chained entries.
 
@@ -40,6 +52,7 @@ class AuditLedger:
             kernel_id: Identifier of the kernel this ledger belongs to.
             variant: Variant name of the kernel.
         """
+        self._lock = RLock()
         self._kernel_id = kernel_id
         self._variant = variant
         self._storage = storage
@@ -114,20 +127,24 @@ class AuditLedger:
         return self._variant
 
     @property
+    @_synchronized
     def entries(self) -> tuple[AuditEntry, ...]:
         """Return all entries as an immutable tuple."""
         return tuple(self._entries)
 
     @property
+    @_synchronized
     def root_hash(self) -> str:
         """Return the current root hash (hash of last entry)."""
         return self._last_hash
 
     @property
+    @_synchronized
     def length(self) -> int:
         """Return the number of entries in the ledger."""
         return len(self._entries)
 
+    @_synchronized
     def append(
         self,
         request_id: str,
@@ -262,6 +279,7 @@ class AuditLedger:
         except Exception as e:
             raise AuditError(f"Failed to append audit entry: {e}") from e
 
+    @_synchronized
     def load_verified(
         self,
         entries: tuple[AuditEntry, ...] | list[AuditEntry],
@@ -307,6 +325,7 @@ class AuditLedger:
         self._last_hash = ordered[-1].entry_hash
         self._next_seq = ordered[-1].ledger_seq + 1
 
+    @_synchronized
     def export(self, ts_ms: int) -> EvidenceBundle:
         """Export the ledger as an evidence bundle.
 
@@ -325,6 +344,7 @@ class AuditLedger:
             variant=self._variant,
         )
 
+    @_synchronized
     def to_list(self) -> list[dict[str, Any]]:
         """Convert ledger to list of dictionaries for serialization.
 

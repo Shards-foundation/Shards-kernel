@@ -16,6 +16,7 @@ from shards_kernel import (
     KernelConfig,
     KernelRequest,
     KernelState,
+    ReceiptStatus,
     StateError,
     ToolCall,
     VirtualClock,
@@ -216,13 +217,68 @@ def test_authorised_handler_default_is_audited_and_executed(signed_kernel):
     )
 
 
-def test_signed_permit_still_allows_safe_subset(signed_kernel):
+def test_signed_permit_rejects_omitted_even_if_tool_ignores_field(signed_kernel):
     kernel, key, _clock, seen = signed_kernel
     result = kernel.submit(
         request({"amount": 1}), signed_permit(key, {"amount": 1, "unused": "ok"})
     )
-    assert result.decision is Decision.ALLOW
-    assert seen == [1]
+    assert result.decision is Decision.DENY
+    assert "PARAMS_MISMATCH" in (result.error or "")
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    "signed_params, submitted_params, allowed",
+    [
+        ({"marker": "approved"}, {"marker": "approved"}, True),
+        ({"marker": "approved"}, {}, False),
+        ({"marker": None}, {}, False),
+        ({"marker": 1}, {"marker": True}, False),
+        ({"marker": "approved"}, {"marker": "approved", "extra": "unexpected"}, False),
+    ],
+)
+def test_ed25519_variadic_tool_requires_exact_signed_params(
+    signed_kernel, signed_params, submitted_params, allowed
+):
+    kernel, key, _clock, _seen = signed_kernel
+    executed = []
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", lambda **kwargs: executed.append(kwargs))
+    result = kernel.submit(request(submitted_params), signed_permit(key, signed_params))
+    assert result.decision is (Decision.ALLOW if allowed else Decision.DENY)
+    assert executed == ([submitted_params] if allowed else [])
+
+
+def test_signed_permit_scope_cannot_mutate_between_signature_and_validation(
+    signed_kernel, monkeypatch
+):
+    """The original caller's mutable permit mapping cannot alter verified scope."""
+    from shards_kernel.permits import _params_satisfy_permit
+
+    kernel, key, _clock, seen = signed_kernel
+    effects = []
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", lambda **kwargs: effects.append(kwargs))
+
+    original = signed_permit(key, {"marker": "approved"})
+    real_match = _params_satisfy_permit
+
+    def concurrent_caller_mutation(request_params, signed_params):
+        # Deterministically simulate the caller mutating its original permit
+        # immediately after successful cryptographic verification but before
+        # the verifier's parameter comparison.
+        original.params.clear()
+        return real_match(request_params, signed_params)
+
+    monkeypatch.setattr(
+        "shards_kernel.permits._params_satisfy_permit", concurrent_caller_mutation
+    )
+    outcome = kernel.submit(request({}, request_id="mutable-scope"), original)
+    assert outcome.decision is Decision.DENY
+    assert "PARAMS_MISMATCH" in (outcome.error or "")
+    assert effects == []
+    assert seen == []
+    assert original.params == {}
 
 
 def test_signed_permit_expiring_before_dispatch_is_denied(signed_kernel):
@@ -402,6 +458,549 @@ def test_async_timeout_keeps_kernel_serialized_until_running_tool_finishes(signe
     asyncio.run(scenario())
 
 
+def test_concurrent_sync_submits_fail_fast_and_audit_every_request(signed_kernel):
+    """SK-001: contention is denied without waiting on the executing handler."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+
+    def slow_probe(amount=99):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test timed out waiting for release")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", slow_probe)
+    permit = signed_permit(key, {"amount": 1})
+
+    def invoke(index):
+        return kernel.submit(
+            request({"amount": 1}, request_id=f"concurrent-{index}"), permit
+        )
+
+    with ThreadPoolExecutor(max_workers=32) as executor:
+        first = executor.submit(invoke, 0)
+        try:
+            assert started.wait(timeout=2)
+            others = [executor.submit(invoke, i) for i in range(1, 256)]
+            # A full set of contenders responds while the first handler remains
+            # active. An unbounded blocking lock fails this deterministic test.
+            busy = [f.result(timeout=3) for f in others[:31]]
+            assert all(x.decision is Decision.DENY for x in busy)
+            assert all("KERNEL_BUSY" in (x.error or "") for x in busy)
+        finally:
+            release.set()
+        results = [first.result(timeout=3)] + [f.result(timeout=3) for f in others]
+
+    assert sum(x.decision is Decision.ALLOW for x in results) == 1
+    assert sum(x.decision is Decision.DENY for x in results) == 255
+    assert seen == [1]
+    bundle = kernel.export_evidence()
+    assert len(bundle.ledger_entries) == 257
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_nested_same_kernel_submit_is_denied_without_deadlock(signed_kernel):
+    kernel, key, _clock, seen = signed_kernel
+    nested = []
+
+    def reentrant_probe(amount=99):
+        nested.append(
+            kernel.submit(
+                request({"amount": 3}, request_id="nested"),
+                signed_permit(key, {"amount": 3}),
+            )
+        )
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", reentrant_probe)
+    result = kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+    assert result.decision is Decision.ALLOW
+    assert len(nested) == 1
+    assert nested[0].decision is Decision.DENY
+    assert "KERNEL_BUSY" in (nested[0].error or "")
+    assert seen == [1]
+
+
+def test_concurrent_halt_preserves_completed_effect_outcome_audit(signed_kernel):
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+    result_holder = []
+
+    def slow_probe(amount=99):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test timed out waiting for release")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", slow_probe)
+    submitter = Thread(
+        target=lambda: result_holder.append(
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        ),
+        daemon=True,
+    )
+    submitter.start()
+    try:
+        assert started.wait(timeout=2)
+        queued = kernel.halt("emergency operator request")
+        assert queued.decision is Decision.HALT
+        assert queued.status is ReceiptStatus.QUEUED
+        assert queued.error == "HALT_QUEUED"
+        assert queued.state_to is not KernelState.HALTED
+        assert queued.evidence_hash
+        assert kernel.get_state() is not KernelState.HALTED
+    finally:
+        release.set()
+    submitter.join(timeout=3)
+    assert not submitter.is_alive()
+    assert len(result_holder) == 1
+    assert result_holder[0].decision is Decision.ALLOW
+    assert seen == [1]
+    assert kernel.get_state() is KernelState.HALTED
+    bundle = kernel.export_evidence()
+    entries = [e for e in bundle.ledger_entries if e.request_id == "request"]
+    assert any(e.audit_phase == "intent" for e in entries)
+    assert any(e.audit_phase == "outcome" and e.decision is Decision.ALLOW for e in entries)
+    assert any(e.error == "HALT_QUEUED" for e in bundle.ledger_entries)
+    assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+@pytest.mark.parametrize("framework", ["flask", "fastapi"])
+def test_http_halt_returns_202_until_inflight_effect_is_audited(signed_kernel, framework):
+    """Operator must not confuse a queued HALT receipt with terminal HALTED."""
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+    outcomes = []
+
+    def blocking_probe(amount=99):
+        started.set()
+        if not release.wait(timeout=5):
+            raise RuntimeError("simulated handler release timed out")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", blocking_probe)
+
+    test_key = "test-only-operator-bearer-key-32-characters"
+    headers = {"Authorization": f"Bearer {test_key}"}
+    if framework == "flask":
+        pytest.importorskip("flask")
+        from shards_kernel.integrations.flask_adapter import create_flask_app
+
+        app = create_flask_app(kernel=kernel, api_key=test_key, allow_test_clock=True)
+        client = app.test_client()
+
+        def post_halt():
+            response = client.post("/halt", headers=headers)
+            return response.status_code, response.get_json()
+
+        def read_status():
+            return client.get("/status", headers=headers).get_json()["state"]
+
+    else:
+        pytest.importorskip("fastapi")
+        pytest.importorskip("httpx")
+        from fastapi.testclient import TestClient
+        from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
+
+        app = create_fastapi_app(kernel=kernel, api_key=test_key, allow_test_clock=True)
+        client = TestClient(app)
+
+        def post_halt():
+            response = client.post("/halt", headers=headers)
+            return response.status_code, response.json()
+
+        def read_status():
+            return client.get("/status", headers=headers).json()["state"]
+
+    worker = Thread(
+        target=lambda: outcomes.append(
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        ),
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert started.wait(timeout=2), "signed tool did not start"
+        status_code, payload = post_halt()
+        assert status_code == 202
+        assert payload["status"] == "halt_queued"
+        assert payload["receipt_status"] == "QUEUED"
+        assert payload["decision"] == "HALT"
+        assert payload["halt_confirmed"] is False
+        assert payload["state_to"] != "HALTED"
+        assert payload["error"] == "HALT_QUEUED"
+        assert payload["evidence_hash"]
+        assert read_status() != "HALTED"
+    finally:
+        release.set()
+        worker.join(timeout=3)
+        if framework == "fastapi":
+            client.close()
+
+    assert not worker.is_alive()
+    assert len(outcomes) == 1
+    assert outcomes[0].decision is Decision.ALLOW
+    assert kernel.get_state() is KernelState.HALTED
+    assert seen == [1]
+    bundle = kernel.export_evidence()
+    assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_admission_helpers_reject_unbooted_kernel():
+    kernel = StrictKernel()
+    with pytest.raises(StateError, match="not booted"):
+        kernel._deny_busy(request({"amount": 1}))
+    with pytest.raises(StateError, match="not booted"):
+        kernel._halt_locked("not booted")
+
+
+def test_queued_halt_is_published_before_owner_unlocks(signed_kernel, monkeypatch):
+    """An in-flight effect cannot be followed by a new admission during halt audit."""
+    kernel, key, _clock, seen = signed_kernel
+    started, release_handler = Event(), Event()
+    queued_append_started, release_halt_audit = Event(), Event()
+    submit_done = Event()
+    receipts = []
+    halted_receipts = []
+
+    def slow_probe(amount=99):
+        started.set()
+        if not release_handler.wait(5):
+            raise RuntimeError("handler release deadline exceeded")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", slow_probe)
+    ledger = kernel._ledger
+    assert ledger is not None
+    original_append = ledger.append
+
+    def pause_halt_commit(*args, **kwargs):
+        if kwargs.get("error") == "HALT_QUEUED":
+            queued_append_started.set()
+            if not release_halt_audit.wait(5):
+                raise RuntimeError("halt audit release deadline exceeded")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "append", pause_halt_commit)
+
+    def primary():
+        try:
+            receipts.append(
+                kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+            )
+        finally:
+            submit_done.set()
+
+    first = Thread(target=primary, daemon=True)
+    halter = Thread(target=lambda: halted_receipts.append(kernel.halt("urgent")), daemon=True)
+    first.start()
+    try:
+        assert started.wait(2)
+        halter.start()
+        assert queued_append_started.wait(2)
+        release_handler.set()
+        # The original request may write its outcome, but it must not release
+        # admission ownership until the halt intent has been published.
+        assert not submit_done.wait(0.15)
+        concurrent = kernel.submit(
+            request({"amount": 2}, request_id="after-halt-queued"),
+            signed_permit(key, {"amount": 2}),
+        )
+        assert concurrent.decision is Decision.DENY
+        assert "KERNEL_BUSY" in (concurrent.error or "")
+    finally:
+        release_handler.set()
+        release_halt_audit.set()
+        first.join(3)
+        if halter.ident is not None:
+            halter.join(3)
+    assert not first.is_alive()
+    assert not halter.is_alive()
+    assert len(receipts) == 1
+    assert receipts[0].decision is Decision.ALLOW
+    assert len(halted_receipts) == 1
+    assert halted_receipts[0].decision is Decision.HALT
+    assert seen == [1]
+    assert kernel.get_state() is KernelState.HALTED
+    bundle = kernel.export_evidence()
+    assert replay_and_verify(
+        [audit_entry_to_dict(e) for e in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_queued_halt_finalizes_if_submit_releases_lock_during_audit(monkeypatch):
+    """Force the narrow release-before-second-try-lock race deterministically."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("halt-race", "strict", clock=VirtualClock(1000)))
+    ledger = kernel._ledger
+    assert ledger is not None
+    kernel._submit_lock.acquire()
+    append_original = ledger.append
+
+    def append_and_release(*args, **kwargs):
+        result = append_original(*args, **kwargs)
+        if kwargs.get("error") == "HALT_QUEUED":
+            kernel._submit_lock.release()
+        return result
+
+    monkeypatch.setattr(ledger, "append", append_and_release)
+    completed = kernel.halt("urgent")
+    assert completed.status is ReceiptStatus.ACCEPTED
+    assert completed.error is None
+    assert completed.decision is Decision.HALT
+    assert completed.state_to is KernelState.HALTED
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    bundle = kernel.export_evidence()
+    assert len(bundle.ledger_entries) == 2
+    assert [e.error for e in bundle.ledger_entries] == ["HALT_QUEUED", None]
+    assert replay_and_verify(
+        [audit_entry_to_dict(e) for e in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+@pytest.mark.parametrize("failed_record", ["KERNEL_BUSY", "HALT_QUEUED"])
+def test_failed_concurrent_admission_audit_quarantines_kernel(
+    signed_kernel, monkeypatch, failed_record
+):
+    """A busy-denial or queued-halt audit write failure is a terminal fault."""
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+    completed = []
+
+    def controlled_probe(amount=99):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test timed out waiting for release")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", controlled_probe)
+    ledger = kernel._ledger
+    assert ledger is not None
+    original_append = ledger.append
+
+    def fail_target_record(*args, **kwargs):
+        if failed_record in (kwargs.get("error") or ""):
+            raise AuditError("injected rejection audit failure")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "append", fail_target_record)
+    worker = Thread(
+        target=lambda: completed.append(
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        ),
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert started.wait(2)
+        with pytest.raises(AuditError, match="injected rejection audit failure"):
+            if failed_record == "KERNEL_BUSY":
+                kernel.submit(request({"amount": 2}, request_id="busy"))
+            else:
+                kernel.halt("operator emergency")
+        assert kernel._pending_halt is not None
+    finally:
+        release.set()
+    worker.join(3)
+    assert not worker.is_alive()
+    assert len(completed) == 1
+    assert completed[0].decision is Decision.ALLOW
+    assert seen == [1]
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    bundle = kernel.export_evidence()
+    assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
+    assert replay_and_verify(
+        [audit_entry_to_dict(e) for e in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_audit_failure_quarantine_when_owner_already_released():
+    """Lost audit while idle must halt immediately, not strand pending halt."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("unowned-audit", "strict", clock=VirtualClock(1000)))
+    kernel._quarantine_failed_admission_audit("no audit persistence")
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    assert any(
+        entry.decision is Decision.HALT for entry in kernel.export_evidence().ledger_entries
+    )
+
+
+def test_repeated_audit_quarantine_after_terminal_halt_is_idempotent():
+    """An already halted instance never emits a second terminal audit entry."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("halted-quarantine", "strict", clock=VirtualClock(1000)))
+    kernel.halt("original halt")
+    before = kernel.export_evidence()
+    kernel._quarantine_failed_admission_audit("late admission audit failure")
+    after = kernel.export_evidence()
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    assert after.root_hash == before.root_hash
+    assert len(after.ledger_entries) == len(before.ledger_entries)
+
+
+def test_pending_halt_prevents_new_submission_even_before_terminal_transition():
+    """The admission gate rejects a pending halt; subsequent finalization is terminal."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("pending-admission", "strict", clock=VirtualClock(1000)))
+    kernel._pending_halt = "operator pending"
+    refusal = kernel.submit(request({"amount": 1}))
+    assert refusal.decision is Decision.DENY
+    assert "KERNEL_BUSY" in (refusal.error or "")
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+
+
+def test_audit_quarantine_is_not_stranded_at_submission_unlock(monkeypatch):
+    """A failing audit cannot race the owner's final halt check and unlock."""
+    from threading import Lock
+
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("unlock-race", "strict", clock=VirtualClock(1000)))
+    entered_release, finish_release, quarantine_entered = Event(), Event(), Event()
+
+    class PausingLock:
+        def __init__(self):
+            self.lock = Lock()
+            self.paused = False
+
+        def acquire(self, blocking=True):
+            return self.lock.acquire(blocking=blocking)
+
+        def release(self):
+            if not self.paused:
+                self.paused = True
+                entered_release.set()
+                if not finish_release.wait(3):
+                    raise RuntimeError("Timed out at controlled admission unlock")
+            self.lock.release()
+
+    kernel._submit_lock = PausingLock()
+    submit_outcome = []
+    submitting = Thread(
+        target=lambda: submit_outcome.append(kernel.submit(request({}))),
+        daemon=True,
+    )
+    submitting.start()
+    assert entered_release.wait(2)
+
+    def quarantine():
+        quarantine_entered.set()
+        kernel._quarantine_failed_admission_audit("synthetic write failure")
+
+    fault_thread = Thread(target=quarantine, daemon=True)
+    fault_thread.start()
+    try:
+        assert quarantine_entered.wait(2)
+        # While the first thread is in the final check/release critical section,
+        # the quarantine writer must not finish and leave an IDLE pending halt.
+        assert fault_thread.is_alive()
+    finally:
+        finish_release.set()
+    submitting.join(3)
+    fault_thread.join(3)
+    assert not submitting.is_alive()
+    assert not fault_thread.is_alive()
+    assert len(submit_outcome) == 1
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    bundle = kernel.export_evidence()
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_queued_halt_skips_second_halt_after_racing_fault(monkeypatch):
+    """Do not write a duplicate terminal event if the owner already halted."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("halt-fault-race", "strict", clock=VirtualClock(1000)))
+    ledger = kernel._ledger
+    assert ledger is not None
+    kernel._submit_lock.acquire()
+    original_append = ledger.append
+
+    def append_and_fault(*args, **kwargs):
+        entry = original_append(*args, **kwargs)
+        if kwargs.get("error") == "HALT_QUEUED":
+            kernel._submit_lock.release()
+            kernel._halt_on_fault("synthetic racing terminal failure")
+        return entry
+
+    monkeypatch.setattr(ledger, "append", append_and_fault)
+    completed = kernel.halt("requested")
+    assert completed.status is ReceiptStatus.ACCEPTED
+    assert completed.decision is Decision.HALT
+    assert completed.state_to is KernelState.HALTED
+    assert completed.error == "HALT_ALREADY_EFFECTIVE"
+    assert kernel.get_state() is KernelState.HALTED
+    bundle = kernel.export_evidence()
+    assert len(bundle.ledger_entries) == 2
+    assert [e.decision for e in bundle.ledger_entries] == [Decision.HALT, Decision.HALT]
+    assert kernel._pending_halt is None
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypatch):
+    """A failed submit cannot strand a lock or allow subsequent tool execution."""
+    kernel, key, _clock, seen = signed_kernel
+
+    def fail_after_admission(*_args):
+        raise RuntimeError("injected processing fault")
+
+    monkeypatch.setattr(kernel, "_submit_bound", fail_after_admission)
+    with pytest.raises(RuntimeError, match="injected processing fault"):
+        kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+    assert kernel.get_state() is KernelState.HALTED
+    assert seen == []
+
+    # A different thread must immediately recover ownership of the admission lock
+    # and observe the terminal halted state, never hang on the first caller.
+    done = Event()
+    observed = []
+
+    def subsequent_submit():
+        try:
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        except StateError as exc:
+            observed.append(str(exc))
+        finally:
+            done.set()
+
+    thread = Thread(target=subsequent_submit, daemon=True)
+    thread.start()
+    assert done.wait(timeout=2), "submit lock was leaked after handler exception"
+    thread.join(timeout=1)
+    assert observed and "halted" in observed[0].lower()
+    assert seen == []
+
+
 def test_async_batch_rejects_mismatched_permit_count_without_submitting():
     class FakeKernel:
         def __init__(self):
@@ -427,9 +1026,11 @@ def test_async_retry_rejects_negative_retry_count():
     asyncio.run(scenario())
 
 
-def test_evidence_export_remains_consistent_during_an_append():
+def test_evidence_export_waits_for_atomic_hash_chain_append():
     ledger = AuditLedger("concurrent", "strict")
     appended, release = Event(), Event()
+    snapshots = {}
+    finished = {name: Event() for name in ("export", "entries", "root_hash", "length")}
 
     class PausingEntries(list):
         def append(self, entry):
@@ -448,21 +1049,49 @@ def test_evidence_export_remains_consistent_during_an_append():
             state_from=KernelState.IDLE,
             state_to=KernelState.COMPLETED,
             ts_ms=1000,
-        )
+        ),
+        daemon=True,
     )
+
+    def snapshot(name, getter):
+        snapshots[name] = getter()
+        finished[name].set()
+
+    getters = {
+        "export": lambda: ledger.export(1000),
+        "entries": lambda: ledger.entries,
+        "root_hash": lambda: ledger.root_hash,
+        "length": lambda: ledger.length,
+    }
+    readers = [
+        Thread(target=snapshot, args=(name, getter), daemon=True)
+        for name, getter in getters.items()
+    ]
     worker.start()
     try:
         assert appended.wait(2)
-        bundle = ledger.export(1000)
-        payload = {
-            "ledger_entries": [audit_entry_to_dict(entry) for entry in bundle.ledger_entries],
-            "root_hash": bundle.root_hash,
-        }
-        assert verify_evidence_bundle(payload).is_valid
+        for reader in readers:
+            reader.start()
+        # No snapshot can observe _entries before its hash-chain head commits.
+        assert all(not done.wait(0.05) for done in finished.values())
     finally:
         release.set()
         worker.join(2)
+        for reader in readers:
+            if reader.ident is not None:
+                reader.join(2)
     assert not worker.is_alive()
+    assert all(not reader.is_alive() for reader in readers)
+    assert all(done.is_set() for done in finished.values())
+    bundle = snapshots["export"]
+    assert snapshots["entries"] == bundle.ledger_entries
+    assert snapshots["root_hash"] == bundle.root_hash
+    assert snapshots["length"] == len(bundle.ledger_entries) == 1
+    payload = {
+        "ledger_entries": [audit_entry_to_dict(entry) for entry in bundle.ledger_entries],
+        "root_hash": bundle.root_hash,
+    }
+    assert verify_evidence_bundle(payload).is_valid
 
 
 def test_cancelled_async_halt_keeps_other_operations_serialized():

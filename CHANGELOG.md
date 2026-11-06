@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Security
+
+- Snapshot mutable signed permit fields before verification and preserve that snapshot through final dispatch, preventing callers from altering nested permit mappings between signature validation and scope checks. Require exact, type-aware equality for every signed permit parameter at execution. Previously a request could omit a signed parameter under subset matching and still invoke a defaulted or variadic handler (SK-002). Signers must explicitly include resolved handler defaults; this intentionally tightens the permit contract. Existing published `0.1.2` wheels remain unchanged until a separately verified security release.
+
+### Fixed
+
+- Distinguish queued operator halt (`ReceiptStatus.QUEUED`, `HALT_QUEUED`) from terminal halt. Flask/FastAPI `POST /halt` now return HTTP 202 with explicit `halt_confirmed: false` for a deferred halt, and HTTP 200 on confirmed terminal `HALTED`; clients can poll authenticated `GET /status` for completion.
+- Add single-flight, non-blocking admission to synchronous `BaseKernel.submit()`: concurrent requests immediately receive audited `DENY` / `KERNEL_BUSY` receipts rather than uncontrolled lifecycle `StateError` or unbounded waiting (SK-001). Serialize hash-chain appends/exports, and record a queued operator halt before applying terminal `HALTED` after the in-flight outcome audit. An in-process handler cannot be forcibly interrupted; deployers must use bounded process supervision for stalled actions.
+
 ### Added
 
 - Added `shards-kernel mcp-call`: one-shot official MCP v2 stdio client for an independently enrolled local agent, using an operator-issued private signed permit file; refuses arbitrary tools/destinations and treats every non-ALLOW receipt as a failure. The relay supplies only an agent-scoped bearer, never an operator or signing key.
