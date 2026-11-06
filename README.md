@@ -97,7 +97,7 @@ A compliant kernel MUST satisfy:
 | INV-HASH-CHAIN | Chain integrity | Audit entries chain to previous hash |
 | INV-FAIL-CLOSED | Deny on ambiguity | Ambiguity/malformed/unhandled ⇒ `DENY` or `HALT` |
 | INV-DETERMINISM | Reproducibility | Identical inputs + initial state ⇒ identical outputs |
-| INV-HALT | Halt availability | Immediate halt from any state; terminal for session |
+| INV-HALT | Halt availability | Halt intent blocks new admission immediately; terminal `HALTED` follows the in-flight outcome audit |
 | INV-EVIDENCE | Exportability | Decisions exportable as verifiable evidence bundle |
 | INV-NO-IMPLICIT-ALLOW | Explicit permission | "Not denied" ≠ allowed; explicit `ALLOW` required |
 
@@ -147,7 +147,7 @@ If a module is not reachable via `shards_kernel.api`, it is **not** a supported 
 
 ### Direct synchronous concurrency
 
-`kernel.submit()` uses **single-flight, non-blocking admission**: exactly one submission owns an instance's state machine; simultaneous calls immediately return an audited `Decision.DENY` / `KERNEL_BUSY` receipt before permit verification or tool dispatch. A busy denial does **not** consume a permit, prove signature validity, or mean the request was evaluated against policy. The audit ledger serializes concurrent append/export. An operator calling `halt()` during an active handler receives `HALT_QUEUED` with a nonterminal `state_to`; the session moves to `HALTED` only after that handler's outcome is audited. Because Python threads cannot safely pre-empt running tools, stalled effects require external process supervision. This is **not** a queue, hard timeout, cross-process lock or universal exactly-once guarantee. Use PostgreSQL authority for shared permits and provider-level idempotency and reconciliation for external effects.
+`kernel.submit()` uses **single-flight, non-blocking admission**: exactly one submission owns an instance's state machine; simultaneous calls immediately return an audited `Decision.DENY` / `KERNEL_BUSY` receipt before permit verification or tool dispatch. A busy denial does **not** consume a permit, prove signature validity, or mean the request was evaluated against policy. The audit ledger serializes concurrent append/export. An operator calling `halt()` during an active handler receives `ReceiptStatus.QUEUED`, `HALT_QUEUED` and a nonterminal `state_to`; the session moves to `HALTED` only after the handler's outcome is audited. The authenticated Flask/FastAPI `POST /halt` endpoints return **HTTP 202** with `status: halt_queued`, `receipt_status: QUEUED`, `halt_confirmed: false` and receipt/audit metadata. Clients must poll the authenticated `GET /status` until `HALTED`; **HTTP 200** with `halt_confirmed: true` confirms immediate terminal completion. A queued receipt is never proof of effect cancellation. Because Python threads cannot safely pre-empt running tools, stalled effects require external process supervision. This is **not** a queue, hard timeout, cross-process lock or universal exactly-once guarantee. Use PostgreSQL authority for shared permits and provider-level idempotency and reconciliation for external effects.
 
 ## Kernel Variants
 
