@@ -12,6 +12,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Distinguish queued operator halt (`ReceiptStatus.QUEUED`, `HALT_QUEUED`) from terminal halt. Flask/FastAPI `POST /halt` now return HTTP 202 with explicit `halt_confirmed: false` for a deferred halt, and HTTP 200 on confirmed terminal `HALTED`; clients can poll authenticated `GET /status` for completion.
 - Add single-flight, non-blocking admission to synchronous `BaseKernel.submit()`: concurrent requests immediately receive audited `DENY` / `KERNEL_BUSY` receipts rather than uncontrolled lifecycle `StateError` or unbounded waiting (SK-001). Serialize hash-chain appends/exports, and record a queued operator halt before applying terminal `HALTED` after the in-flight outcome audit. An in-process handler cannot be forcibly interrupted; deployers must use bounded process supervision for stalled actions.
 
 ### Added
