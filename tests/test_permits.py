@@ -1296,8 +1296,8 @@ class TestPermitVerificationPositive(unittest.TestCase):
         self.assertEqual(result.status, Decision.ALLOW)
         self.assertEqual(len(result.reasons), 0)
 
-    def test_allow_subset_params(self) -> None:
-        """Allow request with subset of permit params."""
+    def test_deny_omitted_signed_params(self) -> None:
+        """Omitting a signed parameter denies authorisation."""
         from dataclasses import replace
 
         permit = replace(
@@ -1319,10 +1319,11 @@ class TestPermitVerificationPositive(unittest.TestCase):
             current_jurisdiction="test-jurisdiction",
             allowed_actions=frozenset(["echo"]),
             request_actor="worker1",
-            request_params={"text": "hello"},  # Subset of permit params
+            request_params={"text": "hello"},  # Signed extra field omitted
         )
 
-        self.assertEqual(result.status, Decision.ALLOW)
+        self.assertEqual(result.status, Decision.DENY)
+        self.assertIn("PARAMS_MISMATCH", result.reasons)
 
     def test_allow_multi_use_permit(self) -> None:
         """Allow multi-use permit for multiple executions."""
