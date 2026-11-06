@@ -243,7 +243,7 @@ def test_shared_mode_refuses_insecure_or_non_strict_boot(signing):
         ))
     strict = StrictKernel()
     strict.enable_shared_permit_accounting(journal)
-    with pytest.raises(BootError, match="strict"):
+    with pytest.raises(BootError, match="insecure"):
         strict.boot(KernelConfig(
             kernel_id=AUDIENCE, variant="strict", clock=VirtualClock(1000),
             allow_insecure_unpermitted_execution=True,
