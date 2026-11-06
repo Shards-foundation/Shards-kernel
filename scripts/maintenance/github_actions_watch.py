@@ -171,7 +171,8 @@ def fetch_page(
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, headers=headers, method="GET")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    for attempt in range(1, options.attempts + 1):
+    attempt = 1
+    while attempt <= options.attempts:
         if interrupted:
             raise MonitorError("interrupted")
         try:
@@ -201,6 +202,8 @@ def fetch_page(
             if interrupted:
                 raise MonitorError("interrupted")
             time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+        attempt += 1
+    raise MonitorError("github_retry_exhausted")
 
 
 def collect_runs(
