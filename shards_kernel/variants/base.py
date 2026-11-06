@@ -28,6 +28,7 @@ from shards_kernel.common.errors import (
 )
 from shards_kernel.common.validate import validate_request, check_ambiguity
 from shards_kernel.audit.ledger import AuditLedger
+from shards_kernel.common.hashing import compute_hash_dict
 from shards_kernel.jurisdiction.policy import JurisdictionPolicy
 from shards_kernel.jurisdiction.rules import evaluate_policy
 from shards_kernel.state.machine import StateMachine
@@ -140,6 +141,10 @@ class BaseKernel(Kernel):
         self._state_machine: Optional[StateMachine] = None
         self._ledger: Optional[AuditLedger] = None
         self._audit_storage = audit_storage
+        # Opt-in, strict-only shared global accounting. Never enabled by default.
+        # The journal reserves the permit and an operation intent atomically.
+        self._shared_permit_journal: Optional[Any] = None
+        self._shared_builtin_tools: dict[str, Any] = {}
         self._policy: Optional[JurisdictionPolicy] = None
         self._dispatcher: Optional[Dispatcher] = None
         self._runtime: Optional[KernelRuntime] = None
@@ -155,6 +160,23 @@ class BaseKernel(Kernel):
         self._execution_authorised: bool = False
         # Independent of StateMachine.reset(). Halt stays irrevocable.
         self._halted: bool = False
+
+    def enable_shared_permit_accounting(self, journal: Any) -> None:
+        """Opt into global PostgreSQL permit accounting before kernel boot.
+
+        This first integration supports *only* the pinned, deterministic
+        builtin echo/add handlers in the strict variant. It is a bounded
+        execution pilot, NOT a remote provider or production service. The
+        PostgreSQL intent is the global accounting authority; the ordinary
+        local audit chain remains an additional, non-atomic projection.
+        """
+        from shards_kernel.distributed.postgres import PostgresPermitJournal
+
+        if self._state_machine is not None:
+            raise StateError("Shared accounting must be enabled before boot")
+        if not isinstance(journal, PostgresPermitJournal):
+            raise TypeError("Shared accounting requires PostgresPermitJournal")
+        self._shared_permit_journal = journal
 
     @property
     def config(self) -> KernelConfig:
@@ -273,6 +295,10 @@ class BaseKernel(Kernel):
         """Boot the kernel with configuration."""
         if self._state_machine is not None:
             raise BootError("Kernel already booted")
+        if self._shared_permit_journal is not None and (
+            config.variant != "strict" or config.allow_insecure_unpermitted_execution
+        ):
+            raise BootError("Shared permit accounting requires the strict, permitted kernel")
 
         self._config = config
         self._transitions = []
@@ -290,6 +316,13 @@ class BaseKernel(Kernel):
             self._rebuild_nonce_registry()
         self._policy = self._policy or JurisdictionPolicy.default()
         self._dispatcher = Dispatcher(create_default_registry())
+        if self._shared_permit_journal is not None:
+            # Pinned tool objects prevent registry substitution between admission
+            # and dispatch. No custom/external effects in this pilot.
+            self._shared_builtin_tools = {
+                name: self._dispatcher.registry.get(name)
+                for name in ("echo", "add")
+            }
         self._runtime = KernelRuntime(
             self._dispatcher,
             now_ms=self._config.clock.now_ms,
@@ -611,8 +644,59 @@ class BaseKernel(Kernel):
                 ["MISSING_PERMIT"],
             )
 
-        # The intent record is appended before the tool is invoked. If this
-        # append fails, the exception propagates and the tool does not run.
+        shared_operation_id: Optional[str] = None
+        if self._shared_permit_journal is not None:
+            # Never let a permissive/legacy HMAC mode or a dynamically replaced
+            # tool reach the distributed accounting and dispatch boundary.
+            if permit_token is None or permit_token.version != 2 or self._public_verifiers is None:
+                return self._deny_permit(
+                    request, state_from, "DISTRIBUTED_REQUIRES_ED25519",
+                    ["DISTRIBUTED_REQUIRES_ED25519"],
+                )
+            if (
+                tool_name not in self._shared_builtin_tools
+                or registered_tool is not self._shared_builtin_tools[tool_name]
+            ):
+                return self._deny_request(
+                    request, state_from, "DISTRIBUTED_TOOL_NOT_APPROVED"
+                )
+            shared_operation_id = compute_hash_dict({
+                "domain": "SHARDS-SHARED-OPERATION-V1",
+                "kernel_id": self.config.kernel_id,
+                "actor": request.actor,
+                "request_id": request.request_id,
+            })
+            request_sha256 = compute_hash_dict({
+                "domain": "SHARDS-SHARED-REQUEST-V1",
+                "operation_id": shared_operation_id,
+                "permit_id": permit_token.permit_id,
+                "tool_name": tool_name,
+                "params": canonical_params,
+                "evidence": request.evidence,
+                "intent": request.intent,
+            })
+            # This PostgreSQL transaction consumes the global budget and
+            # creates the durable intent together. Any timeout or partition
+            # propagates and HALTS the kernel; there is no SQLite fallback.
+            reserved = self._shared_permit_journal.reserve(
+                operation_id=shared_operation_id,
+                permit_id=permit_token.permit_id,
+                issuer=permit_token.issuer,
+                subject=permit_token.subject,
+                nonce=permit_token.nonce,
+                max_executions=permit_token.max_executions,
+                request_sha256=request_sha256,
+            )
+            if not reserved:
+                return self._deny_permit(
+                    request, state_from, "GLOBAL_PERMIT_EXHAUSTED_OR_DUPLICATE",
+                    ["GLOBAL_PERMIT_EXHAUSTED_OR_DUPLICATE"],
+                    permit_digest=permit_digest, proposal_hash=proposal_hash,
+                )
+
+        # The local intent is an extra audit projection. The globally
+        # authoritative reservation was already committed to PostgreSQL.
+        # If this append fails, the budget stays spent and dispatch stops.
         machine.transition(KernelState.AUDITING)
         self._ledger.append(
             request_id=request.request_id,
@@ -659,6 +743,9 @@ class BaseKernel(Kernel):
 
         self._execution_authorised = True
         self._transition_executing()
+        if shared_operation_id is not None:
+            if not self._shared_permit_journal.mark_dispatched(shared_operation_id):
+                raise AuditError("Shared operation dispatch gate refused execution")
         context = ExecutionContext(
             trace_id=request.request_id,
             actor=request.actor,
@@ -684,6 +771,11 @@ class BaseKernel(Kernel):
             authorisation_deadline_ms=(permit_token.valid_until_ms if permit_token is not None else None),
         )
         if not runtime_result.dispatcher_result.success:
+            if shared_operation_id is not None:
+                # A failed invocation might still have applied a side effect.
+                # Preserve budget consumption and quarantine it for review.
+                if not self._shared_permit_journal.mark_unknown(shared_operation_id):
+                    raise AuditError("Could not mark failed operation UNKNOWN")
             return self._fail_request(
                 request,
                 state_from,
@@ -711,6 +803,18 @@ class BaseKernel(Kernel):
             permit_subject=permit_subject,
             permit_max_executions=permit_max_executions,
         )
+        if shared_operation_id is not None:
+            # Only deterministic builtins are reachable in this pilot, so the
+            # locally witnessed audit outcome is sufficient to close the
+            # internal operation. External providers require independent
+            # confirmation and must NOT use this reconciliation path.
+            if not self._shared_permit_journal.reconcile(
+                shared_operation_id,
+                outcome="SUCCEEDED",
+                evidence_ref=entry.entry_hash,
+                provider_ref="builtin:" + shared_operation_id,
+            ):
+                raise AuditError("Could not reconcile committed builtin outcome")
         self._complete_request()
         return self._receipt(
             request,
