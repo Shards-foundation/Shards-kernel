@@ -578,9 +578,10 @@ def test_async_retry_rejects_negative_retry_count():
     asyncio.run(scenario())
 
 
-def test_evidence_export_remains_consistent_during_an_append():
+def test_evidence_export_waits_for_atomic_hash_chain_append():
     ledger = AuditLedger("concurrent", "strict")
-    appended, release = Event(), Event()
+    appended, release, exported = Event(), Event(), Event()
+    snapshots = []
 
     class PausingEntries(list):
         def append(self, entry):
@@ -599,21 +600,32 @@ def test_evidence_export_remains_consistent_during_an_append():
             state_from=KernelState.IDLE,
             state_to=KernelState.COMPLETED,
             ts_ms=1000,
-        )
+        ),
+        daemon=True,
+    )
+    reader = Thread(
+        target=lambda: (snapshots.append(ledger.export(1000)), exported.set()),
+        daemon=True,
     )
     worker.start()
     try:
         assert appended.wait(2)
-        bundle = ledger.export(1000)
-        payload = {
-            "ledger_entries": [audit_entry_to_dict(entry) for entry in bundle.ledger_entries],
-            "root_hash": bundle.root_hash,
-        }
-        assert verify_evidence_bundle(payload).is_valid
+        reader.start()
+        # Export cannot see _entries changed before the append hash/head commits.
+        assert not exported.wait(0.05)
     finally:
         release.set()
         worker.join(2)
+        if reader.ident is not None:
+            reader.join(2)
     assert not worker.is_alive()
+    assert exported.is_set()
+    assert len(snapshots) == 1
+    payload = {
+        "ledger_entries": [audit_entry_to_dict(entry) for entry in snapshots[0].ledger_entries],
+        "root_hash": snapshots[0].root_hash,
+    }
+    assert verify_evidence_bundle(payload).is_valid
 
 
 def test_cancelled_async_halt_keeps_other_operations_serialized():
