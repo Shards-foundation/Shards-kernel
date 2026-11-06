@@ -248,6 +248,38 @@ def test_ed25519_variadic_tool_requires_exact_signed_params(
     assert executed == ([submitted_params] if allowed else [])
 
 
+def test_signed_permit_scope_cannot_mutate_between_signature_and_validation(
+    signed_kernel, monkeypatch
+):
+    """The original caller's mutable permit mapping cannot alter verified scope."""
+    import shards_kernel.permits as permit_module
+
+    kernel, key, _clock, seen = signed_kernel
+    effects = []
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", lambda **kwargs: effects.append(kwargs))
+
+    original = signed_permit(key, {"marker": "approved"})
+    real_match = permit_module._params_satisfy_permit
+
+    def concurrent_caller_mutation(request_params, signed_params):
+        # Deterministically simulate the caller mutating its original permit
+        # immediately after successful cryptographic verification but before
+        # the verifier's parameter comparison.
+        original.params.clear()
+        return real_match(request_params, signed_params)
+
+    monkeypatch.setattr(
+        permit_module, "_params_satisfy_permit", concurrent_caller_mutation
+    )
+    outcome = kernel.submit(request({}, request_id="mutable-scope"), original)
+    assert outcome.decision is Decision.DENY
+    assert "PARAMS_MISMATCH" in (outcome.error or "")
+    assert effects == []
+    assert seen == []
+    assert original.params == {}
+
+
 def test_signed_permit_expiring_before_dispatch_is_denied(signed_kernel):
     kernel, key, clock, seen = signed_kernel
     kernel.set_runtime_hooks(before_execute=lambda _ctx, _call: clock.advance(1001))
