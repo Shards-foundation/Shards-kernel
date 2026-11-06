@@ -627,6 +627,20 @@ def test_audit_failure_quarantine_when_owner_already_released():
     )
 
 
+def test_repeated_audit_quarantine_after_terminal_halt_is_idempotent():
+    """An already halted instance never emits a second terminal audit entry."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("halted-quarantine", "strict", clock=VirtualClock(1000)))
+    kernel.halt("original halt")
+    before = kernel.export_evidence()
+    kernel._quarantine_failed_admission_audit("late admission audit failure")
+    after = kernel.export_evidence()
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    assert after.root_hash == before.root_hash
+    assert len(after.ledger_entries) == len(before.ledger_entries)
+
+
 def test_pending_halt_prevents_new_submission_even_before_terminal_transition():
     """The admission gate rejects a pending halt; subsequent finalization is terminal."""
     kernel = StrictKernel()
