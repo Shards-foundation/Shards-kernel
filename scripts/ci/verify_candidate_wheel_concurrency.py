@@ -69,8 +69,13 @@ def scenario(limit: int) -> dict[str, object]:
     )
     executed: list[int] = []
     executed_lock = threading.Lock()
+    handler_started = threading.Event()
+    handler_release = threading.Event()
 
     def candidate_sink(marker: int) -> int:
+        handler_started.set()
+        if not handler_release.wait(timeout=5):
+            raise RuntimeError("Timed out awaiting synthetic handler release")
         with executed_lock:
             executed.append(marker)
         return marker
@@ -112,10 +117,25 @@ def scenario(limit: int) -> dict[str, object]:
         except Exception as exc:
             return {"exception": type(exc).__name__}
 
-    positive = attempt(0)
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        rest = list(pool.map(attempt, range(1, ATTEMPTS)))
-    outcomes = [positive] + rest
+        first = pool.submit(attempt, 0)
+        handler_started_observed = handler_started.wait(timeout=3)
+        others = [pool.submit(attempt, i) for i in range(1, ATTEMPTS)]
+        try:
+            # This enforces *actual* contention: workers must return while the
+            # first handler is still active. An unlocked original implementation
+            # raises StateError; an unbounded lock deadlocks or times out here.
+            contention = (
+                [future.result(timeout=3) for future in others[: WORKERS - 1]]
+                if handler_started_observed
+                else []
+            )
+        finally:
+            handler_release.set()
+        outcomes = [first.result(timeout=3)] + [
+            future.result(timeout=3) for future in others
+        ]
+    positive = outcomes[0]
     allowed = sum(x.get("decision") == Decision.ALLOW.value for x in outcomes)
     denied = sum(x.get("decision") == Decision.DENY.value for x in outcomes)
     exceptions = [x for x in outcomes if "exception" in x]
@@ -124,8 +144,13 @@ def scenario(limit: int) -> dict[str, object]:
         [audit_entry_to_dict(entry) for entry in evidence.ledger_entries],
         evidence.root_hash,
     )
+    contended_denials = sum(
+        item.get("decision") == Decision.DENY.value for item in contention
+    )
     passed = (
-        positive.get("decision") == Decision.ALLOW.value
+        handler_started_observed
+        and contended_denials == WORKERS - 1
+        and positive.get("decision") == Decision.ALLOW.value
         and not exceptions
         and allowed + denied == ATTEMPTS
         and 1 <= allowed <= limit
@@ -139,6 +164,7 @@ def scenario(limit: int) -> dict[str, object]:
         "workers": WORKERS,
         "allowed": allowed,
         "denied": denied,
+        "contended_denials_before_release": contended_denials,
         "effects": len(executed),
         "uncontrolled_exceptions": len(exceptions),
         "exception_samples": exceptions[:3],
@@ -161,6 +187,7 @@ def main() -> int:
             {
                 "schema": "shards.wheel-sk001.v1",
                 "package_version": shards_kernel.__version__,
+                "python_version": sys.version.split()[0],
                 "import_path": module_path,
                 "commit_sha": os.environ.get("GITHUB_SHA", "local"),
                 "results": rows,
