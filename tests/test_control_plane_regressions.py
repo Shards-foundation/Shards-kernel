@@ -402,6 +402,37 @@ def test_async_timeout_keeps_kernel_serialized_until_running_tool_finishes(signe
     asyncio.run(scenario())
 
 
+def test_concurrent_sync_submits_are_serialized_and_audited(signed_kernel):
+    """SK-001: simultaneous callers never see lifecycle StateError or overspend."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import sleep
+
+    kernel, key, _clock, seen = signed_kernel
+
+    def slow_probe(amount=99):
+        sleep(0.003)
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", slow_probe)
+    permit = signed_permit(key, {"amount": 1})
+
+    def invoke(index):
+        return kernel.submit(
+            request({"amount": 1}, request_id=f"concurrent-{index}"), permit
+        ).decision
+
+    with ThreadPoolExecutor(max_workers=32) as executor:
+        results = list(executor.map(invoke, range(256)))
+
+    assert results.count(Decision.ALLOW) == 1
+    assert results.count(Decision.DENY) == 255
+    assert seen == [1]
+    entries = kernel.export_evidence().ledger_entries
+    assert len(entries) >= 256
+
+
 def test_async_batch_rejects_mismatched_permit_count_without_submitting():
     class FakeKernel:
         def __init__(self):
