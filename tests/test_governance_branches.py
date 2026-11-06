@@ -572,7 +572,8 @@ class TestBaseKernelDefensiveBranches(unittest.TestCase):
         self.assertIn("PARAM_BINDING_MISMATCH", receipt.error or "")
         self.assertEqual(called, [])
 
-    def test_post_check_permit_rewrite_is_rejected(self) -> None:
+    def test_post_check_caller_permit_rewrite_cannot_change_signed_execution(self) -> None:
+        """Mutating the caller's token cannot rewrite the private verified snapshot."""
         kernel = _RewritePermitParams()
         kernel.boot(KernelConfig(kernel_id="k", variant="strict", clock=VirtualClock(1)))
         permit, keyring = _permit("spy", {"text": "hi"})
@@ -589,9 +590,10 @@ class TestBaseKernelDefensiveBranches(unittest.TestCase):
             ),
             permit_token=permit,  # type: ignore[arg-type]
         )
-        self.assertEqual(receipt.decision, Decision.DENY)
-        self.assertIn("PARAM_BINDING_MISMATCH", receipt.error or "")
-        self.assertEqual(called, [])
+        self.assertEqual(receipt.decision, Decision.ALLOW)
+        self.assertEqual(called, ["hi"])
+        self.assertEqual(permit.params, {"text": "other"})
+        self.assertNotEqual(permit.params, {"text": "hi"})
 
     def test_revoking_the_dev_opt_out_before_execution_denies(self) -> None:
         kernel = _RevokeInsecureOptOut()
