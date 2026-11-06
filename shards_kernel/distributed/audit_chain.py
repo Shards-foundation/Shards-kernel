@@ -17,6 +17,14 @@ GENESIS_ROOT = "0" * 64
 _ALLOWED_EVENTS = frozenset(
     {"RESERVED", "DISPATCHED", "UNKNOWN", "SUCCEEDED", "NOT_APPLIED"}
 )
+_PREVIOUS_STATES = {
+    "RESERVED": frozenset({None}),
+    "DISPATCHED": frozenset({"RESERVED"}),
+    "UNKNOWN": frozenset({"DISPATCHED"}),
+    "SUCCEEDED": frozenset({"DISPATCHED", "UNKNOWN"}),
+    "NOT_APPLIED": frozenset({"DISPATCHED", "UNKNOWN"}),
+}
+_IDENTITY_FIELDS = ("permit_id", "request_sha256", "issuer", "subject", "nonce")
 
 AUDIT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS shards_authority_audit_head (
@@ -112,6 +120,18 @@ class AuthorityAuditChain:
             or (last is not None and (last[0] != current_seq or last[1] != current_hash))
         ):
             raise AuthorityAuditIntegrityError("Authority chain head disagrees with log")
+        # Validate the sequence *within* each operation as well as the
+        # global hash link. A forged skipped transition must never be
+        # appended even if its hash would be internally self-consistent.
+        cur.execute(
+            """SELECT event_type FROM shards_authority_audit
+               WHERE operation_id = %s ORDER BY seq DESC LIMIT 1""",
+            (operation_id,),
+        )
+        prior = cur.fetchone()
+        prior_state = prior[0] if prior is not None else None
+        if prior_state not in _PREVIOUS_STATES[event_type]:
+            raise AuthorityAuditIntegrityError("Invalid authority operation transition")
         next_seq = current_seq + 1
         entry_hash = cls._hash(next_seq, current_hash, canonical)
         cur.execute(
@@ -153,6 +173,8 @@ class AuthorityAuditChain:
                     rows = cur.fetchall()
                     seq = 0
                     root = GENESIS_ROOT
+                    operation_states: dict[str, str] = {}
+                    operation_identities: dict[str, tuple[str, ...]] = {}
                     for number, operation_id, event_type, canonical, previous, digest in rows:
                         seq += 1
                         if number != seq or previous != root or event_type not in _ALLOWED_EVENTS:
@@ -165,28 +187,54 @@ class AuthorityAuditChain:
                                 or cls._canonical(decoded) != canonical
                             ):
                                 raise AuthorityAuditIntegrityError("Authority event payload mismatch")
+                            fields = decoded.get("fields")
+                            if not isinstance(fields, dict):
+                                raise AuthorityAuditIntegrityError("Authority event missing fields")
+                            identity = tuple(fields.get(k) for k in _IDENTITY_FIELDS)
+                            if any(not isinstance(item, str) or not item for item in identity):
+                                raise AuthorityAuditIntegrityError("Authority event identity incomplete")
+                            prior_state = operation_states.get(operation_id)
+                            if prior_state not in _PREVIOUS_STATES[event_type]:
+                                raise AuthorityAuditIntegrityError("Invalid authority operation history")
+                            if event_type == "RESERVED":
+                                if (
+                                    type(fields.get("max_executions")) is not int
+                                    or fields["max_executions"] < 1
+                                    or type(fields.get("use_count")) is not int
+                                    or not 1 <= fields["use_count"] <= fields["max_executions"]
+                                ):
+                                    raise AuthorityAuditIntegrityError("Malformed permit reservation evidence")
+                                operation_identities[operation_id] = identity
+                            elif operation_identities.get(operation_id) != identity:
+                                raise AuthorityAuditIntegrityError("Operation identity changed across events")
                             expected = cls._hash(seq, root, canonical)
                         except (TypeError, ValueError, AttributeError) as exc:
                             raise AuthorityAuditIntegrityError("Malformed authority event payload") from exc
                         if digest != expected:
                             raise AuthorityAuditIntegrityError("Authority event hash mismatch")
                         root = digest
+                        operation_states[operation_id] = event_type
                     if (seq, root) != (head[0], head[1]):
                         raise AuthorityAuditIntegrityError("Authority head does not match history")
-                    # An operation created before the audit migration is an
-                    # unverifiable history gap. Never fabricate a backfill.
+                    # Compare the independently stored operation state and
+                    # immutable permit/request identity to the *whole* event
+                    # history. An old row without a RESERVED event fails.
                     cur.execute(
-                        """SELECT op.operation_id FROM shards_effect_operation op
-                           LEFT JOIN LATERAL (
-                             SELECT a.event_type FROM shards_authority_audit a
-                             WHERE a.operation_id = op.operation_id
-                             ORDER BY a.seq DESC LIMIT 1
-                           ) last_event ON TRUE
-                           WHERE last_event.event_type IS DISTINCT FROM op.state
-                           LIMIT 1"""
+                        """SELECT operation_id, state, permit_id, request_sha256,
+                                  issuer, subject, nonce
+                           FROM shards_effect_operation"""
                     )
-                    if cur.fetchone() is not None:
-                        raise AuthorityAuditIntegrityError(
-                            "Unjournalled operation or effect-state mismatch"
-                        )
+                    operation_rows = cur.fetchall()
+                    if len(operation_rows) != len(operation_states):
+                        raise AuthorityAuditIntegrityError("Unjournalled operation count mismatch")
+                    for op_id, state, permit_id, request_hash, issuer, subject, nonce in operation_rows:
+                        if (
+                            operation_states.get(op_id) != state
+                            or operation_identities.get(op_id) != (
+                                permit_id, request_hash, issuer, subject, nonce
+                            )
+                        ):
+                            raise AuthorityAuditIntegrityError(
+                                "Unjournalled operation or effect-state mismatch"
+                            )
                     return AuthorityAuditSnapshot(sequence=seq, root=root)
