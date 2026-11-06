@@ -252,7 +252,7 @@ def test_signed_permit_scope_cannot_mutate_between_signature_and_validation(
     signed_kernel, monkeypatch
 ):
     """The original caller's mutable permit mapping cannot alter verified scope."""
-    import shards_kernel.permits as permit_module
+    from shards_kernel.permits import _params_satisfy_permit
 
     kernel, key, _clock, seen = signed_kernel
     effects = []
@@ -260,7 +260,7 @@ def test_signed_permit_scope_cannot_mutate_between_signature_and_validation(
     kernel._dispatcher.registry.register("probe", lambda **kwargs: effects.append(kwargs))
 
     original = signed_permit(key, {"marker": "approved"})
-    real_match = permit_module._params_satisfy_permit
+    real_match = _params_satisfy_permit
 
     def concurrent_caller_mutation(request_params, signed_params):
         # Deterministically simulate the caller mutating its original permit
@@ -270,7 +270,7 @@ def test_signed_permit_scope_cannot_mutate_between_signature_and_validation(
         return real_match(request_params, signed_params)
 
     monkeypatch.setattr(
-        permit_module, "_params_satisfy_permit", concurrent_caller_mutation
+        "shards_kernel.permits._params_satisfy_permit", concurrent_caller_mutation
     )
     outcome = kernel.submit(request({}, request_id="mutable-scope"), original)
     assert outcome.decision is Decision.DENY
