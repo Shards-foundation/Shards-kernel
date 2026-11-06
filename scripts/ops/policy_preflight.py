@@ -154,9 +154,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 expected_kernel_id=args.expected_kernel_id,
             )
             LOG.info("policy_verified", extra={"data": report})
-        except (ValueError, OSError, ImportError, TypeError, KeyError) as exc:
+        except Exception as exc:
             result = 2
-            # External parser exceptions may disclose paths or document contents.
+            # Fail closed on unexpected verifier exceptions too. Never emit
+            # exception text: it may contain paths or signed-policy contents.
             reason = ("DEPENDENCY_MISSING_INSTALL_SHARDS_KERNEL_CRYPTO"
                       if isinstance(exc, ImportError) else "POLICY_REJECTED")
             LOG.error("policy_rejected", extra={"data": {"reason": reason}})
