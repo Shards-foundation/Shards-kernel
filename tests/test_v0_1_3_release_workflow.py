@@ -163,70 +163,30 @@ def test_busy_audit_rejects_generic_denials_and_empty_evidence():
     assert assess_busy_audit(contention, all_receipts, corrupted)[1] is False
 
 
-def test_dispatch_shell_invocation(tmp_path):
-    """Execute the actual YAML Bash block with a fake gh executable.
+def test_dispatch_shell_invocation_is_ci_enforced():
+    """Actual Bash execution is covered by the dedicated CI shell regression."""
+    current = WORKFLOW.read_text(encoding="utf-8")
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    script_path = ROOT / "scripts" / "ci" / "check_release_dispatch_shell.sh"
+    assert script_path.is_file()
+    script = script_path.read_text(encoding="utf-8")
+    assert script.startswith("#!/usr/bin/env bash")
+    assert "bash scripts/ci/check_release_dispatch_shell.sh" in current
+    assert "bash scripts/ci/check_release_dispatch_shell.sh" in ci
+    assert "Dispatch using trusted workflow run identity" in script
+    assert 'bash -e -o pipefail "$temp_dir/dispatch.sh"' in script
+    assert 'bash -e -o pipefail "$temp_dir/broken.sh"' in script
+    assert "Incorrect gh workflow dispatch argv" in script
 
-    This catches accidental double-backslashes, misplaced continuations and
-    dropped/shifted arguments without dispatching any real GitHub workflow.
-    """
-    import os
-
-    source = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    # Static precondition before invoking the shell-level regression.
     marker = "      - name: Dispatch using trusted workflow run identity"
-    start = source.index("        run: |", source.index(marker)) + 1
+    lines = current.splitlines()
+    pos = lines.index("        run: |", lines.index(marker))
     commands = []
-    for line in source[start:]:
+    for line in lines[pos + 1:]:
         if line.startswith("          "):
             commands.append(line[10:])
         elif line.strip():
             break
-    assert commands
-    script = "\n".join(commands) + "\n"
-    continuations = [line for line in commands if line.endswith("\\")]
-    assert len(continuations) == 4
-    assert all(not line.endswith("\\\\") for line in continuations)
-
-    mock_dir = tmp_path / "mock-bin"
-    mock_dir.mkdir()
-    record = tmp_path / "gh-arguments.txt"
-    fake_gh = mock_dir / "gh"
-    fake_gh.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$@" > "$GH_ARGS_PATH"\n',
-        encoding="utf-8",
-    )
-    fake_gh.chmod(0o700)
-    env = {
-        **os.environ,
-        "PATH": str(mock_dir) + os.pathsep + os.environ.get("PATH", ""),
-        "GITHUB_REPOSITORY": "Shards-foundation/Shards-kernel",
-        "GITHUB_RUN_ID": "987654321",
-        "GH_ARGS_PATH": str(record),
-    }
-
-    def execute(payload):
-        # Invoke a fixed absolute interpreter: no shell=True, executable
-        # path lookup, command interpolation, or credential is required.
-        return os.spawnve(
-            os.P_WAIT,
-            "/bin/bash",
-            ["/bin/bash", "-e", "-o", "pipefail", "-c", payload],
-            env,
-        )
-
-    assert execute(script) == 0
-    assert record.read_text(encoding="utf-8").splitlines() == [
-        "workflow", "run", "publish.yml",
-        "--repo", "Shards-foundation/Shards-kernel",
-        "--ref", "v0.1.3",
-        "--field", "release_tag=v0.1.3",
-        "--field", "verified_run_id=987654321",
-    ]
-
-    # Demonstrate that the original double-backslash defect makes Bash abort.
-    broken = script.replace(
-        "gh workflow run publish.yml " + "\\" + "\n",
-        "gh workflow run publish.yml " + "\\\\" + "\n",
-        1,
-    )
-    assert broken != script
-    assert execute(broken) != 0
+    assert len([line for line in commands if line.endswith(chr(92))]) == 4
+    assert all(not line.endswith(chr(92) * 2) for line in commands)
