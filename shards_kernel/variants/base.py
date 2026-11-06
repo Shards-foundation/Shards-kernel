@@ -140,6 +140,9 @@ class BaseKernel(Kernel):
         """
         # Non-blocking, single-flight admission avoids unbounded request waiters.
         self._submit_lock = Lock()
+        # Coordinate halt-intent writes with the end of single-flight admission:
+        # no halt may be stranded between the owner's final check and unlock.
+        self._halt_intent_lock = Lock()
         self._pending_halt: Optional[str] = None
         self._config: Optional[KernelConfig] = None
         self._state_machine: Optional[StateMachine] = None
@@ -387,11 +390,12 @@ class BaseKernel(Kernel):
         try:
             return self._submit_serialized(request, permit_token)
         finally:
-            try:
-                if self._pending_halt is not None and not self._halted:
-                    self._halt_locked(self._pending_halt)
-            finally:
-                self._submit_lock.release()
+            with self._halt_intent_lock:
+                try:
+                    if self._pending_halt is not None and not self._halted:
+                        self._halt_locked(self._pending_halt)
+                finally:
+                    self._submit_lock.release()
 
     def _deny_busy(self, request: KernelRequest) -> KernelReceipt:
         """Audited pre-admission refusal; no permit verification or tool dispatch.
@@ -432,14 +436,15 @@ class BaseKernel(Kernel):
 
     def _quarantine_failed_admission_audit(self, reason: str) -> None:
         """Prevent future execution when a pre-admission audit could not commit."""
-        self._pending_halt = reason
-        if self._submit_lock.acquire(blocking=False):
-            try:
-                if not self._halted:
-                    self._halt_on_fault(reason)
-                self._pending_halt = None
-            finally:
-                self._submit_lock.release()
+        with self._halt_intent_lock:
+            self._pending_halt = reason
+            if self._submit_lock.acquire(blocking=False):
+                try:
+                    if not self._halted:
+                        self._halt_on_fault(reason)
+                    self._pending_halt = None
+                finally:
+                    self._submit_lock.release()
 
     def _submit_serialized(
         self, request: KernelRequest, permit_token: Optional[PermitToken]
@@ -938,7 +943,8 @@ class BaseKernel(Kernel):
             raise StateError("Kernel not booted")
         if self._submit_lock.acquire(blocking=False):
             try:
-                return self._halt_locked(reason)
+                with self._halt_intent_lock:
+                    return self._halt_locked(reason)
             finally:
                 self._submit_lock.release()
 
@@ -958,17 +964,19 @@ class BaseKernel(Kernel):
         except Exception:
             self._quarantine_failed_admission_audit("Operator halt audit failure")
             raise
-        self._pending_halt = reason
-        # Close the race where the submission completed while the request
-        # audit was committed: if the owner has gone, perform the halt now.
-        if self._submit_lock.acquire(blocking=False):
-            try:
-                if not self._halted:
-                    self._halt_locked(reason)
-                else:
-                    self._pending_halt = None
-            finally:
-                self._submit_lock.release()
+        # The intent lock is shared with submit's final check AND unlock.
+        # Even if the audit above finished just as the submission ended,
+        # the terminal transition can never be stranded in an idle kernel.
+        with self._halt_intent_lock:
+            self._pending_halt = reason
+            if self._submit_lock.acquire(blocking=False):
+                try:
+                    if not self._halted:
+                        self._halt_locked(reason)
+                    else:
+                        self._pending_halt = None
+                finally:
+                    self._submit_lock.release()
         return KernelReceipt(
             request_id="HALT",
             status=ReceiptStatus.ACCEPTED,
