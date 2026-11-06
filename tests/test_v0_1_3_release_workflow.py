@@ -170,7 +170,6 @@ def test_dispatch_shell_invocation(tmp_path):
     dropped/shifted arguments without dispatching any real GitHub workflow.
     """
     import os
-    import subprocess
 
     source = WORKFLOW.read_text(encoding="utf-8").splitlines()
     marker = "      - name: Dispatch using trusted workflow run identity"
@@ -202,21 +201,19 @@ def test_dispatch_shell_invocation(tmp_path):
         "GITHUB_REPOSITORY": "Shards-foundation/Shards-kernel",
         "GITHUB_RUN_ID": "987654321",
         "GH_ARGS_PATH": str(record),
-        "GH_TOKEN": "test-fixture-only",
     }
 
     def execute(payload):
-        return subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", payload],
-            cwd=tmp_path,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
+        # Invoke a fixed absolute interpreter: no shell=True, executable
+        # path lookup, command interpolation, or credential is required.
+        return os.spawnve(
+            os.P_WAIT,
+            "/bin/bash",
+            ["/bin/bash", "-e", "-o", "pipefail", "-c", payload],
+            env,
         )
 
-    result = execute(script)
-    assert result.returncode == 0, result.stderr
+    assert execute(script) == 0
     assert record.read_text(encoding="utf-8").splitlines() == [
         "workflow", "run", "publish.yml",
         "--repo", "Shards-foundation/Shards-kernel",
@@ -232,4 +229,4 @@ def test_dispatch_shell_invocation(tmp_path):
         1,
     )
     assert broken != script
-    assert execute(broken).returncode != 0
+    assert execute(broken) != 0
