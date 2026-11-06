@@ -44,17 +44,19 @@ class SignedAuthorityCheckpoint:
     previous_digest: str
     signature: str
 
-    def validate(self) -> None:
-        if type(self.version) is not int or self.version != _VERSION:
-            raise CheckpointIntegrityError("Unsupported checkpoint version")
+    def _validate_identity(self) -> None:
         for field in ("environment", "key_id"):
             value = getattr(self, field)
             if not isinstance(value, str) or _ID.fullmatch(value) is None:
                 raise CheckpointIntegrityError("Malformed checkpoint " + field)
+
+    def _validate_numbers(self) -> None:
         if type(self.sequence) is not int or self.sequence < 0:
             raise CheckpointIntegrityError("Invalid checkpoint sequence")
         if type(self.issued_at_ms) is not int or self.issued_at_ms <= 0:
             raise CheckpointIntegrityError("Invalid checkpoint timestamp")
+
+    def _validate_hashes(self) -> None:
         if not isinstance(self.root, str) or _HASH.fullmatch(self.root) is None:
             raise CheckpointIntegrityError("Malformed checkpoint root")
         if (
@@ -62,6 +64,8 @@ class SignedAuthorityCheckpoint:
             or _HASH.fullmatch(self.previous_digest) is None
         ):
             raise CheckpointIntegrityError("Malformed previous checkpoint digest")
+
+    def _validate_signature(self) -> None:
         if not isinstance(self.signature, str):
             raise CheckpointIntegrityError("Malformed checkpoint signature")
         try:
@@ -70,6 +74,15 @@ class SignedAuthorityCheckpoint:
             raise CheckpointIntegrityError("Malformed checkpoint signature") from exc
         if len(decoded) != 64:
             raise CheckpointIntegrityError("Invalid checkpoint signature length")
+
+    def validate(self) -> None:
+        """Validate all signed fields before use or serialisation."""
+        if type(self.version) is not int or self.version != _VERSION:
+            raise CheckpointIntegrityError("Unsupported checkpoint version")
+        self._validate_identity()
+        self._validate_numbers()
+        self._validate_hashes()
+        self._validate_signature()
 
     def _payload(self) -> dict[str, Any]:
         return {
