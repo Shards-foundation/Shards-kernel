@@ -392,7 +392,13 @@ class BaseKernel(Kernel):
         self._state_machine.assert_state(KernelState.IDLE)
         self._execution_authorised = False
         try:
-            return self._submit_bound(request, permit_token)
+            # PermitToken is frozen, but its nested params/constraints dictionaries
+            # are not. The caller may retain and mutate the original while we
+            # verify the signature, check scope and dispatch. Keep one private
+            # snapshot throughout the entire signed authorisation boundary.
+            # A concurrent mutation that breaks copying fails closed here.
+            signed_snapshot = copy.deepcopy(permit_token) if permit_token is not None else None
+            return self._submit_bound(request, signed_snapshot)
         except Exception:
             self._halt_on_fault("Unhandled exception during request processing")
             raise
