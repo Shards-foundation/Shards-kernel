@@ -272,6 +272,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # For annotated tags, ^{} resolves the COMMIT rather than the tag
+          # object's SHA. For lightweight tags, the peeled ref is absent and
+          # the exact direct ref resolves to the commit. Refuse transport errors.
+          release_tag_commit() {
+            local peeled
+            peeled="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)" || return 1
+            if [ -n "$peeled" ]; then
+              printf '%s\\n' "$peeled"
+            else
+              git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1
+            fi
+          }
+          require_unpublished_draft() {
+            test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = true || {
+              echo "Release was promoted during recovery; refusing asset mutation" >&2
+              return 1
+            }
+          }
+          # Reject pre-existing incorrect tags BEFORE ANY draft mutation.
+          # The mutable draft may have been left behind by an earlier run.
+          initial_tag_commit="$(release_tag_commit)"
+          if [ -n "$initial_tag_commit" ] && [ "$initial_tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Existing release tag conflicts with verified protected-main commit" >&2
+            exit 1
+          fi
           # A successful create request is not sufficient: verify the published
           # release identity and the exact three checksum-protected assets.
           # GitHub draft assets are not yet immutable. A retry may rebuild
@@ -279,6 +304,7 @@ jobs:
           # repair the unpublished draft, never replace a published asset.
           # The new bytes must have passed THIS run's read-only verification.
           if [ "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "true" ]; then
+            require_unpublished_draft
             draft_target="$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
             [[ "$draft_target" =~ ^[a-f0-9]{40}$ ]] || {
               echo "Draft is not tied to a full commit SHA" >&2
@@ -303,10 +329,13 @@ jobs:
                 gh release download v0.1.3 --repo "$GITHUB_REPOSITORY" --dir "$staged_dir" --pattern "$name"
                 if ! cmp -s -- "$artifact" "$staged_dir/$name"; then
                   echo "Replacing unpublished draft asset with newly verified artifact: $name"
+                  require_unpublished_draft
                   gh release delete-asset v0.1.3 "$name" --repo "$GITHUB_REPOSITORY" --yes
+                  require_unpublished_draft
                   gh release upload v0.1.3 "$artifact" --repo "$GITHUB_REPOSITORY"
                 fi
               else
+                require_unpublished_draft
                 gh release upload v0.1.3 "$artifact" --repo "$GITHUB_REPOSITORY"
               fi
             done
@@ -322,22 +351,25 @@ jobs:
           # Compare the uploaded asset bytes with locally built, verified
           # artifacts. GitHub's asset names alone are not an integrity proof,
           # and a substituted checksum file must not validate itself.
-          verify_dir="$(mktemp -d "$RUNNER_TEMP/shards-release-assets.XXXXXX")"
-          gh release download v0.1.3 \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir "$verify_dir" \
-            --pattern 'shards_kernel-0.1.3-*.whl' \
-            --pattern 'shards_kernel-0.1.3.tar.gz' \
-            --pattern 'SHA256SUMS'
-          test "$(find "$verify_dir" -maxdepth 1 -type f | wc -l)" -eq 3
-          cmp -- dist/SHA256SUMS "$verify_dir/SHA256SUMS"
-          (
-            cd "$verify_dir"
-            sha256sum --check --strict SHA256SUMS
-          )
-          for local_artifact in dist/*.whl dist/*.tar.gz; do
-            cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"
-          done
+          verify_uploaded_assets() {
+            verify_dir="$(mktemp -d "$RUNNER_TEMP/shards-release-assets.XXXXXX")"
+            gh release download v0.1.3 \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir "$verify_dir" \
+              --pattern 'shards_kernel-0.1.3-*.whl' \
+              --pattern 'shards_kernel-0.1.3.tar.gz' \
+              --pattern 'SHA256SUMS'
+            test "$(find "$verify_dir" -maxdepth 1 -type f | wc -l)" -eq 3
+            cmp -- dist/SHA256SUMS "$verify_dir/SHA256SUMS"
+            (
+              cd "$verify_dir"
+              sha256sum --check --strict SHA256SUMS
+            )
+            for local_artifact in dist/*.whl dist/*.tar.gz; do
+              cmp -- "$local_artifact" "$verify_dir/$(basename "$local_artifact")"
+            done
+          }
+          verify_uploaded_assets
           # Draft GitHub releases do not always create a Git ref until they
           # are promoted. Authenticate the draft's original target before any
           # promotion, and never treat an absent draft tag as a wrong SHA.
@@ -372,10 +404,7 @@ jobs:
           # Atomically create the missing Git tag BEFORE publishing. If another
           # actor wins the tag race, fail closed rather than publishing against
           # an untrusted tag; on rerun the pre-existing SHA must match.
-          tag_commit="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)"
-          if [ -z "$tag_commit" ]; then
-            tag_commit="$(git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)"
-          fi
+          tag_commit="$(release_tag_commit)"
           if [ -n "$tag_commit" ] && [ "$tag_commit" != "$GITHUB_SHA" ]; then
             echo "Release tag points to another commit" >&2
             exit 1
@@ -385,6 +414,7 @@ jobs:
               echo "Published release has no immutable Git tag" >&2
               exit 1
             }
+            require_unpublished_draft
             gh api -X POST "/repos/$GITHUB_REPOSITORY/git/refs" \
               -f ref=refs/tags/v0.1.3 \
               -f sha="$GITHUB_SHA" >/dev/null || {
@@ -392,25 +422,40 @@ jobs:
               exit 1
             }
           fi
-          tag_commit="$(git ls-remote --tags origin 'refs/tags/v0.1.3^{}' | cut -f1)"
-          if [ -z "$tag_commit" ]; then
-            tag_commit="$(git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)"
-          fi
+          tag_commit="$(release_tag_commit)"
           test "$tag_commit" = "$GITHUB_SHA" || {
             echo "Release tag does not point to verified protected-main commit" >&2
             exit 1
           }
 
-          # Publishing is the final, non-reversible step, only after exact
-          # bytes and an existing exact-SHA tag are independently verified.
+          # Revalidate state, tag and ALL asset bytes immediately before
+          # promotion. This serializes competing Actions runs via workflow
+          # concurrency; these checks reject detectable external draft edits.
+          # GitHub does not provide atomic CAS for manual release mutations.
           if [ "$release_is_draft" = "true" ]; then
+            require_unpublished_draft
+            test "$(release_tag_commit)" = "$GITHUB_SHA" || {
+              echo "Release tag changed before draft promotion" >&2
+              exit 1
+            }
+            test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$GITHUB_SHA" || {
+              echo "Release target changed before promotion" >&2
+              exit 1
+            }
+            verify_uploaded_assets
+            require_unpublished_draft
+            test "$(release_tag_commit)" = "$GITHUB_SHA" || {
+              echo "Release tag changed before publication" >&2
+              exit 1
+            }
             gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --draft=false
           fi
           test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = false
-          test "$(git ls-remote --tags --refs origin refs/tags/v0.1.3 | cut -f1)" = "$GITHUB_SHA" || {
+          test "$(release_tag_commit)" = "$GITHUB_SHA" || {
             echo "Published release tag does not match verified commit" >&2
             exit 1
           }
+          verify_uploaded_assets
           echo "Verified tag and uploaded bytes, published final GitHub release"
 
   dispatch:
