@@ -86,6 +86,11 @@ def file_findings(root: Path, relative: Path, max_bytes: int) -> List[Tuple[str,
     """Find bounded text-hygiene problems without following symlinks."""
     findings: List[Tuple[str, str]] = []
     target = root / relative
+    for ancestor in relative.parents:
+        if ancestor == Path("."):
+            break
+        if (root / ancestor).is_symlink():
+            return [("critical", "symlinked_tracked_directory")]
     try:
         metadata = target.lstat()
     except OSError:
@@ -99,7 +104,8 @@ def file_findings(root: Path, relative: Path, max_bytes: int) -> List[Tuple[str,
     if relative.suffix.lower() not in TEXT_SUFFIXES and relative.name not in SPECIAL_NAMES:
         return findings
     try:
-        content = target.read_bytes()
+        with target.open("rb") as stream:
+            content = stream.read(max_bytes + 1)
     except OSError:
         return [("critical", "tracked_file_unreadable")]
     if len(content) > max_bytes:
