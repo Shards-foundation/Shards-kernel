@@ -401,17 +401,23 @@ scope and operational limitations.
 
 ## Organisation-wide repository review automation
 
-Use the helper below to clone every repository in a GitHub organisation, run
-standard quality checks, and export machine-readable + markdown summaries.
+Use the safe **read-only GitHub API inventory** to inspect repository metadata,
+last-push age and (optionally) reported default-branch protection. The command
+**does not** clone, install, execute, reset or delete anything:
 
 ```bash
-export GITHUB_TOKEN=ghp_xxx   # token with access to your organisation repos
-python scripts/org_repo_review.py --org Shards-foundation
+python scripts/org_repo_review.py --org Shards-foundation --format json
+python scripts/org_repo_review.py --org Shards-foundation --check-branches --strict
 ```
 
-Outputs:
-- `reports/org-review.json` with full command output and exit codes.
-- `reports/org-review.md` with per-repo pass/fail status.
+The script emits structured operational events to stderr and JSON or Markdown
+reports to stdout. Inject `GITHUB_TOKEN` in the environment for access
+to private repositories; an anonymous call only sees the publicly accessible
+subset. Legacy `--workspace` and `--output` workflow arguments are
+intentionally unsupported because they previously enabled destructive actions.
+
+See [the safe organisation inventory runbook](docs/operations/ORGANISATION_INVENTORY.md)
+for operational limits, report formats and exit codes.
 
 ## Autonomous Codex contribution scaffold
 
