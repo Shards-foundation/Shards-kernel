@@ -621,7 +621,7 @@ def test_audit_failure_quarantine_when_owner_already_released():
     kernel.boot(KernelConfig("unowned-audit", "strict", clock=VirtualClock(1000)))
     kernel._quarantine_failed_admission_audit("no audit persistence")
     assert kernel.get_state() is KernelState.HALTED
-    assert kernel._pending_halt == "no audit persistence"
+    assert kernel._pending_halt is None
     assert any(
         entry.decision is Decision.HALT for entry in kernel.export_evidence().ledger_entries
     )
@@ -632,8 +632,9 @@ def test_pending_halt_prevents_new_submission_even_before_terminal_transition():
     kernel = StrictKernel()
     kernel.boot(KernelConfig("pending-admission", "strict", clock=VirtualClock(1000)))
     kernel._pending_halt = "operator pending"
-    with pytest.raises(StateError, match="halt requested"):
-        kernel.submit(request({"amount": 1}))
+    refusal = kernel.submit(request({"amount": 1}))
+    assert refusal.decision is Decision.DENY
+    assert "KERNEL_BUSY" in (refusal.error or "")
     assert kernel.get_state() is KernelState.HALTED
     assert kernel._pending_halt is None
 
@@ -662,6 +663,7 @@ def test_queued_halt_skips_second_halt_after_racing_fault(monkeypatch):
     bundle = kernel.export_evidence()
     assert len(bundle.ledger_entries) == 2
     assert [e.decision for e in bundle.ledger_entries] == [Decision.HALT, Decision.HALT]
+    assert kernel._pending_halt is None
     assert replay_and_verify(
         [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
     )[0]
