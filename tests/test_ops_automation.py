@@ -37,10 +37,6 @@ class LocalTestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def log_message(self, fmt, *args):
-        return
-
-
 @pytest.fixture
 def local_operator():
     LocalTestHandler.health = {"status": "healthy", "kernel_state": "IDLE"}
