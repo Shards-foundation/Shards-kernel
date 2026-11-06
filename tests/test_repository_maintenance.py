@@ -38,6 +38,28 @@ def test_hygiene_detects_conflict_nul_and_missing_file(tmp_path: Path) -> None:
     )
 
 
+def test_hygiene_rejects_symlinked_parent(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.py").write_text("value = 1\n", encoding="utf-8")
+    link = tmp_path / "tracked"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Host does not permit symlink creation")
+    assert ("critical", "symlinked_tracked_directory") in hygiene.file_findings(
+        tmp_path, Path("tracked/secret.py"), 1024,
+    )
+
+
+def test_hygiene_restricts_file_bytes(tmp_path: Path) -> None:
+    document = tmp_path / "large.md"
+    document.write_bytes(b"A" * 128)
+    assert hygiene.file_findings(tmp_path, Path("large.md"), 64) == [
+        ("advisory", "file_above_scan_limit")
+    ]
+
+
 def test_hygiene_refuses_unsafe_git_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hygiene, "tracked_paths", lambda _root: [Path("../escape.py")])
     assert hygiene.audit(tmp_path, 2000, False, []) == 2
