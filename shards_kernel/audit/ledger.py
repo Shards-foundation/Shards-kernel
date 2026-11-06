@@ -127,16 +127,19 @@ class AuditLedger:
         return self._variant
 
     @property
+    @_synchronized
     def entries(self) -> tuple[AuditEntry, ...]:
         """Return all entries as an immutable tuple."""
         return tuple(self._entries)
 
     @property
+    @_synchronized
     def root_hash(self) -> str:
         """Return the current root hash (hash of last entry)."""
         return self._last_hash
 
     @property
+    @_synchronized
     def length(self) -> int:
         """Return the number of entries in the ledger."""
         return len(self._entries)
