@@ -164,38 +164,6 @@ def test_tampering_with_existing_audit_event_is_detected_and_restorable(journal)
     assert journal.verify_authority_audit() == original
 
 
-def test_legacy_unjournalled_operation_is_not_falsely_certified(journal):
-    psycopg = pytest.importorskip("psycopg")
-    p = permit()
-    with pytest.raises(RuntimeError, match="rollback legacy test"):
-        with psycopg.connect(os.environ["SHARDS_TEST_POSTGRES_DSN"]) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO shards_effect_operation
-                       (operation_id, permit_id, request_sha256, issuer, subject, nonce)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
-                    (
-                        p["operation_id"], p["permit_id"], p["request_sha256"],
-                        p["issuer"], p["subject"], p["nonce"],
-                    ),
-                )
-            # The ordinary verifier uses a fresh connection and cannot see
-            # uncommitted rows; check using the transaction's SQL visibility.
-            with conn.cursor() as cur:
-                cur.execute(
-                    """SELECT COUNT(*) FROM shards_effect_operation op
-                       WHERE op.operation_id = %s AND NOT EXISTS (
-                         SELECT 1 FROM shards_authority_audit a
-                         WHERE a.operation_id = op.operation_id
-                       )""",
-                    (p["operation_id"],),
-                )
-                assert cur.fetchone()[0] == 1
-            raise RuntimeError("rollback legacy test")
-    assert journal.get(p["operation_id"]) is None
-    assert journal.verify_authority_audit().root != ""
-
-
 def test_hash_domain_separation_and_validation():
     a = AuthorityAuditChain._canonical({"b": 1, "a": "x"})
     b = AuthorityAuditChain._canonical({"a": "x", "b": 1})
@@ -357,3 +325,136 @@ def test_committed_pre_migration_intent_is_reported_as_history_gap(journal):
                     (p["operation_id"],),
                 )
     journal.verify_authority_audit()
+
+
+def test_append_rejects_skipped_state_transition(journal):
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ["SHARDS_TEST_POSTGRES_DSN"]
+    p = permit()
+    assert journal.reserve(**p)
+    before = journal.verify_authority_audit()
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            with pytest.raises(
+                AuthorityAuditIntegrityError, match="Invalid authority operation transition"
+            ):
+                AuthorityAuditChain.append(
+                    cur, p["operation_id"], "SUCCEEDED",
+                    {"permit_id": p["permit_id"], "request_sha256": p["request_sha256"]},
+                )
+    assert journal.verify_authority_audit() == before
+
+
+def test_self_consistent_hash_forgery_cannot_skip_operation_transition(journal):
+    """Simulate a privileged actor recomputing the chain to conceal skipped dispatch."""
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ["SHARDS_TEST_POSTGRES_DSN"]
+    p = permit()
+    assert journal.reserve(**p)
+    verified = journal.verify_authority_audit()
+    seq = verified.sequence + 1
+    canonical = AuthorityAuditChain._canonical({
+        "event": "SUCCEEDED",
+        "operation_id": p["operation_id"],
+        "fields": {
+            "permit_id": p["permit_id"],
+            "request_sha256": p["request_sha256"],
+            "issuer": p["issuer"],
+            "subject": p["subject"],
+            "nonce": p["nonce"],
+            "evidence_ref": "forged",
+            "provider_ref": "forged",
+        },
+    })
+    digest = AuthorityAuditChain._hash(seq, verified.root, canonical)
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO shards_authority_audit
+                   (seq, operation_id, event_type, event_canonical, prev_hash, entry_hash)
+                   VALUES (%s, %s, 'SUCCEEDED', %s, %s, %s)""",
+                (seq, p["operation_id"], canonical, verified.root, digest),
+            )
+            cur.execute(
+                """UPDATE shards_authority_audit_head SET last_seq=%s, last_hash=%s
+                   WHERE singleton=TRUE""",
+                (seq, digest),
+            )
+            cur.execute(
+                """UPDATE shards_effect_operation SET state='SUCCEEDED'
+                   WHERE operation_id=%s""",
+                (p["operation_id"],),
+            )
+    try:
+        with pytest.raises(AuthorityAuditIntegrityError, match="Invalid authority operation history"):
+            journal.verify_authority_audit()
+    finally:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM shards_authority_audit WHERE seq=%s", (seq,))
+                cur.execute(
+                    """UPDATE shards_authority_audit_head SET last_seq=%s, last_hash=%s
+                       WHERE singleton=TRUE""",
+                    (verified.sequence, verified.root),
+                )
+                cur.execute(
+                    """UPDATE shards_effect_operation SET state='RESERVED'
+                       WHERE operation_id=%s""",
+                    (p["operation_id"],),
+                )
+    assert journal.verify_authority_audit() == verified
+
+
+def test_self_consistent_hash_forgery_cannot_change_permit_identity(journal):
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ["SHARDS_TEST_POSTGRES_DSN"]
+    p = permit()
+    assert journal.reserve(**p)
+    before = journal.verify_authority_audit()
+    seq = before.sequence + 1
+    canonical = AuthorityAuditChain._canonical({
+        "event": "DISPATCHED", "operation_id": p["operation_id"],
+        "fields": {
+            "permit_id": "forged-permit",
+            "request_sha256": p["request_sha256"],
+            "issuer": p["issuer"], "subject": p["subject"],
+            "nonce": p["nonce"],
+        },
+    })
+    digest = AuthorityAuditChain._hash(seq, before.root, canonical)
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO shards_authority_audit
+                   (seq, operation_id, event_type, event_canonical, prev_hash, entry_hash)
+                   VALUES (%s, %s, 'DISPATCHED', %s, %s, %s)""",
+                (seq, p["operation_id"], canonical, before.root, digest),
+            )
+            cur.execute(
+                """UPDATE shards_authority_audit_head SET last_seq=%s, last_hash=%s
+                   WHERE singleton=TRUE""",
+                (seq, digest),
+            )
+            cur.execute(
+                """UPDATE shards_effect_operation SET state='DISPATCHED'
+                   WHERE operation_id=%s""",
+                (p["operation_id"],),
+            )
+    try:
+        with pytest.raises(AuthorityAuditIntegrityError, match="Operation identity changed"):
+            journal.verify_authority_audit()
+    finally:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM shards_authority_audit WHERE seq=%s", (seq,))
+                cur.execute(
+                    """UPDATE shards_authority_audit_head SET last_seq=%s, last_hash=%s
+                       WHERE singleton=TRUE""",
+                    (before.sequence, before.root),
+                )
+                cur.execute(
+                    """UPDATE shards_effect_operation SET state='RESERVED'
+                       WHERE operation_id=%s""",
+                    (p["operation_id"],),
+                )
+    assert journal.verify_authority_audit() == before
