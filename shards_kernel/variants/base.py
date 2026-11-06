@@ -6,6 +6,7 @@ provides common functionality that variants can extend.
 
 import copy
 from abc import ABC, abstractmethod
+from threading import RLock
 from typing import Any, Callable, Optional
 
 from shards_kernel.common.codec import equal_json_values
@@ -137,6 +138,8 @@ class BaseKernel(Kernel):
                 list_entries. Restored entries are verified before use;
                 storage failures must prevent tool execution.
         """
+        # Serialize concurrent synchronous submissions across the full audit/effect lifecycle.
+        self._submit_lock = RLock()
         self._config: Optional[KernelConfig] = None
         self._state_machine: Optional[StateMachine] = None
         self._ledger: Optional[AuditLedger] = None
@@ -374,10 +377,18 @@ class BaseKernel(Kernel):
     ) -> KernelReceipt:
         """Submit a request for processing.
 
+        Concurrent synchronous calls are serialized; each receives an audited result.
         An unexpected exception halts the kernel. A tool call is not run
         unless its parameters were bound and an intent audit record was
         appended first.
         """
+        with self._submit_lock:
+            return self._submit_serialized(request, permit_token)
+
+    def _submit_serialized(
+        self, request: KernelRequest, permit_token: Optional[PermitToken]
+    ) -> KernelReceipt:
+        """Process a single submission while the caller holds the lock."""
         if (
             self._state_machine is None
             or self._dispatcher is None
