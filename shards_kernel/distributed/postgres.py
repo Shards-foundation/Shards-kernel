@@ -12,6 +12,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from shards_kernel.distributed.audit_chain import (
+    AuthorityAuditChain,
+    AuthorityAuditSnapshot,
+)
+
 # PostgreSQL connections use the DB-API/psycopg context-manager interface.
 # Importing this module does not require psycopg or make a network connection.
 ConnectionFactory = Callable[[], Any]
@@ -94,6 +99,7 @@ class PostgresPermitJournal:
             with conn.transaction():
                 with conn.cursor() as cur:
                     cur.execute(_SCHEMA)
+                    AuthorityAuditChain.initialize_schema(cur)
 
     @staticmethod
     def _identifier(value: str, field: str) -> str:
@@ -167,8 +173,22 @@ class PostgresPermitJournal:
                                  AND used < max_executions RETURNING used""",
                             (issuer, subject, nonce),
                         )
-                        if cur.fetchone() is None:
+                        consumed = cur.fetchone()
+                        if consumed is None:
                             raise _BudgetExhausted()
+                        # The permit budget, operation intent, and hash-linked
+                        # shared audit event COMMIT OR ROLLBACK TOGETHER.
+                        AuthorityAuditChain.append(
+                            cur, operation_id, "RESERVED", {
+                                "permit_id": permit_id,
+                                "request_sha256": request_sha256,
+                                "issuer": issuer,
+                                "subject": subject,
+                                "nonce": nonce,
+                                "max_executions": max_executions,
+                                "use_count": consumed[0],
+                            },
+                        )
             return True
         except _BudgetExhausted:
             # The transaction has rolled back the tentative intent INSERT.
@@ -212,10 +232,24 @@ class PostgresPermitJournal:
                            SET state = %s, evidence_ref = %s, provider_ref = %s,
                                updated_at = now()
                            WHERE operation_id = %s AND state IN ('DISPATCHED', 'UNKNOWN')
-                           RETURNING operation_id""",
+                           RETURNING permit_id, request_sha256, issuer, subject, nonce""",
                         (outcome, evidence_ref, provider_ref or None, operation_id),
                     )
-                    return cur.fetchone() is not None
+                    effect = cur.fetchone()
+                    if effect is None:
+                        return False
+                    AuthorityAuditChain.append(
+                        cur, operation_id, outcome, {
+                            "permit_id": effect[0],
+                            "request_sha256": effect[1],
+                            "issuer": effect[2],
+                            "subject": effect[3],
+                            "nonce": effect[4],
+                            "evidence_ref": evidence_ref,
+                            "provider_ref": provider_ref or None,
+                        },
+                    )
+                    return True
 
     def _transition(self, operation_id: str, target: str, sources: tuple[str, ...]) -> bool:
         operation_id = self._identifier(operation_id, "operation_id")
@@ -230,10 +264,30 @@ class PostgresPermitJournal:
                     cur.execute(
                         """UPDATE shards_effect_operation SET state = %s, updated_at = now()
                            WHERE operation_id = %s AND state = %s
-                           RETURNING operation_id""",
+                           RETURNING permit_id, request_sha256, issuer, subject, nonce""",
                         (target, operation_id, sources[0]),
                     )
-                    return cur.fetchone() is not None
+                    effect = cur.fetchone()
+                    if effect is None:
+                        return False
+                    AuthorityAuditChain.append(
+                        cur, operation_id, target, {
+                            "permit_id": effect[0],
+                            "request_sha256": effect[1],
+                            "issuer": effect[2],
+                            "subject": effect[3],
+                            "nonce": effect[4],
+                        },
+                    )
+                    return True
+
+    def verify_authority_audit(self) -> AuthorityAuditSnapshot:
+        """Verify the global primary's event chain and per-operation state.
+
+        This only verifies the local PostgreSQL history, NOT external trust
+        anchoring, backup integrity or independent provider confirmation.
+        """
+        return AuthorityAuditChain.verify(self._connect())
 
     def get(self, operation_id: str) -> EffectOperation | None:
         operation_id = self._identifier(operation_id, "operation_id")
