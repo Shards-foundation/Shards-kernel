@@ -248,3 +248,22 @@ def test_nonstring_identity_fields_fail_with_integrity_exception(
         payload[field] = invalid
         with pytest.raises(CheckpointIntegrityError, match="Malformed checkpoint"):
             SignedAuthorityCheckpoint.from_json(json.dumps(payload))
+
+
+def test_duplicate_json_fields_are_not_silently_interpreted(identity):
+    cp = make_checkpoint(identity)
+    valid_json = cp.as_json()
+    duplicate = valid_json[:-1] + ',"environment":"staging-a"}'
+    with pytest.raises(CheckpointIntegrityError, match="Duplicate checkpoint"):
+        SignedAuthorityCheckpoint.from_json(duplicate)
+    assert SignedAuthorityCheckpoint.from_json(valid_json) == cp
+
+
+@pytest.mark.parametrize("minimum", [True, -1, "1", None])
+def test_chain_rejects_invalid_pinned_minimum_type(identity, minimum):
+    cp = make_checkpoint(identity)
+    with pytest.raises(ValueError, match="minimum_sequence"):
+        verify_checkpoint_chain(
+            [cp], trusted_keys=identity[1],
+            expected_environment="staging-a", minimum_sequence=minimum,
+        )
