@@ -124,13 +124,14 @@ def test_append_and_verify_happy_path_without_real_database():
     conn = MemoryConnection()
     cur = conn.cursor()
     AuthorityAuditChain.initialize_schema(cur)
-    assert AuthorityAuditChain.append(cur, "op", "RESERVED", fields())
-    assert AuthorityAuditChain.append(
+    first_root = AuthorityAuditChain.append(cur, "op", "RESERVED", fields())
+    second_root = AuthorityAuditChain.append(
         cur, "op", "DISPATCHED",
         {k: fields()[k] for k in (
             "permit_id", "request_sha256", "issuer", "subject", "nonce"
         )},
     )
+    assert first_root != second_root
     conn.operations = [operation("DISPATCHED")]
     result = AuthorityAuditChain.verify(conn)
     assert isinstance(result, AuthorityAuditSnapshot)
@@ -156,7 +157,10 @@ def test_append_refuses_invalid_operation_order():
         AuthorityAuditChain.append(conn.cursor(), "op", "INVALID", fields())
     with pytest.raises(AuthorityAuditIntegrityError, match="Invalid authority"):
         AuthorityAuditChain.append(conn.cursor(), "op", "SUCCEEDED", fields())
-    assert AuthorityAuditChain.append(conn.cursor(), "op", "RESERVED", fields())
+    initial_root = AuthorityAuditChain.append(
+        conn.cursor(), "op", "RESERVED", fields()
+    )
+    assert len(initial_root) == 64
     with pytest.raises(AuthorityAuditIntegrityError, match="Invalid authority"):
         AuthorityAuditChain.append(conn.cursor(), "op", "RESERVED", fields())
 
