@@ -84,14 +84,20 @@ def test_distinct_postgres_connections_share_one_authoritative_chain(journal):
     assert after.root != before.root
 
 
+def _assert_failed_audit_append(monkeypatch, operation):
+    """One failure injector shared by the reservation/transition invariants."""
+    def fail(*args, **kwargs):
+        raise OSError("audit lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(AuthorityAuditChain, "append", fail)
+        with pytest.raises(OSError, match="audit lost"):
+            operation()
+
+
 def test_audit_insert_failure_rolls_back_budget_and_operation(journal, monkeypatch):
     p = permit()
-    def refuse(*args, **kwargs):
-        raise RuntimeError("audit is unavailable")
-    with monkeypatch.context() as m:
-        m.setattr(AuthorityAuditChain, "append", refuse)
-        with pytest.raises(RuntimeError, match="audit is unavailable"):
-            journal.reserve(**p)
+    _assert_failed_audit_append(monkeypatch, lambda: journal.reserve(**p))
     assert journal.get(p["operation_id"]) is None
     assert journal.reserve(**p)
     assert journal.verify_authority_audit().sequence >= 1
@@ -101,13 +107,9 @@ def test_audit_insert_failure_rolls_back_dispatch_state(journal, monkeypatch):
     p = permit()
     assert journal.reserve(**p)
     before = journal.verify_authority_audit()
-    with monkeypatch.context() as m:
-        m.setattr(
-            AuthorityAuditChain, "append",
-            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("audit lost")),
-        )
-        with pytest.raises(OSError, match="audit lost"):
-            journal.mark_dispatched(p["operation_id"])
+    _assert_failed_audit_append(
+        monkeypatch, lambda: journal.mark_dispatched(p["operation_id"])
+    )
     assert journal.get(p["operation_id"]).state == "RESERVED"
     assert journal.verify_authority_audit() == before
     assert journal.mark_dispatched(p["operation_id"])
@@ -119,16 +121,13 @@ def test_audit_failure_rolls_back_reconciliation(journal, monkeypatch):
     assert journal.reserve(**p)
     assert journal.mark_dispatched(p["operation_id"])
     before = journal.verify_authority_audit()
-    with monkeypatch.context() as m:
-        m.setattr(
-            AuthorityAuditChain, "append",
-            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("audit lost")),
-        )
-        with pytest.raises(OSError, match="audit lost"):
-            journal.reconcile(
-                p["operation_id"], outcome="NOT_APPLIED",
-                evidence_ref="provider:proves-nonapplication",
-            )
+    _assert_failed_audit_append(
+        monkeypatch,
+        lambda: journal.reconcile(
+            p["operation_id"], outcome="NOT_APPLIED",
+            evidence_ref="provider:proves-nonapplication",
+        ),
+    )
     assert journal.get(p["operation_id"]).state == "DISPATCHED"
     assert journal.verify_authority_audit() == before
 
@@ -252,24 +251,35 @@ def test_corruption_variants_are_detected(journal, field, bad_value, reason):
     dsn = os.environ["SHARDS_TEST_POSTGRES_DSN"]
     p = permit()
     assert journal.reserve(**p)
-    # The field is a static test parameter, never user-substituted into SQL
-    # in an exposed API. All inputs are known trusted literals above.
-    query = "UPDATE shards_authority_audit SET " + field + " = %s WHERE operation_id = %s RETURNING " + field
+    # Explicit, static statements avoid dynamic SQL interpolation even in
+    # adversarial tests. Only the values are bound at runtime.
+    statements = {
+        "prev_hash": (
+            "SELECT prev_hash FROM shards_authority_audit WHERE operation_id = %s",
+            "UPDATE shards_authority_audit SET prev_hash = %s WHERE operation_id = %s",
+        ),
+        "event_canonical": (
+            "SELECT event_canonical FROM shards_authority_audit WHERE operation_id = %s",
+            "UPDATE shards_authority_audit SET event_canonical = %s WHERE operation_id = %s",
+        ),
+        "entry_hash": (
+            "SELECT entry_hash FROM shards_authority_audit WHERE operation_id = %s",
+            "UPDATE shards_authority_audit SET entry_hash = %s WHERE operation_id = %s",
+        ),
+    }
+    select_sql, update_sql = statements[field]
     with psycopg.connect(dsn) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + field + " FROM shards_authority_audit WHERE operation_id = %s",
-                (p["operation_id"],),
-            )
+            cur.execute(select_sql, (p["operation_id"],))
             original = cur.fetchone()[0]
-            cur.execute(query, (bad_value, p["operation_id"]))
+            cur.execute(update_sql, (bad_value, p["operation_id"]))
     try:
         with pytest.raises(AuthorityAuditIntegrityError, match=reason):
             journal.verify_authority_audit()
     finally:
         with psycopg.connect(dsn) as conn:
             with conn.cursor() as cur:
-                cur.execute(query, (original, p["operation_id"]))
+                cur.execute(update_sql, (original, p["operation_id"]))
     journal.verify_authority_audit()
 
 
