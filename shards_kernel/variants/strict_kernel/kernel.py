@@ -8,6 +8,7 @@ The strict kernel enforces maximum constraints:
 """
 
 from shards_kernel.common.types import KernelConfig, KernelRequest
+from shards_kernel.common.errors import BootError
 from shards_kernel.variants.base import BaseKernel
 
 
@@ -26,6 +27,8 @@ class StrictKernel(BaseKernel):
 
     def boot(self, config: KernelConfig) -> None:
         """Boot with strict configuration enforcement."""
+        if self._shared_permit_journal is not None and config.allow_insecure_unpermitted_execution:
+            raise BootError("Shared permit accounting refuses insecure permit opt-out")
         # Enforce strict settings
         strict_config = KernelConfig(
             kernel_id=config.kernel_id,
