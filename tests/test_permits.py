@@ -1367,5 +1367,16 @@ class TestPermitVerificationPositive(unittest.TestCase):
         self.assertEqual(r2.status, Decision.ALLOW)
 
 
+def test_exact_scope_rejects_non_mappings_and_json_type_aliases() -> None:
+    """Cover malformed boundaries as well as valid exact signed arguments."""
+    from shards_kernel.permits import _params_satisfy_permit
+
+    assert _params_satisfy_permit({"value": [1, {"ok": None}]}, {"value": [1, {"ok": None}]})
+    assert not _params_satisfy_permit(None, {"value": 1})
+    assert not _params_satisfy_permit({"value": 1}, None)
+    assert not _params_satisfy_permit({"value": True}, {"value": 1})
+    assert not _params_satisfy_permit({}, {"value": None})
+
+
 if __name__ == "__main__":
     unittest.main()
