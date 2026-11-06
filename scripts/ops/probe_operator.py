@@ -214,14 +214,18 @@ def probe_once(config: Configuration, stop: threading.Event) -> None:
             raise ProbeFailure("interrupted")
         try:
             health = request_json(opener, config, "/health", authenticated=False)
+            health_state = health.get("kernel_state")
             if (health.get("status") != "healthy"
-                    or health.get("kernel_state") not in OPERATIONAL_STATES):
+                    or not isinstance(health_state, str)
+                    or health_state not in OPERATIONAL_STATES):
                 raise ProbeFailure("unhealthy_kernel")
             if config.check_status:
                 status = request_json(opener, config, "/status", authenticated=True)
+                status_state = status.get("state")
                 if (not isinstance(status.get("kernel_id"), str)
                         or not status["kernel_id"]
-                        or status.get("state") not in OPERATIONAL_STATES):
+                        or not isinstance(status_state, str)
+                        or status_state not in OPERATIONAL_STATES):
                     raise ProbeFailure("invalid_kernel_status")
                 if config.expected_kernel_id and status["kernel_id"] != config.expected_kernel_id:
                     raise ProbeFailure("wrong_kernel_identity")
