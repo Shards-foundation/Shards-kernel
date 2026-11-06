@@ -433,6 +433,40 @@ def test_concurrent_sync_submits_are_serialized_and_audited(signed_kernel):
     assert len(entries) >= 256
 
 
+def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypatch):
+    """A failed submit cannot strand a lock or allow subsequent tool execution."""
+    kernel, key, _clock, seen = signed_kernel
+
+    def fail_after_admission(*_args):
+        raise RuntimeError("injected processing fault")
+
+    monkeypatch.setattr(kernel, "_submit_bound", fail_after_admission)
+    with pytest.raises(RuntimeError, match="injected processing fault"):
+        kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+    assert kernel.get_state() is KernelState.HALTED
+    assert seen == []
+
+    # A different thread must immediately recover ownership of the RLock
+    # and observe the terminal halted state, never hang on the first caller.
+    done = Event()
+    observed = []
+
+    def subsequent_submit():
+        try:
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        except StateError as exc:
+            observed.append(str(exc))
+        finally:
+            done.set()
+
+    thread = Thread(target=subsequent_submit, daemon=True)
+    thread.start()
+    assert done.wait(timeout=2), "submit lock was leaked after handler exception"
+    thread.join(timeout=1)
+    assert observed and "halted" in observed[0].lower()
+    assert seen == []
+
+
 def test_async_batch_rejects_mismatched_permit_count_without_submitting():
     class FakeKernel:
         def __init__(self):
