@@ -281,7 +281,10 @@ def monitor(
             "duration_seconds": round(time.monotonic() - started, 3),
             "scope": "github_actions_observation_only",
         }})
-        if not complete:
+        if not complete or not runs:
+            LOG.error("insufficient_evidence", extra={"data": {
+                "reason": "pagination_incomplete" if not complete else "no_recent_workflow_runs",
+            }})
             return 2
         if any(results[key] for key in (
             "failed", "stale", "unknown_status", "unknown_conclusion", "invalid_clock",
