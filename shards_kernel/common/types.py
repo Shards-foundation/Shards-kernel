@@ -30,6 +30,7 @@ class ReceiptStatus(Enum):
     """Status of a kernel receipt."""
 
     ACCEPTED = "ACCEPTED"
+    QUEUED = "QUEUED"  # Stop request accepted; terminal HALTED not confirmed yet.
     REJECTED = "REJECTED"
     FAILED = "FAILED"
 
