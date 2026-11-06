@@ -28,6 +28,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,crypto,mcp]"
 
+      - name: Exercise exact Bash release dispatcher without credentials
+        run: bash scripts/ci/check_release_dispatch_shell.sh
+
       - name: Run strict multi-process E2E acceptance gate
         run: python scripts/ci/run_e2e_gate.py
 
