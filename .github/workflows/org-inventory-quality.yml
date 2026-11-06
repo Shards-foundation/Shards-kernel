@@ -1,0 +1,60 @@
+name: Organisation inventory regression coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory-regression:
+    name: Read-only inventory negative paths and coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned test tools
+        run: python -m pip install pytest==9.2.0 pytest-cov==7.1.0
+
+      - name: Verify non-mutating inventory with branch coverage
+        run: >-
+          python -m pytest tests/test_org_repo_review.py -q
+          --cov=scripts.org_repo_review
+          --cov-branch
+          --cov-report=term-missing
+          --cov-report=json:coverage-org-inventory.json
+          --cov-fail-under=80
+
+      - name: Independently enforce unrounded coverage percentage
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path("coverage-org-inventory.json").read_text(encoding="utf-8"))
+          actual = float(report["totals"]["percent_covered"])
+          if not math.isfinite(actual) or actual < 80.0:
+              sys.exit("Organisation inventory coverage below enforced 80% floor")
+          PY
+
+      - name: Archive measured coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: org-inventory-coverage
+          path: coverage-org-inventory.json
+          retention-days: 14
