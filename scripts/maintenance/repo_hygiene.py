@@ -76,8 +76,7 @@ def tracked_paths(root: Path) -> List[Path]:
     try:
         # Git executable has been resolved outside the audited repository.
         # Fixed argv: repository text is never passed to an executable.
-        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
-        result = subprocess.run(  # nosec B603
+        result = subprocess.run(  # nosec B603  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
             [str(git_path), "ls-files", "--cached", "-z"],
             cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=GIT_TIMEOUT, check=False,
