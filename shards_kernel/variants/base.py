@@ -524,7 +524,14 @@ class BaseKernel(Kernel):
             permit_verification_result = verify_permit(
                 permit=permit_token,
                 keyring=self._keyring,
-                nonce_registry=self._nonce_registry,
+                # In shared mode the PostgreSQL primary is the sole replay
+                # and consumption authority. A process-local cache must
+                # never reject *after* the global reservation has committed.
+                nonce_registry=(
+                    self._nonce_registry
+                    if self._shared_permit_journal is None
+                    else NonceRegistry()
+                ),
                 current_time_ms=self.config.clock.now_ms(),
                 current_jurisdiction=self.config.jurisdiction,
                 allowed_actions=allowed_actions,
@@ -720,7 +727,7 @@ class BaseKernel(Kernel):
             audit_phase="intent",
         )
 
-        if permit_token is not None:
+        if permit_token is not None and self._shared_permit_journal is None:
             consumed = self._nonce_registry.check_and_record(
                 nonce=permit_token.nonce,
                 issuer=permit_token.issuer,
