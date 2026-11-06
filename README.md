@@ -145,6 +145,10 @@ If a module is not reachable via `shards_kernel.api`, it is **not** a supported 
 
 ---
 
+### Direct synchronous concurrency
+
+`kernel.submit()` serializes simultaneous submissions to one kernel instance: one request executes at a time, each accepted or denied request follows the normal permit and audit path. Do **not** interpret serialization as a tool timeout, preemption guarantee, distributed queue, or cross-process safety; use the authenticated operator and PostgreSQL shared permit authority where those are required. An in-flight external effect still requires its own idempotency and reconciliation policy.
+
 ## Kernel Variants
 
 Variants tune posture while preserving invariants:
