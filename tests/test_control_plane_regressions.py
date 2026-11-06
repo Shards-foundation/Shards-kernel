@@ -556,6 +556,65 @@ def test_queued_halt_finalizes_if_submit_releases_lock_during_audit(monkeypatch)
     )[0]
 
 
+@pytest.mark.parametrize("failed_record", ["KERNEL_BUSY", "HALT_QUEUED"])
+def test_failed_concurrent_admission_audit_quarantines_kernel(
+    signed_kernel, monkeypatch, failed_record
+):
+    """A busy-denial or queued-halt audit write failure is a terminal fault."""
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+    completed = []
+
+    def controlled_probe(amount=99):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test timed out waiting for release")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", controlled_probe)
+    ledger = kernel._ledger
+    assert ledger is not None
+    original_append = ledger.append
+
+    def fail_target_record(*args, **kwargs):
+        if failed_record in (kwargs.get("error") or ""):
+            raise AuditError("injected rejection audit failure")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "append", fail_target_record)
+    worker = Thread(
+        target=lambda: completed.append(
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        ),
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert started.wait(2)
+        with pytest.raises(AuditError, match="injected rejection audit failure"):
+            if failed_record == "KERNEL_BUSY":
+                kernel.submit(request({"amount": 2}, request_id="busy"))
+            else:
+                kernel.halt("operator emergency")
+        assert kernel._pending_halt is not None
+    finally:
+        release.set()
+    worker.join(3)
+    assert not worker.is_alive()
+    assert len(completed) == 1
+    assert completed[0].decision is Decision.ALLOW
+    assert seen == [1]
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    bundle = kernel.export_evidence()
+    assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
+    assert replay_and_verify(
+        [audit_entry_to_dict(e) for e in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
 def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypatch):
     """A failed submit cannot strand a lock or allow subsequent tool execution."""
     kernel, key, _clock, seen = signed_kernel
