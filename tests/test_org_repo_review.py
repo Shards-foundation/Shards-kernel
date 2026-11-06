@@ -311,5 +311,165 @@ class TestOrgSafety(unittest.TestCase):
         self.assertTrue(json.loads(output.getvalue())["complete"])
 
 
+    def test_invalid_numeric_ranges_fail_before_network(self) -> None:
+        invalid = [
+            ("--timeout", "nan"), ("--timeout", "0"),
+            ("--attempts", "0"), ("--attempts", "999"),
+            ("--max-pages", "0"), ("--max-pages", "999"),
+            ("--repo-limit", "-1"), ("--repo-limit", "99999"),
+            ("--stale-days", "0"), ("--stale-days", "9999"),
+        ]
+        for flag, value in invalid:
+            with self.subTest(flag=flag, value=value):
+                with self.assertRaises(review.InventoryError):
+                    review.validate(review.parse_args([
+                        "--org", "Shards-foundation", flag, value,
+                    ]))
+
+    def test_invalid_datetime_types_formats_and_timezone(self) -> None:
+        for value in (None, 123, "this-is-not-a-date", "2026-11-06T09:00:00"):
+            with self.subTest(value=value):
+                with self.assertRaises(review.InventoryError):
+                    review.parse_datetime(value)
+
+    def test_repo_metadata_types_and_defaults_fail_closed(self) -> None:
+        bad_values = [
+            make_repo(archived="false"),
+            make_repo(private=1),
+            make_repo(default_branch=""),
+            make_repo(default_branch=123),
+            make_repo(pushed_at="injected-not-a-date"),
+        ]
+        for value in bad_values:
+            with self.subTest(value=value):
+                with self.assertRaises(review.InventoryError):
+                    review.validate_repo(value, "Shards-foundation")
+        with self.assertRaisesRegex(review.InventoryError, "github_repo_not_object"):
+            review.validate_repo(["not-an-object"], "Shards-foundation")
+
+    def test_missing_default_branch_and_push_date_are_advisory(self) -> None:
+        repo = review.validate_repo(
+            make_repo(default_branch=None, pushed_at=None), "Shards-foundation"
+        )
+        review.add_risk_flags(repo, datetime(2026, 11, 6, tzinfo=timezone.utc), 180)
+        self.assertIn("default_branch_missing", repo["findings"])
+        self.assertIn("last_push_unavailable", repo["findings"])
+
+    def test_disabled_repository_is_advisory_but_not_staleness(self) -> None:
+        repo = review.validate_repo(
+            make_repo(disabled=True, pushed_at="2021-01-01T00:00:00Z"),
+            "Shards-foundation",
+        )
+        review.add_risk_flags(repo, datetime(2026, 11, 6, tzinfo=timezone.utc), 180)
+        self.assertIn("repository_disabled", repo["findings"])
+        self.assertNotIn("last_push_older_than_threshold", repo["findings"])
+
+    def test_archived_repository_does_not_generate_staleness(self) -> None:
+        repo = review.validate_repo(
+            make_repo(archived=True, pushed_at="2021-01-01T00:00:00Z"),
+            "Shards-foundation",
+        )
+        review.add_risk_flags(repo, datetime(2026, 11, 6, tzinfo=timezone.utc), 180)
+        self.assertNotIn("last_push_older_than_threshold", repo["findings"])
+
+    def test_branch_lookup_errors_and_invalid_data_fail_closed(self) -> None:
+        cases = [
+            ({"protected": "yes"}, "github_branch_metadata_invalid"),
+            ([1, 2], "github_branch_metadata_invalid"),
+            (urllib.error.HTTPError("https://api.github.com", 401, "denied", {}, None),
+             "github_http_401"),
+        ]
+        for result, expected in cases:
+            repo = review.validate_repo(make_repo(), "Shards-foundation")
+            with self.subTest(expected=expected):
+                with self.assertRaisesRegex(review.InventoryError, expected):
+                    review.check_branches(
+                        [repo], FakeOpener([result]), self.settings, None, [],
+                    )
+
+    def test_branch_lookup_interruption_fails_closed(self) -> None:
+        repo = review.validate_repo(make_repo(), "Shards-foundation")
+        with self.assertRaisesRegex(review.InventoryError, "interrupted"):
+            review.check_branches(
+                [repo], FakeOpener([]), self.settings, None, [signal.SIGTERM],
+            )
+
+    def test_missing_branch_is_unknown_not_confirmed_protected(self) -> None:
+        settings = review.validate(review.parse_args([
+            "--org", "Shards-foundation", "--check-branches",
+        ]))
+        repo = make_repo(default_branch=None, pushed_at=None)
+        with patch.object(review, "make_opener", return_value=FakeOpener([[repo]])), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = review.report_inventory(settings, None, [])
+        self.assertEqual(code, 2)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["assessment"], "NOT_VERIFIED")
+        self.assertEqual(report["repositories"][0]["branch_protected"], "NOT_APPLICABLE")
+
+    def test_branch_protected_flag_is_not_rule_certification(self) -> None:
+        settings = review.validate(review.parse_args([
+            "--org", "Shards-foundation", "--check-branches",
+        ]))
+        with patch.object(review, "make_opener",
+                          return_value=FakeOpener([[make_repo()], {"protected": True}])), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = review.report_inventory(settings, None, [])
+        self.assertEqual(code, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["repositories"][0]["branch_protected"], "REPORTED_TRUE")
+        self.assertEqual(report["scope"], "read_only_github_api_inventory_not_security_certification")
+
+    def test_markdown_mode_outputs_safe_summary(self) -> None:
+        settings = review.validate(review.parse_args([
+            "--org", "Shards-foundation", "--format", "markdown",
+        ]))
+        with patch.object(review, "make_opener", return_value=FakeOpener([[make_repo()]])), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = review.report_inventory(settings, None, [])
+        self.assertEqual(code, 0)
+        self.assertIn("| Shards-kernel |", output.getvalue())
+        self.assertNotIn("clone_url", output.getvalue())
+
+    def test_none_report_format_has_no_stdout(self) -> None:
+        settings = review.validate(review.parse_args([
+            "--org", "Shards-foundation", "--format", "none",
+        ]))
+        with patch.object(review, "make_opener", return_value=FakeOpener([[make_repo()]])), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = review.report_inventory(settings, None, [])
+        self.assertEqual(code, 0)
+        self.assertEqual(output.getvalue(), "")
+
+    def test_main_rejects_invalid_config_and_api_errors(self) -> None:
+        with patch.object(review, "report_inventory",
+                          side_effect=AssertionError("must not run")):
+            self.assertEqual(review.main([
+                "--org", "Shards-foundation", "--attempts", "0",
+            ]), 2)
+        with patch.object(review, "report_inventory",
+                          side_effect=review.InventoryError("synthetic_outage")):
+            self.assertEqual(review.main(["--org", "Shards-foundation"]), 2)
+
+    def test_oversized_page_rejected(self) -> None:
+        page = [make_repo(name=f"R{i}") for i in range(review.PAGE_SIZE + 1)]
+        with self.assertRaisesRegex(review.InventoryError, "github_repo_page_oversized"):
+            review.collect_repos(FakeOpener([page]), self.settings, None, [])
+
+    def test_api_interruption_before_open(self) -> None:
+        with self.assertRaisesRegex(review.InventoryError, "interrupted"):
+            review.read_api(FakeOpener([]), "/orgs/Shards-foundation/repos",
+                            self.settings, None, [signal.SIGINT])
+
+    def test_api_non_200_response_is_rejected(self) -> None:
+        class ErrorOpener:
+            def open(self, request, timeout):
+                return FakeResponse({}, status=202)
+        with self.assertRaisesRegex(review.InventoryError, "github_unexpected_http_status"):
+            review.read_api(ErrorOpener(), "/orgs/Shards-foundation/repos",
+                            self.settings, None, [])
+
+
+
 if __name__ == "__main__":
     unittest.main()
