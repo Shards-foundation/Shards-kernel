@@ -259,10 +259,10 @@ def collect_repos(
             if len(output) > MAX_REPOS:
                 raise InventoryError("github_repo_limit_exceeded")
         LOG.info("page_checked", extra={"data": {"page": page, "repositories": len(output)}})
-        if len(raw) < PAGE_SIZE:
-            return output, page, True
         if settings.repo_limit and len(output) >= settings.repo_limit:
             return output, page, False
+        if len(raw) < PAGE_SIZE:
+            return output, page, True
     raise InventoryError("inventory_pagination_limit")
 
 
