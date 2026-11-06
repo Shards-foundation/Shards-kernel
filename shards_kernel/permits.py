@@ -611,7 +611,7 @@ def verify_permit(
     if permit.subject != request_actor:
         reasons.append("SUBJECT_MISMATCH")
 
-    # Check 8: Params match (request params must be subset of permit params)
+    # Check 8: All signed parameters must match; omission is never authorised.
     if not _params_satisfy_permit(request_params, permit.params):
         reasons.append("PARAMS_MISMATCH")
 
@@ -655,29 +655,16 @@ def verify_permit(
 def _params_satisfy_permit(
     request_params: dict[str, Any], permit_params: dict[str, Any]
 ) -> bool:
+    """Require exact, type-aware equality of signed execution parameters.
+
+    A permit parameter is a required binding, not an optional upper bound.
+    Subset comparisons let a caller omit a signed field and cause a tool
+    default or variadic handler to execute with a different effective action.
+    Handler defaults are resolved before this check by the kernel.
     """
-    Check if request params are satisfied by permit params.
-
-    Rule: Request params must be a subset of permit params (equal or more restrictive).
-
-    Args:
-        request_params: Parameters from request
-        permit_params: Parameters authorized by permit
-
-    Returns:
-        True if request params satisfy permit, False otherwise
-    """
-    # All request params must be present in permit params
-    for key, value in request_params.items():
-        if key not in permit_params:
-            return False  # Request has param not in permit
-
-        # Values must match exactly (strict equality)
-        # Future: Could support range checks, regex, etc.
-        if not equal_json_values(permit_params[key], value):
-            return False  # Param value mismatch
-
-    return True
+    if not isinstance(request_params, dict) or not isinstance(permit_params, dict):
+        return False
+    return equal_json_values(request_params, permit_params)
 
 
 # Constraints the kernel actually enforces. Anything else fails closed.
