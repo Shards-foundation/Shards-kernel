@@ -37,7 +37,7 @@ class LocalTestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def log_message(self, format, *args):
+    def log_message(self, fmt, *args):
         return
 
 
@@ -132,15 +132,15 @@ def test_policy_validity_and_expiry(tmp_path):
     assert result["result"] == "SIGNED_POLICY_VALID"
     assert not (tmp_path / "audit.sqlite3").exists()
     with pytest.raises(ValueError, match="lifetime"):
-        policy_preflight.preflight(**dict(args, min_ttl_seconds=120))
+        policy_preflight.preflight(**{**args, "min_ttl_seconds": 120})
     with pytest.raises(ValueError, match="revision"):
-        policy_preflight.preflight(**dict(args, minimum_revision=8))
+        policy_preflight.preflight(**{**args, "minimum_revision": 8})
     with pytest.raises(ValueError, match="identity"):
-        policy_preflight.preflight(**dict(args, expected_kernel_id="wrong"))
+        policy_preflight.preflight(**{**args, "expected_kernel_id": "wrong"})
     with pytest.raises(ValueError):
-        policy_preflight.preflight(**dict(args, trusted_key="00" * 32))
+        policy_preflight.preflight(**{**args, "trusted_key": "00" * 32})
     with pytest.raises(ValueError):
-        policy_preflight.preflight(**dict(args, now_ms=now + 61000))
+        policy_preflight.preflight(**{**args, "now_ms": now + 61000})
 
 
 def test_missing_policy_no_raw_paths_in_log(tmp_path, monkeypatch, capsys):
