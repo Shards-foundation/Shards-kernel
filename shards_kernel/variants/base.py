@@ -466,7 +466,11 @@ class BaseKernel(Kernel):
         self._state_machine.assert_state(KernelState.IDLE)
         self._execution_authorised = False
         try:
-            return self._submit_bound(request, permit_token)
+            # PermitToken's nested JSON mappings remain mutable despite the
+            # frozen dataclass. Pin one private snapshot before signature
+            # verification and preserve it through the final dispatch gate.
+            signed_snapshot = copy.deepcopy(permit_token) if permit_token is not None else None
+            return self._submit_bound(request, signed_snapshot)
         except Exception:
             self._halt_on_fault("Unhandled exception during request processing")
             raise
