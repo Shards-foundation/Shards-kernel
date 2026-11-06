@@ -308,3 +308,97 @@ def test_builtin_add_reconciles_with_audit_hash(postgres_journal, signing):
     entry = postgres_journal.get(op_id)
     assert entry is not None and entry.state == "SUCCEEDED"
     assert entry.evidence_ref == response.evidence_hash
+
+
+def test_rejected_legacy_hmac_never_reserves_global_budget(postgres_journal):
+    kernel = StrictKernel()
+    kernel.enable_shared_permit_accounting(postgres_journal)
+    kernel.boot(KernelConfig(kernel_id=AUDIENCE, variant="strict", clock=VirtualClock(1000)))
+    kernel.set_policy(JurisdictionPolicy(
+        allowed_actors=frozenset({"alice"}), allowed_tools=frozenset({"echo"})
+    ))
+    keyring = {"legacy-key": b"test-only-32-byte-local-secret--"}
+    kernel.set_keyring(keyring)
+    permit = (
+        PermitBuilder().issuer("operator").subject("alice")
+        .jurisdiction("default").action("echo").params({"text": "approved"})
+        .max_executions(1).valid_from_ms(0).valid_until_ms(2000)
+        .proposal_hash("legacy-in-shared").build(keyring, "legacy-key")
+    )
+    result = kernel.submit(request(uuid4().hex), permit_token=permit)
+    assert result.decision is Decision.DENY
+    assert "DISTRIBUTED_REQUIRES_ED25519" in (result.error or "")
+    assert not [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
+
+
+def test_only_pinned_builtins_can_reach_global_reservation(postgres_journal, signing):
+    secret, public = signing
+    kernel = make_kernel(postgres_journal, public)
+    kernel.set_policy(JurisdictionPolicy(
+        allowed_actors=frozenset({"alice"}), allowed_tools=frozenset({"not-installed"})
+    ))
+    unsigned = (
+        PermitBuilder().issuer("operator").subject("alice")
+        .jurisdiction("default").action("not-installed")
+        .params({}).constraints({}).max_executions(1)
+        .valid_from_ms(0).valid_until_ms(2000).proposal_hash("not-installed")
+        .build_unsigned_v2(key_id=KEY_ID, audience=AUDIENCE)
+    )
+    permit = sign_v2_permit(unsigned, secret)
+    req = KernelRequest(
+        request_id=uuid4().hex, ts_ms=1000, actor="alice",
+        intent="invoke unregistered tool",
+        tool_call=ToolCall(name="not-installed", params={}), params={},
+    )
+    response = kernel.submit(req, permit_token=permit)
+    assert response.decision is Decision.DENY
+    assert "DISTRIBUTED_TOOL_NOT_APPROVED" in (response.error or "")
+    assert not [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
+
+
+def test_dispatch_gate_failure_halts_before_tool_effect(postgres_journal, signing, monkeypatch):
+    secret, public = signing
+    kernel = make_kernel(postgres_journal, public)
+    permit = signed_permit(secret)
+    # Simulate a failing/blocked durable DISPATCHED state transition.
+    monkeypatch.setattr(postgres_journal, "mark_dispatched", lambda _: False)
+    with pytest.raises(Exception, match="dispatch gate refused"):
+        kernel.submit(request(uuid4().hex), permit_token=permit)
+    assert kernel.get_state() is KernelState.HALTED
+    reserved = [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
+    assert len(reserved) == 1 and reserved[0].state == "RESERVED"
+
+
+def test_failed_builtin_execution_quarantines_unknown(
+    postgres_journal, signing, monkeypatch
+):
+    from types import SimpleNamespace
+    from shards_kernel.common.types import ReceiptStatus
+
+    secret, public = signing
+    kernel = make_kernel(postgres_journal, public)
+    permit = signed_permit(secret)
+    failed = SimpleNamespace(
+        dispatcher_result=SimpleNamespace(success=False, error="ambiguous fault")
+    )
+    monkeypatch.setattr(kernel._runtime, "execute", lambda *args, **kwargs: failed)
+    response = kernel.submit(request(uuid4().hex), permit_token=permit)
+    assert response.status is ReceiptStatus.FAILED
+    outstanding = [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
+    assert len(outstanding) == 1 and outstanding[0].state == "UNKNOWN"
+
+
+def test_failed_reconciliation_halts_without_releasing_budget(
+    postgres_journal, signing, monkeypatch
+):
+    secret, public = signing
+    kernel = make_kernel(postgres_journal, public)
+    permit = signed_permit(secret)
+    monkeypatch.setattr(postgres_journal, "reconcile", lambda *args, **kwargs: False)
+    with pytest.raises(Exception, match="reconcile committed builtin"):
+        kernel.submit(request(uuid4().hex), permit_token=permit)
+    assert kernel.get_state() is KernelState.HALTED
+    outstanding = [x for x in postgres_journal.unresolved() if x.permit_id == permit.permit_id]
+    assert len(outstanding) == 1 and outstanding[0].state == "DISPATCHED"
+    second = make_kernel(postgres_journal, public)
+    assert second.submit(request(uuid4().hex), permit_token=permit).decision is Decision.DENY
