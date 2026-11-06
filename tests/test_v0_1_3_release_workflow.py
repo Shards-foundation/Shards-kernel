@@ -72,7 +72,13 @@ def test_release_0_1_3_version_and_one_shot_protection():
     # the dispatcher is a separate job depending on successful release.
     assert "gh workflow run publish.yml" not in release_job
     assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("gh release edit v0.1.3")
-    assert release_job.index('tag_commit="$(git ls-remote') < release_job.index("gh release edit v0.1.3")
+    assert release_job.index("cmp -- dist/SHA256SUMS") < release_job.index("target_commit=")
+    assert release_job.index("target_commit=") < release_job.index("gh api -X POST")
+    assert release_job.index("gh api -X POST") < release_job.index("gh release edit v0.1.3 --repo \\"$GITHUB_REPOSITORY\\" --draft=false")
+    assert 'gh api -X POST "/repos/$GITHUB_REPOSITORY/git/refs"' in release_job
+    assert 'git merge-base --is-ancestor "$target_commit" "$GITHUB_SHA"' in release_job
+    assert 'gh release edit v0.1.3 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"' in release_job
+    assert "Published release tag does not match verified commit" in release_job
     assert "gh workflow run publish.yml" in dispatch_job
     assert '--field verified_run_id="$GITHUB_RUN_ID"' in dispatch_job
     for untrusted in ("expected_commit", "expected_wheel_sha256", "expected_sdist_sha256"):
@@ -88,7 +94,7 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert '.event == "push"' in publisher
     assert '.head_branch == "main"' in publisher
     assert '.head_sha == $sha' in publisher
-    assert "publish-v0.1.3.yml@refs/heads/main" in publisher
+    assert 'and .path == ".github/workflows/publish-v0.1.3.yml"' in publisher
     assert "jobs?per_page=100&filter=latest" in publisher
     assert "Verify v0.1.3 source and clean installed wheel" in publisher
     assert "Publish immutable v0.1.3 GitHub assets" in publisher
