@@ -1005,9 +1005,20 @@ class BaseKernel(Kernel):
             if self._submit_lock.acquire(blocking=False):
                 try:
                     if not self._halted:
-                        self._halt_locked(reason)
-                    else:
-                        self._pending_halt = None
+                        # The in-flight request released admission before we
+                        # returned: report terminal completion, not deferral.
+                        return self._halt_locked(reason)
+                    self._pending_halt = None
+                    return KernelReceipt(
+                        request_id="HALT",
+                        status=ReceiptStatus.ACCEPTED,
+                        state_from=KernelState.HALTED,
+                        state_to=KernelState.HALTED,
+                        ts_ms=self.config.clock.now_ms(),
+                        decision=Decision.HALT,
+                        error="HALT_ALREADY_EFFECTIVE",
+                        evidence_hash=self._ledger.root_hash,
+                    )
                 finally:
                     self._submit_lock.release()
             return KernelReceipt(
