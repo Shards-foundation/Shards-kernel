@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess  # nosec B404 - required for fixed-argv git ls-files only
@@ -66,11 +67,18 @@ def setup_logging(level: str) -> None:
 
 def tracked_paths(root: Path) -> List[Path]:
     """Enumerate tracked paths without interpreting repository text as shell code."""
+    executable = shutil.which("git")
+    if not executable:
+        raise AuditError("git_unavailable")
+    git_path = Path(executable).resolve()
+    if not git_path.is_file() or git_path == root or root in git_path.parents:
+        raise AuditError("untrusted_git_executable")
     try:
-        # Git binary and arguments are fixed; no repository text is executed.
+        # Git executable has been resolved outside the audited repository.
+        # Fixed argv: repository text is never passed to an executable.
         # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         result = subprocess.run(  # nosec B603
-            ["git", "ls-files", "--cached", "-z"],
+            [str(git_path), "ls-files", "--cached", "-z"],
             cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=GIT_TIMEOUT, check=False,
         )
