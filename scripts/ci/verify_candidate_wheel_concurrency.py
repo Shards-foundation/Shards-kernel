@@ -14,10 +14,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import shards_kernel
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from shards_kernel import (
+    __file__ as package_init_path,
+    __version__,
     Decision,
     KernelConfig,
     KernelRequest,
@@ -41,7 +42,7 @@ WORKERS = 100
 
 def check_installed_wheel() -> str:
     """Reject accidental source-tree import or non-venv execution."""
-    package_path = Path(shards_kernel.__file__).resolve()
+    package_path = Path(package_init_path).resolve()
     workspace = os.environ.get("GITHUB_WORKSPACE", "")
     if workspace and package_path.is_relative_to(Path(workspace).resolve()):
         raise RuntimeError("Refusing in-tree package import")
@@ -186,7 +187,7 @@ def main() -> int:
         json.dumps(
             {
                 "schema": "shards.wheel-sk001.v1",
-                "package_version": shards_kernel.__version__,
+                "package_version": __version__,
                 "python_version": sys.version.split()[0],
                 "import_path": module_path,
                 "commit_sha": os.environ.get("GITHUB_SHA", "local"),
