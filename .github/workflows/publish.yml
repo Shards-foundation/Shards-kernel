@@ -2,8 +2,8 @@ name: Publish verified release to PyPI
 
 # Matches the pending PyPI trusted publisher:
 # Shards-foundation / Shards-kernel / publish.yml / environment pypi.
-# The already published GitHub release v0.1.0 can be published using
-# Actions > Publish verified release to PyPI > Run workflow (main, tag v0.1.0).
+# Only dispatch from the exact immutable, published vX.Y.Z tag.
+# The tag must be a protected-main ancestor and the release assets must match.
 on:
   workflow_dispatch:
     inputs:
@@ -12,11 +12,16 @@ on:
         required: true
         default: "v0.1.0"
         type: string
+      verified_run_id:
+        description: "Source workflow run ID; verified independently by the publisher for v0.1.3"
+        required: false
+        type: string
   release:
     types: [published]
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: pypi-${{ github.event.release.tag_name || inputs.release_tag }}
@@ -28,7 +33,7 @@ jobs:
     if: >-
       github.repository == 'Shards-foundation/Shards-kernel' &&
       (
-        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == format('refs/tags/{0}', inputs.release_tag)) ||
         (github.event_name == 'release' && github.event.release.prerelease == false)
       )
     runs-on: ubuntu-24.04
@@ -45,12 +50,51 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Only final semantic-version tags (vX.Y.Z) may be published" >&2
             exit 1
           }
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG" || {
+            echo "Publisher must execute at the immutable release tag" >&2
+            exit 1
+          }
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" || {
+            echo "Publisher checkout differs from release tag commit" >&2
+            exit 1
+          }
+          # Inputs are *only* selectors, never authority. Independently verify
+          # the GitHub API run record, its protected-main SHA, workflow path,
+          # and both completed gate jobs before accepting v0.1.3 artifacts.
+          if [ "$RELEASE_TAG" = "v0.1.3" ]; then
+            [[ "$GITHUB_EVENT_NAME" = "workflow_dispatch" && "$VERIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+              echo "v0.1.3 requires a trusted verification run selector" >&2
+              exit 1
+            }
+            gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN_ID" \
+              > "$RUNNER_TEMP/shards-verified-run.json"
+            jq -e --arg sha "$(git rev-parse HEAD)" '
+              .event == "push"
+              and .head_branch == "main"
+              and .head_sha == $sha
+              and (.path | endswith(".github/workflows/publish-v0.1.3.yml@refs/heads/main"))
+            ' "$RUNNER_TEMP/shards-verified-run.json" >/dev/null || {
+              echo "Untrusted workflow run, main branch, or source revision" >&2
+              exit 1
+            }
+            gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN_ID/jobs?per_page=100&filter=latest" \
+              > "$RUNNER_TEMP/shards-verified-jobs.json"
+            jq -e '
+              ([.jobs[] | select(.name == "Verify v0.1.3 source and clean installed wheel" and .conclusion == "success")] | length) == 1
+              and ([.jobs[] | select(.name == "Publish immutable v0.1.3 GitHub assets" and .conclusion == "success")] | length) == 1
+            ' "$RUNNER_TEMP/shards-verified-jobs.json" >/dev/null || {
+              echo "Verified workflow gate jobs must both have succeeded" >&2
+              exit 1
+            }
+            echo "Authenticated release workflow run provenance and completed verification jobs"
+          fi
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)" = "$RELEASE_TAG"
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false
@@ -72,16 +116,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --dir dist \
-            --pattern 'shards_kernel-*.whl' \
-            --pattern 'shards_kernel-*.tar.gz' \
-            --pattern 'SHA256SUMS'
-          test -f dist/SHA256SUMS
-          (cd dist && sha256sum --check --strict SHA256SUMS)
+          if [ "$RELEASE_TAG" = "v0.1.3" ]; then
+            # The source of truth is the immutable Actions artifact produced by
+            # the successful protected-main verification job, NOT checksum
+            # values supplied by the caller or mutable GitHub Release assets.
+            gh run download "$VERIFIED_RUN_ID" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name shards-kernel-v0.1.3-verified \
+              --dir dist
+            test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
+            test -f dist/shards_kernel-0.1.3-py3-none-any.whl
+            test -f dist/shards_kernel-0.1.3.tar.gz
+            test -f dist/SHA256SUMS
+            (cd dist && sha256sum --check --strict SHA256SUMS)
+
+            # Detect release asset replacement after the first verification:
+            # compare all three public assets against the authenticated run.
+            public_dir="$(mktemp -d "$RUNNER_TEMP/public-release.XXXXXX")"
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --dir "$public_dir" \
+              --pattern 'shards_kernel-*.whl' \
+              --pattern 'shards_kernel-*.tar.gz' \
+              --pattern 'SHA256SUMS'
+            test "$(find "$public_dir" -maxdepth 1 -type f | wc -l)" -eq 3
+            for artifact in dist/*; do
+              cmp -- "$artifact" "$public_dir/$(basename "$artifact")" || {
+                echo "Public release asset differs from authenticated verified run" >&2
+                exit 1
+              }
+            done
+          else
+            # Historical release handling is preserved.
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --dir dist \
+              --pattern 'shards_kernel-*.whl' \
+              --pattern 'shards_kernel-*.tar.gz' \
+              --pattern 'SHA256SUMS'
+            test -f dist/SHA256SUMS
+            (cd dist && sha256sum --check --strict SHA256SUMS)
+          fi
 
       - name: Verify exact artifact set and embedded package metadata
         env:
