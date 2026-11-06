@@ -185,13 +185,12 @@ jobs:
           retention-days: 7
 
   release:
-    name: Publish immutable v0.1.3 GitHub assets and dispatch trusted publisher
+    name: Publish immutable v0.1.3 GitHub assets
     needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
-      actions: write
     steps:
       - name: Checkout exact protected main commit without credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -327,28 +326,33 @@ jobs:
           test "$(gh release view v0.1.3 --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = false
           echo "Verified tag and uploaded bytes, published final GitHub release"
 
-      - name: Dispatch verified trusted PyPI publisher
+  dispatch:
+    name: Dispatch trusted PyPI publisher from validated workflow run
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      # This job cannot run until the exact build was verified and the release
+      # job finished successfully. The publisher does NOT trust these dispatch
+      # inputs: it fetches run provenance and immutable artifacts via API.
+      - name: Dispatch using trusted workflow run identity
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          wheel="dist/shards_kernel-0.1.3-py3-none-any.whl"
-          source="dist/shards_kernel-0.1.3.tar.gz"
-          test -f "$wheel" && test -f "$source"
-          wheel_sha="$(sha256sum "$wheel" | cut -d ' ' -f 1)"
-          source_sha="$(sha256sum "$source" | cut -d ' ' -f 1)"
-          gh workflow run publish.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref v0.1.3 \
-            --field release_tag=v0.1.3 \
-            --field expected_commit="$GITHUB_SHA" \
-            --field expected_wheel_sha256="$wheel_sha" \
-            --field expected_sdist_sha256="$source_sha"
+          gh workflow run publish.yml \\
+            --repo "$GITHUB_REPOSITORY" \\
+            --ref v0.1.3 \\
+            --field release_tag=v0.1.3 \\
+            --field verified_run_id="$GITHUB_RUN_ID"
 
   verify-pypi:
     name: Verify published PyPI v0.1.3 artifacts and installed runtime
-    needs: release
+    needs: dispatch
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
