@@ -16,6 +16,7 @@ from shards_kernel import (
     KernelConfig,
     KernelRequest,
     KernelState,
+    ReceiptStatus,
     StateError,
     ToolCall,
     VirtualClock,
@@ -553,7 +554,10 @@ def test_concurrent_halt_preserves_completed_effect_outcome_audit(signed_kernel)
         assert started.wait(timeout=2)
         queued = kernel.halt("emergency operator request")
         assert queued.decision is Decision.HALT
+        assert queued.status is ReceiptStatus.QUEUED
         assert queued.error == "HALT_QUEUED"
+        assert queued.state_to is not KernelState.HALTED
+        assert queued.evidence_hash
         assert kernel.get_state() is not KernelState.HALTED
     finally:
         release.set()
@@ -568,6 +572,92 @@ def test_concurrent_halt_preserves_completed_effect_outcome_audit(signed_kernel)
     assert any(e.audit_phase == "intent" for e in entries)
     assert any(e.audit_phase == "outcome" and e.decision is Decision.ALLOW for e in entries)
     assert any(e.error == "HALT_QUEUED" for e in bundle.ledger_entries)
+    assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
+    assert replay_and_verify(
+        [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
+@pytest.mark.parametrize("framework", ["flask", "fastapi"])
+def test_http_halt_returns_202_until_inflight_effect_is_audited(signed_kernel, framework):
+    """Operator must not confuse a queued HALT receipt with terminal HALTED."""
+    kernel, key, _clock, seen = signed_kernel
+    started, release = Event(), Event()
+    outcomes = []
+
+    def blocking_probe(amount=99):
+        started.set()
+        if not release.wait(timeout=5):
+            raise RuntimeError("simulated handler release timed out")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", blocking_probe)
+
+    test_key = "test-only-operator-bearer-key-32-characters"
+    headers = {"Authorization": f"Bearer {test_key}"}
+    if framework == "flask":
+        pytest.importorskip("flask")
+        from shards_kernel.integrations.flask_adapter import create_flask_app
+
+        app = create_flask_app(kernel=kernel, api_key=test_key, allow_test_clock=True)
+        client = app.test_client()
+
+        def post_halt():
+            response = client.post("/halt", headers=headers)
+            return response.status_code, response.get_json()
+
+        def read_status():
+            return client.get("/status", headers=headers).get_json()["state"]
+
+    else:
+        pytest.importorskip("fastapi")
+        pytest.importorskip("httpx")
+        from fastapi.testclient import TestClient
+        from shards_kernel.integrations.fastapi_adapter import create_fastapi_app
+
+        app = create_fastapi_app(kernel=kernel, api_key=test_key, allow_test_clock=True)
+        client = TestClient(app)
+
+        def post_halt():
+            response = client.post("/halt", headers=headers)
+            return response.status_code, response.json()
+
+        def read_status():
+            return client.get("/status", headers=headers).json()["state"]
+
+    worker = Thread(
+        target=lambda: outcomes.append(
+            kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+        ),
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert started.wait(timeout=2), "signed tool did not start"
+        status_code, payload = post_halt()
+        assert status_code == 202
+        assert payload["status"] == "halt_queued"
+        assert payload["receipt_status"] == "QUEUED"
+        assert payload["decision"] == "HALT"
+        assert payload["halt_confirmed"] is False
+        assert payload["state_to"] != "HALTED"
+        assert payload["error"] == "HALT_QUEUED"
+        assert payload["evidence_hash"]
+        assert read_status() != "HALTED"
+    finally:
+        release.set()
+        worker.join(timeout=3)
+        if framework == "fastapi":
+            client.close()
+
+    assert not worker.is_alive()
+    assert len(outcomes) == 1
+    assert outcomes[0].decision is Decision.ALLOW
+    assert kernel.get_state() is KernelState.HALTED
+    assert seen == [1]
+    bundle = kernel.export_evidence()
     assert bundle.ledger_entries[-1].state_to is KernelState.HALTED
     assert replay_and_verify(
         [audit_entry_to_dict(entry) for entry in bundle.ledger_entries], bundle.root_hash
