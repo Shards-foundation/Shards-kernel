@@ -63,6 +63,21 @@ jobs:
           --cov=scripts.maintenance --cov-branch
           --cov-report=term-missing
           --cov-report=json:coverage-maintenance.json
+          --cov-fail-under=90
+      - name: Enforce unrounded maintenance branch coverage
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path("coverage-maintenance.json").read_text(encoding="utf-8"))
+          actual = float(report["totals"]["percent_covered"])
+          if not math.isfinite(actual) or actual < 90.0:
+              sys.exit("Maintenance automation coverage below enforced 90% floor")
+          PY
+
       - name: Archive measured maintenance coverage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
