@@ -519,6 +519,43 @@ def test_concurrent_halt_preserves_completed_effect_outcome_audit(signed_kernel)
     )[0]
 
 
+def test_admission_helpers_reject_unbooted_kernel():
+    kernel = StrictKernel()
+    with pytest.raises(StateError, match="not booted"):
+        kernel._deny_busy(request({"amount": 1}))
+    with pytest.raises(StateError, match="not booted"):
+        kernel._halt_locked("not booted")
+
+
+def test_queued_halt_finalizes_if_submit_releases_lock_during_audit(monkeypatch):
+    """Force the narrow release-before-second-try-lock race deterministically."""
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig("halt-race", "strict", clock=VirtualClock(1000)))
+    ledger = kernel._ledger
+    assert ledger is not None
+    kernel._submit_lock.acquire()
+    append_original = ledger.append
+
+    def append_and_release(*args, **kwargs):
+        result = append_original(*args, **kwargs)
+        if kwargs.get("error") == "HALT_QUEUED":
+            kernel._submit_lock.release()
+        return result
+
+    monkeypatch.setattr(ledger, "append", append_and_release)
+    queued = kernel.halt("urgent")
+    assert queued.error == "HALT_QUEUED"
+    assert queued.decision is Decision.HALT
+    assert kernel.get_state() is KernelState.HALTED
+    assert kernel._pending_halt is None
+    bundle = kernel.export_evidence()
+    assert len(bundle.ledger_entries) == 2
+    assert [e.error for e in bundle.ledger_entries] == ["HALT_QUEUED", None]
+    assert replay_and_verify(
+        [audit_entry_to_dict(e) for e in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
 def test_sync_submit_releases_lock_after_fault_and_halts(signed_kernel, monkeypatch):
     """A failed submit cannot strand a lock or allow subsequent tool execution."""
     kernel, key, _clock, seen = signed_kernel
