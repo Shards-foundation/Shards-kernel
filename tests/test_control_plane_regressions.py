@@ -527,6 +527,82 @@ def test_admission_helpers_reject_unbooted_kernel():
         kernel._halt_locked("not booted")
 
 
+def test_queued_halt_is_published_before_owner_unlocks(signed_kernel, monkeypatch):
+    """An in-flight effect cannot be followed by a new admission during halt audit."""
+    kernel, key, _clock, seen = signed_kernel
+    started, release_handler = Event(), Event()
+    queued_append_started, release_halt_audit = Event(), Event()
+    submit_done = Event()
+    receipts = []
+    halted_receipts = []
+
+    def slow_probe(amount=99):
+        started.set()
+        if not release_handler.wait(5):
+            raise RuntimeError("handler release deadline exceeded")
+        seen.append(amount)
+        return amount
+
+    kernel._dispatcher.registry.unregister("probe")
+    kernel._dispatcher.registry.register("probe", slow_probe)
+    ledger = kernel._ledger
+    assert ledger is not None
+    original_append = ledger.append
+
+    def pause_halt_commit(*args, **kwargs):
+        if kwargs.get("error") == "HALT_QUEUED":
+            queued_append_started.set()
+            if not release_halt_audit.wait(5):
+                raise RuntimeError("halt audit release deadline exceeded")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "append", pause_halt_commit)
+
+    def primary():
+        try:
+            receipts.append(
+                kernel.submit(request({"amount": 1}), signed_permit(key, {"amount": 1}))
+            )
+        finally:
+            submit_done.set()
+
+    first = Thread(target=primary, daemon=True)
+    halter = Thread(target=lambda: halted_receipts.append(kernel.halt("urgent")), daemon=True)
+    first.start()
+    try:
+        assert started.wait(2)
+        halter.start()
+        assert queued_append_started.wait(2)
+        release_handler.set()
+        # The original request may write its outcome, but it must not release
+        # admission ownership until the halt intent has been published.
+        assert not submit_done.wait(0.15)
+        concurrent = kernel.submit(
+            request({"amount": 2}, request_id="after-halt-queued"),
+            signed_permit(key, {"amount": 2}),
+        )
+        assert concurrent.decision is Decision.DENY
+        assert "KERNEL_BUSY" in (concurrent.error or "")
+    finally:
+        release_handler.set()
+        release_halt_audit.set()
+        first.join(3)
+        if halter.ident is not None:
+            halter.join(3)
+    assert not first.is_alive()
+    assert not halter.is_alive()
+    assert len(receipts) == 1
+    assert receipts[0].decision is Decision.ALLOW
+    assert len(halted_receipts) == 1
+    assert halted_receipts[0].decision is Decision.HALT
+    assert seen == [1]
+    assert kernel.get_state() is KernelState.HALTED
+    bundle = kernel.export_evidence()
+    assert replay_and_verify(
+        [audit_entry_to_dict(e) for e in bundle.ledger_entries], bundle.root_hash
+    )[0]
+
+
 def test_queued_halt_finalizes_if_submit_releases_lock_during_audit(monkeypatch):
     """Force the narrow release-before-second-try-lock race deterministically."""
     kernel = StrictKernel()
