@@ -196,3 +196,115 @@ def test_uncertain_execution_is_not_retried_automatically(
     assert len(outstanding) == 1 and outstanding[0].state == "DISPATCHED"
     retry = make_kernel(postgres_journal, public)
     assert retry.submit(request(uuid4().hex), permit_token=permit).decision is Decision.DENY
+
+
+def test_shared_primary_is_only_nonce_authority(postgres_journal, signing):
+    """Out-of-sync local replay projection cannot reject after global spend."""
+    secret, public = signing
+    kernel = make_kernel(postgres_journal, public)
+    permit = signed_permit(secret)
+    # Simulate an older local ledger that cached a use which is not present
+    # in the shared database. The shared primary is authoritative here.
+    assert kernel._nonce_registry.check_and_record(
+        nonce=permit.nonce, issuer=permit.issuer, subject=permit.subject,
+        permit_id=permit.permit_id, max_executions=permit.max_executions,
+        current_time_ms=1000,
+    )
+    op_req = request(uuid4().hex)
+    first = kernel.submit(op_req, permit_token=permit)
+    assert first.decision is Decision.ALLOW
+    from shards_kernel.common.hashing import compute_hash_dict
+    op_id = compute_hash_dict({
+        "domain": "SHARDS-SHARED-OPERATION-V1",
+        "kernel_id": AUDIENCE,
+        "actor": op_req.actor,
+        "request_id": op_req.request_id,
+    })
+    completed = postgres_journal.get(op_id)
+    assert completed is not None and completed.state == "SUCCEEDED"
+    assert completed.evidence_ref == kernel.export_evidence().ledger_entries[-1].entry_hash
+    assert completed.provider_ref == "builtin:" + op_id
+    # Any reuse remains denied by PostgreSQL, even with a fresh request ID.
+    second = make_kernel(postgres_journal, public)
+    denied = second.submit(request(uuid4().hex), permit_token=permit)
+    assert denied.decision is Decision.DENY
+
+
+def test_shared_mode_refuses_insecure_or_non_strict_boot(signing):
+    from shards_kernel.common.errors import BootError
+    from shards_kernel.variants.permissive_kernel import PermissiveKernel
+
+    journal = PostgresPermitJournal(lambda: None)
+    permissive = PermissiveKernel()
+    permissive.enable_shared_permit_accounting(journal)
+    with pytest.raises(BootError, match="strict"):
+        permissive.boot(KernelConfig(
+            kernel_id=AUDIENCE, variant="permissive", clock=VirtualClock(1000)
+        ))
+    strict = StrictKernel()
+    strict.enable_shared_permit_accounting(journal)
+    with pytest.raises(BootError, match="strict"):
+        strict.boot(KernelConfig(
+            kernel_id=AUDIENCE, variant="strict", clock=VirtualClock(1000),
+            allow_insecure_unpermitted_execution=True,
+        ))
+
+
+def test_existing_local_hmac_replay_semantics_unchanged():
+    kernel = StrictKernel()
+    kernel.boot(KernelConfig(
+        kernel_id="local-test", variant="strict", clock=VirtualClock(1000)
+    ))
+    kernel.set_policy(JurisdictionPolicy(
+        allowed_actors=frozenset({"alice"}),
+        allowed_tools=frozenset({"echo"}),
+    ))
+    keyring = {"local-key": b"only-for-test-with-32-byte-key--"}
+    kernel.set_keyring(keyring)
+    signed = (
+        PermitBuilder().issuer("operator").subject("alice")
+        .jurisdiction("default").action("echo")
+        .params({"text": "approved"}).constraints({})
+        .max_executions(1).valid_from_ms(0).valid_until_ms(2000)
+        .proposal_hash("local-test")
+        .build(keyring, "local-key")
+    )
+    assert kernel.submit(request("local-first"), permit_token=signed).decision is Decision.ALLOW
+    assert kernel.submit(request("local-second"), permit_token=signed).decision is Decision.DENY
+
+
+def test_builtin_add_reconciles_with_audit_hash(postgres_journal, signing):
+    secret, public = signing
+    kernel = make_kernel(postgres_journal, public)
+    kernel.set_policy(JurisdictionPolicy(
+        allowed_actors=frozenset({"alice"}),
+        allowed_tools=frozenset({"add"}),
+    ))
+    signed = (
+        PermitBuilder().issuer("operator").subject("alice")
+        .jurisdiction("default").action("add")
+        .params({"a": 2, "b": 3}).constraints({})
+        .max_executions(1).valid_from_ms(0).valid_until_ms(2000)
+        .proposal_hash("approved-add")
+        .build_unsigned_v2(key_id=KEY_ID, audience=AUDIENCE)
+    )
+    permit = sign_v2_permit(signed, secret)
+    op_req = KernelRequest(
+        request_id=uuid4().hex, ts_ms=1000, actor="alice",
+        intent="add approved integers",
+        tool_call=ToolCall(name="add", params={"a": 2, "b": 3}),
+        params={"a": 2, "b": 3},
+    )
+    response = kernel.submit(op_req, permit_token=permit)
+    assert response.decision is Decision.ALLOW
+    assert response.tool_result == 5
+    from shards_kernel.common.hashing import compute_hash_dict
+    op_id = compute_hash_dict({
+        "domain": "SHARDS-SHARED-OPERATION-V1",
+        "kernel_id": AUDIENCE,
+        "actor": op_req.actor,
+        "request_id": op_req.request_id,
+    })
+    entry = postgres_journal.get(op_id)
+    assert entry is not None and entry.state == "SUCCEEDED"
+    assert entry.evidence_ref == response.evidence_hash
