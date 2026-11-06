@@ -20,7 +20,7 @@ import os
 import re
 import signal
 import stat
-import subprocess
+import subprocess  # nosec B404 - required for fixed-argv git ls-files only
 import sys
 import time
 from pathlib import Path
@@ -67,9 +67,11 @@ def setup_logging(level: str) -> None:
 def tracked_paths(root: Path) -> List[Path]:
     """Enumerate tracked paths without interpreting repository text as shell code."""
     try:
-        command = ["git", "ls-files", "--cached", "-z"]
-        result = subprocess.run(
-            command, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        # Git binary and arguments are fixed; no repository text is executed.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+        result = subprocess.run(  # nosec B603
+            ["git", "ls-files", "--cached", "-z"],
+            cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=GIT_TIMEOUT, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
