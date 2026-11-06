@@ -1,0 +1,110 @@
+name: Repository maintenance audit
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "37 5 * * 1"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  tracked-file-hygiene:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Audit tracked source files (read-only)
+        run: python scripts/maintenance/repo_hygiene.py --repo .
+
+  workflow-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Audit workflow source patterns (read-only)
+        run: python scripts/maintenance/workflow_safety.py --repo .
+
+  maintenance-regression:
+    name: Maintenance regression and measured branch coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tools
+        run: python -m pip install pytest==9.2.0 pytest-cov==7.1.0
+      - name: Run maintenance negative-path tests with branch coverage
+        run: >-
+          python -m pytest tests/test_repository_maintenance.py -q
+          --cov=scripts.maintenance --cov-branch
+          --cov-report=term-missing
+          --cov-report=json:coverage-maintenance.json
+          --cov-fail-under=90
+      - name: Enforce unrounded maintenance branch coverage
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path("coverage-maintenance.json").read_text(encoding="utf-8"))
+          actual = float(report["totals"]["percent_covered"])
+          if not math.isfinite(actual) or actual < 90.0:
+              sys.exit("Maintenance automation coverage below enforced 90% floor")
+          PY
+
+      - name: Archive measured maintenance coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maintenance-coverage
+          path: coverage-maintenance.json
+          retention-days: 14
+
+  github-actions-observability:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Observe last 7 days of main-branch workflow health
+        run: >-
+          python scripts/maintenance/github_actions_watch.py
+          --repo "$GITHUB_REPOSITORY"
+          --branch main
+          --lookback-hours 168
+          --stale-minutes 240
+          --max-pages 15
