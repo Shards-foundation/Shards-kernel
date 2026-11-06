@@ -151,6 +151,12 @@ def test_actions_monitor_refuses_incomplete_results(monkeypatch: pytest.MonkeyPa
     assert actions.monitor(options, None, []) == 2
 
 
+def test_actions_monitor_rejects_empty_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    options = actions.validate(actions.parse_args([]))
+    monkeypatch.setattr(actions, "collect_runs", lambda *_args: ([], True, 1))
+    assert actions.monitor(options, None, []) == 2
+
+
 def test_actions_monitor_reports_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime(2026, 11, 6, tzinfo=timezone.utc)
     run = {"id": 42, "name": "release", "status": "completed",
