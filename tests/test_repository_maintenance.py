@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import json
-import subprocess
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -58,7 +56,7 @@ def test_git_list_is_explicit_argv_not_shell(tmp_path: Path, monkeypatch: pytest
 
     def fake_run(command, **kwargs):
         observed.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout=b"src/a.py\x00README.md\x00")
+        return types.SimpleNamespace(returncode=0, stdout=b"src/a.py\x00README.md\x00")
 
     monkeypatch.setattr(hygiene.subprocess, "run", fake_run)
     assert hygiene.tracked_paths(tmp_path) == [Path("src/a.py"), Path("README.md")]
