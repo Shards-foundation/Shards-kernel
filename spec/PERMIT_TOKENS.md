@@ -126,7 +126,7 @@ class PermitToken:
 | `subject` | str | Non-empty, max 256 chars | Worker identity; must match execution context |
 | `jurisdiction` | str | Non-empty, max 256 chars | Must match kernel's active jurisdiction policy |
 | `action` | str | Non-empty, max 256 chars | Tool name; must be on allowlist |
-| `params` | dict | Max 64KB serialized | Exact params; request params must match or be subset |
+| `params` | dict | Max 64KB serialized | Exact parameters including all keys, values and JSON types; omissions deny |
 | `constraints` | dict | Max 64KB serialized | Bounds: `max_time_ms`, `max_memory_mb`, `allowed_domains`, etc. |
 | `max_executions` | int | ≥1 | Single-use = 1; multi-use = N; unlimited = -1 (discouraged) |
 | `valid_from_ms` | int | ≥0 | Monotonic time; permit invalid before this |
@@ -608,7 +608,7 @@ This allows graceful key rotation without breaking existing permits during trans
 | **Permit tampering** | Any field change invalidates HMAC |
 | **Replay attacks** | Nonce registry; single-use or bounded-use |
 | **Time window exploitation** | Monotonic clock; strict boundary checks |
-| **Privilege escalation** | Params must exactly match or be subset |
+| **Privilege escalation** | Params must match exactly; missing keys and handler-default substitutions deny |
 | **Constraint bypass** | All constraints validated before execution |
 | **Key compromise** | Key rotation support; revoke old keys |
 | **Nonce collision** | UUID4 has ~2^122 space; cryptographically unlikely |
