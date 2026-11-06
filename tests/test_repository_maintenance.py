@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import types
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
@@ -261,7 +262,7 @@ def test_actions_transient_transport_failure_retries_once(monkeypatch: pytest.Mo
             return _SyntheticApiResponse(b'{"workflow_runs":[]}')
 
     opener = FlakyOpener()
-    ticks = iter([0.0, 99.0])
+    ticks = itertools.count(0.0, 99.0)
     monkeypatch.setattr(actions.urllib.request, "build_opener", lambda *_args: opener)
     monkeypatch.setattr(actions.time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(actions.time, "sleep", lambda _seconds: None)
