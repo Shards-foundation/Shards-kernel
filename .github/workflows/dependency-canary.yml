@@ -22,8 +22,11 @@ jobs:
       - name: Install package and latest tooling
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install --upgrade --upgrade-strategy eager pytest ruff mypy build
+          # Exercise the same optional test paths as CI (crypto, property tests,
+          # HTTP adapters and MCP). The bare package intentionally has no
+          # runtime dependencies and cannot run the complete test suite.
+          python -m pip install -e ".[dev,crypto,mcp]"
+          python -m pip install --upgrade --upgrade-strategy eager pytest ruff mypy build
 
       - name: Canary quality checks
         run: |
