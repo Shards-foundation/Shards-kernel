@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: "0 6 * * 4"
   workflow_dispatch:
+  # Exercise the canary itself when its workflow changes, before merge.
+  pull_request:
+    paths:
+      - ".github/workflows/dependency-canary.yml"
+
+permissions:
+  contents: read
 
 jobs:
   canary:
