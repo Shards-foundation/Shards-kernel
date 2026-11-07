@@ -37,9 +37,13 @@ jobs:
 
       - name: Canary quality checks
         run: |
-          # Same honest gate as CI. Repo-wide format/type debt is not a canary signal.
+          # Same honest lint gate as CI. Repo-wide format/type debt is not a canary signal.
+          ruff --version
           ruff check . --select E,F --ignore E501
-          pytest -q
+          # The normal CI job enforces the pinned Ruff version; this canary
+          # intentionally upgrades Ruff to detect compatibility regressions.
+          # Deselect only the exact-version contract, not functional tests.
+          pytest -q --deselect=tests/test_dev_ruff_version_contract.py::test_installed_ruff_matches_project_dev_pin
 
       - name: Canary build
         run: python -m build
