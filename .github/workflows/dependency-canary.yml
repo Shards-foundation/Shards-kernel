@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: "0 6 * * 4"
   workflow_dispatch:
+  # Exercise the canary itself when its workflow changes, before merge.
+  pull_request:
+    paths:
+      - ".github/workflows/dependency-canary.yml"
+
+permissions:
+  contents: read
 
 jobs:
   canary:
@@ -22,14 +29,21 @@ jobs:
       - name: Install package and latest tooling
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install --upgrade --upgrade-strategy eager pytest ruff mypy build
+          # Exercise the same optional test paths as CI (crypto, property tests,
+          # HTTP adapters and MCP). The bare package intentionally has no
+          # runtime dependencies and cannot run the complete test suite.
+          python -m pip install -e ".[dev,crypto,mcp]"
+          python -m pip install --upgrade --upgrade-strategy eager pytest ruff mypy build
 
       - name: Canary quality checks
         run: |
-          # Same honest gate as CI. Repo-wide format/type debt is not a canary signal.
+          # Same honest lint gate as CI. Repo-wide format/type debt is not a canary signal.
+          ruff --version
           ruff check . --select E,F --ignore E501
-          pytest -q
+          # The normal CI job enforces the pinned Ruff version; this canary
+          # intentionally upgrades Ruff to detect compatibility regressions.
+          # Deselect only the exact-version contract, not functional tests.
+          pytest -q --deselect=tests/test_dev_ruff_version_contract.py::test_installed_ruff_matches_project_dev_pin
 
       - name: Canary build
         run: python -m build
