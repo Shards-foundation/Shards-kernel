@@ -133,7 +133,7 @@ jobs:
         shell: bash
         run: |
           if [ ! -f "$RUNNER_TEMP/acceptance.json" ]; then
-            printf '%s\\n' '{"schema":"shards-published-acceptance-v2","status":"FAIL","failures":["REPORT_NOT_EXECUTABLE"]}' > "$RUNNER_TEMP/acceptance.json"
+            printf '%s\n' '{"schema":"shards-published-acceptance-v2","status":"FAIL","failures":["REPORT_NOT_EXECUTABLE"]}' > "$RUNNER_TEMP/acceptance.json"
             exit 1
           fi
 
