@@ -301,9 +301,17 @@ def main():
                 json.dumps(fallback, sort_keys=True, indent=2) + "\n",
                 encoding="utf-8",
             )
-        except OSError:
-            pass
-        print("Acceptance report generation failed; no PASS recorded", file=sys.stderr)
+        except OSError as write_error:
+            # Preserve nonzero exit even if the filesystem cannot store FAIL JSON.
+            print(
+                "Could not persist FAIL acceptance receipt: "
+                + type(write_error).__name__,
+                file=sys.stderr,
+            )
+        print(
+            "Acceptance report generation failed: " + type(exc).__name__,
+            file=sys.stderr,
+        )
         return 1
 
 
