@@ -37,6 +37,10 @@ def require_disposable_database(value):
         "Explicit disposable-database opt-in required",
     )
     require(bool(value), "Missing SHARDS_TEST_POSTGRES_DSN")
+    require(
+        not any(os.environ.get(name) for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE")),
+        "libpq environment connection overrides are forbidden",
+    )
     config = conninfo_to_dict(value)
     require(
         not any(key in config for key in ("hostaddr", "service", "servicefile")),
