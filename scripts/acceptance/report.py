@@ -25,6 +25,7 @@ STAGED_FILES = (
     "acceptance_postgres.py",
     "test_distributed_postgres_accounting.py",
     "test_distributed_kernel_execution.py",
+    "conftest.py",
 )
 EXPECTED_CASES = frozenset({
     ("test_distributed_postgres_accounting", "test_single_use_and_no_tentative_intent_left_on_denial"),
@@ -69,8 +70,9 @@ EXPECTED_CASES = frozenset({
     ("acceptance_postgres", "test_crash_retains_budget_and_quarantines_uncertainty[reserved]"),
     ("acceptance_postgres", "test_crash_retains_budget_and_quarantines_uncertainty[dispatched]"),
 })
-assert len(EXPECTED_CASES) == 41  # module constant only; checked again at runtime
-SHA = re.compile(r"[0-9a-f]{40}\\Z")
+if len(EXPECTED_CASES) != 41:
+    raise RuntimeError("Acceptance identity manifest is incomplete")
+SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def distribution_version(package):
