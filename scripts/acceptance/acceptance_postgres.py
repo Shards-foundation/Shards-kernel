@@ -38,8 +38,13 @@ def require_disposable_database(value):
     )
     require(bool(value), "Missing SHARDS_TEST_POSTGRES_DSN")
     config = conninfo_to_dict(value)
+    require(
+        not any(key in config for key in ("hostaddr", "service", "servicefile")),
+        "PostgreSQL connection redirection overrides are forbidden",
+    )
     dbname = config.get("dbname", "")
     host = config.get("host", "")
+    require(isinstance(host, str) and "," not in host, "Multiple PostgreSQL hosts forbidden")
     require(
         dbname in ("shards_acceptance", "shards_kernel_test"),
         "Only named disposable acceptance/test databases may be used",
