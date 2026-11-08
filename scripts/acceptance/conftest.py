@@ -17,6 +17,8 @@ def pytest_sessionstart(session):
     dsn = os.environ.get("SHARDS_TEST_POSTGRES_DSN", "")
     if not dsn:
         pytest.exit("Disposable PostgreSQL DSN missing", returncode=2)
+    if any(os.environ.get(name) for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE")):
+        pytest.exit("Refusing libpq environment connection overrides", returncode=2)
     try:
         settings = conninfo_to_dict(dsn)
     except Exception:
