@@ -6,6 +6,7 @@ The model is only asked to propose structured actions; it receives no signer.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -16,7 +17,6 @@ import tempfile
 import time
 import urllib.request
 import uuid
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from implementations.storage import SQLiteAuditStorage
 from shards_kernel.api import (
-    Decision, JurisdictionPolicy, KernelConfig, KernelRequest, PermitBuilder,
-    StrictKernel, ToolCall, ReceiptStatus, replay_and_verify,
+    Decision,
+    JurisdictionPolicy,
+    KernelConfig,
+    KernelRequest,
+    PermitBuilder,
+    ReceiptStatus,
+    StrictKernel,
+    ToolCall,
+    replay_and_verify,
 )
 from shards_kernel.common.codec import audit_entry_to_dict
 from shards_kernel.common.time import PersistentSystemClock
