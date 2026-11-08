@@ -49,6 +49,7 @@ postgres = ["psycopg[binary]>=3.2,<4"]
 dev = [
     "pytest>=7",
     "pytest-cov>=4",
+    "defusedxml>=0.7.1,<1",  # Safe JUnit parsing for acceptance report tests.
     "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
     "hypothesis>=6",
     "ruff==0.17.3",
