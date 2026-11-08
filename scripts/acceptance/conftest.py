@@ -21,8 +21,12 @@ def pytest_sessionstart(session):
         settings = conninfo_to_dict(dsn)
     except Exception:
         pytest.exit("Invalid PostgreSQL DSN", returncode=2)
+    if any(key in settings for key in ("hostaddr", "service", "servicefile")):
+        pytest.exit("Refusing PostgreSQL connection overrides", returncode=2)
     database = settings.get("dbname", "")
     host = settings.get("host", "")
+    if not isinstance(host, str) or "," in host:
+        pytest.exit("Refusing multi-host or missing PostgreSQL target", returncode=2)
     if database not in ("shards_acceptance", "shards_kernel_test"):
         pytest.exit("Refusing non-test PostgreSQL database", returncode=2)
     if host not in ("127.0.0.1", "localhost") and not host.startswith("/"):
