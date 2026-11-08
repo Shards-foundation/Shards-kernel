@@ -6,7 +6,7 @@ Synthetic evidence verifies failures cannot be labelled PASS.
 
 import hashlib
 import json
-from xml.etree import ElementTree as Writer
+from html import escape
 
 import pytest
 
@@ -14,15 +14,26 @@ from scripts.acceptance import report
 
 
 def make_junit(folder, cases, result=None):
-    root = Writer.Element("testsuite")
+    """Write minimal synthetic JUnit from controlled test names, never parse XML."""
+    if result not in (None, "failure", "error", "skipped"):
+        raise ValueError("Invalid synthetic test result")
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<testsuite>"]
     for index, (module, name) in enumerate(cases):
-        case = Writer.SubElement(root, "testcase", classname=module, name=name)
-        if result and index == 0:
-            Writer.SubElement(case, result).text = "synthetic negative test"
-    Writer.ElementTree(root).write(
-        folder / "acceptance-junit.xml", encoding="utf-8", xml_declaration=True
+        attrs = (
+            ' classname="' + escape(module, quote=True) + '"'
+            + ' name="' + escape(name, quote=True) + '"'
+        )
+        if result is not None and index == 0:
+            lines.append(
+                "<testcase" + attrs + "><" + result
+                + ">synthetic negative test</" + result + "></testcase>"
+            )
+        else:
+            lines.append("<testcase" + attrs + "/>")
+    lines.append("</testsuite>")
+    (folder / "acceptance-junit.xml").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
     )
-
 
 @pytest.fixture
 def evidence(tmp_path, monkeypatch):
