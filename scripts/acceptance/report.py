@@ -129,11 +129,7 @@ def _read_junit(path):
     return keys, counts
 
 
-def generate(folder):
-    """Generate a receipt even when prerequisites or test execution failed."""
-    folder = Path(folder)
-    folder.mkdir(parents=True, exist_ok=True)
-    issues = []
+def _new_record():
     record = {
         "schema": "shards-published-acceptance-v2",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -165,7 +161,9 @@ def generate(folder):
         "dependencies": {},
         "failures": [],
     }
+    return record
 
+def _check_wheel(folder, record, issues):
     wheels = list((folder / "wheels").glob("shards_kernel-*.whl"))
     if len(wheels) != 1:
         issues.append("MISSING_OR_MULTIPLE_WHEELS")
@@ -180,6 +178,7 @@ def generate(folder):
         except OSError:
             issues.append("WHEEL_READ_FAILED")
 
+def _check_runtime(record, issues):
     installed = distribution_version("shards-kernel")
     record["installed_distribution_version"] = installed
     if installed != EXPECTED_VERSION:
@@ -195,6 +194,7 @@ def generate(folder):
     except Exception:
         issues.append("POSTGRES_VERSION_UNAVAILABLE")
 
+def _check_pytest_status(folder, record, issues):
     status_file = folder / "pytest-exit-code.txt"
     try:
         status_text = status_file.read_text(encoding="utf-8").strip()
@@ -207,6 +207,7 @@ def generate(folder):
     except (OSError, ValueError):
         issues.append("PYTEST_EXIT_STATUS_MISSING_OR_INVALID")
 
+def _check_junit(folder, record, issues):
     junit = folder / "acceptance-junit.xml"
     try:
         keys, totals = _read_junit(junit)
@@ -231,6 +232,7 @@ def generate(folder):
     except Exception:
         issues.append("JUNIT_MISSING_OR_INVALID")
 
+def _check_harness(folder, record, issues):
     try:
         recorded_head = (folder / "harness-commit.txt").read_text(
             encoding="utf-8"
@@ -245,6 +247,7 @@ def generate(folder):
     except OSError:
         issues.append("HARNESS_COMMIT_MISSING")
 
+def _check_source_manifest(folder, record, issues):
     try:
         manifest = _safe_json(folder / "acceptance-sources.json")
         if (
@@ -266,6 +269,7 @@ def generate(folder):
     except (OSError, ValueError, TypeError, AttributeError):
         issues.append("STAGED_SOURCE_MANIFEST_MISSING_OR_INVALID")
 
+def _finalize_report(folder, record, issues):
     record["failures"] = sorted(set(issues))
     record["status"] = "PASS" if not record["failures"] else "FAIL"
     (folder / "acceptance.json").write_text(
@@ -280,6 +284,19 @@ def generate(folder):
     }, sort_keys=True))
     return record["status"] == "PASS"
 
+def generate(folder):
+    """Generate a complete FAIL/PASS receipt from individually verified inputs."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    issues = []
+    record = _new_record()
+    _check_wheel(folder, record, issues)
+    _check_runtime(record, issues)
+    _check_pytest_status(folder, record, issues)
+    _check_junit(folder, record, issues)
+    _check_harness(folder, record, issues)
+    _check_source_manifest(folder, record, issues)
+    return _finalize_report(folder, record, issues)
 
 def main():
     parser = argparse.ArgumentParser()
