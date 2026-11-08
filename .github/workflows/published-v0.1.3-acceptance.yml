@@ -74,9 +74,12 @@ jobs:
           for name in test_distributed_postgres_accounting.py test_distributed_kernel_execution.py; do
             git show "$ACCEPTANCE_TAG_COMMIT:tests/$name" > "$RUNNER_TEMP/shards-acceptance/$name"
           done
-          for name in acceptance_local.py acceptance_postgres.py conftest.py; do
+          for name in acceptance_local.py acceptance_postgres.py; do
             git show "HEAD:scripts/acceptance/$name" > "$RUNNER_TEMP/shards-acceptance/$name"
           done
+          # Only activate the strict PostgreSQL guard for this isolated wheel suite.
+          # Do not leave a conftest.py in the repository's ordinary pytest tree.
+          git show "HEAD:scripts/acceptance/postgres_preflight.py" > "$RUNNER_TEMP/shards-acceptance/conftest.py"
           python - <<'PY'
           import hashlib
           import json
