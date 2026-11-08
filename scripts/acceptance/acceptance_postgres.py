@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from shards_kernel.common.types import KernelConfig, KernelRequest, ToolCall, VirtualClock
@@ -23,6 +24,33 @@ AUDIENCE = "published-acceptance-operator"
 KEY_ID = "acceptance-issuer"
 
 
+def require(condition, reason):
+    """Always enforce test invariants, even under python -O."""
+    if not condition:
+        raise AssertionError(reason)
+
+
+def require_disposable_database(value):
+    """Refuse arbitrary or remote database targets before schema modification."""
+    require(
+        os.environ.get("SHARDS_ACCEPTANCE_DISPOSABLE_DB") == "YES_TEST_ONLY",
+        "Explicit disposable-database opt-in required",
+    )
+    require(bool(value), "Missing SHARDS_TEST_POSTGRES_DSN")
+    config = conninfo_to_dict(value)
+    dbname = config.get("dbname", "")
+    host = config.get("host", "")
+    require(
+        dbname in ("shards_acceptance", "shards_kernel_test"),
+        "Only named disposable acceptance/test databases may be used",
+    )
+    require(
+        host in ("localhost", "127.0.0.1") or host.startswith("/"),
+        "Remote PostgreSQL targets are prohibited by this acceptance harness",
+    )
+    return value
+
+
 def journal(dsn):
     return PostgresPermitJournal(lambda: psycopg.connect(dsn, connect_timeout=5))
 
@@ -30,7 +58,7 @@ def journal(dsn):
 @pytest.fixture(scope="module")
 def dsn():
     value = os.environ.get("SHARDS_TEST_POSTGRES_DSN")
-    assert value, "Disposable PostgreSQL DSN is mandatory; never skip this gate"
+    require_disposable_database(value)
     journal(value).initialize_schema()
     return value
 
@@ -90,10 +118,10 @@ def test_two_os_processes_share_one_authority(dsn):
                     child.terminate()
                     child.join(timeout=5)
                     pytest.fail("Process contention worker timed out")
-                assert child.exitcode == 0
+                require(child.exitcode == 0, f"Contender exited {child.exitcode}")
             outcomes = [results.get(timeout=5) for _ in children]
-            assert sum(d == "ALLOW" and value == "approved" for d, value in outcomes) == 1, outcomes
-            assert sum(d == "DENY" and value is None for d, value in outcomes) == 1, outcomes
+            require(sum(d == "ALLOW" and value == "approved" for d, value in outcomes) == 1, f"Not exactly one allowed effect: {outcomes}")
+            require(sum(d == "DENY" and value is None for d, value in outcomes) == 1, f"Not exactly one denied request: {outcomes}")
         finally:
             for child in children:
                 if child.is_alive():
@@ -135,23 +163,23 @@ def test_crash_retains_budget_and_quarantines_uncertainty(dsn, dispatch):
             child.terminate()
             child.join(timeout=5)
             pytest.fail("Crash worker timed out")
-        assert child.exitcode == 77
+        require(child.exitcode == 77, f"Crash worker exited {child.exitcode}")
         store = journal(dsn)
         record = store.get(values["operation_id"])
-        assert record is not None
-        assert record.state == ("DISPATCHED" if dispatch else "RESERVED")
-        assert store.reserve(
+        require(record is not None, "Committed operation missing")
+        require(record.state == ("DISPATCHED" if dispatch else "RESERVED"), "Incorrect crash state")
+        require(store.reserve(
             operation_id=uuid4().hex, permit_id=values["permit_id"],
             issuer=values["issuer"], subject=values["subject"],
             nonce=values["nonce"], max_executions=1, request_sha256="b" * 64,
-        ) is False
+        ) is False, "Consumed permit was reserved again")
         if dispatch:
-            assert store.mark_unknown(values["operation_id"]) is True
-            assert store.get(values["operation_id"]).state == "UNKNOWN"
+            require(store.mark_unknown(values["operation_id"]) is True, "Quarantine rejected")
+            require(store.get(values["operation_id"]).state == "UNKNOWN", "Incorrect quarantine state")
         with psycopg.connect(dsn) as conn:
             budget = conn.execute(
                 "SELECT used, max_executions FROM shards_permit_budget "
                 "WHERE issuer=%s AND subject=%s AND nonce=%s",
                 (values["issuer"], values["subject"], values["nonce"]),
             ).fetchone()
-        assert budget == (1, 1)
+        require(budget == (1, 1), f"Permit budget corrupted: {budget}")
