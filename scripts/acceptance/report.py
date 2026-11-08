@@ -15,7 +15,11 @@ import platform
 import re
 import sys
 
-from defusedxml import ElementTree as ET
+try:
+    from defusedxml import ElementTree as ET
+except ImportError:
+    # When setup fails before dependencies install, still emit a FAIL JSON receipt.
+    ET = None
 
 EXPECTED_VERSION = "0.1.3"
 PINNED_TAG_SHA = "5f122099d37c241b5388e10ca2b2d65f74840d47"
@@ -99,6 +103,8 @@ def _safe_json(path):
 
 
 def _read_junit(path):
+    if ET is None:
+        raise ValueError("Safe JUnit parser unavailable")
     if path.stat().st_size > 4_000_000:
         raise ValueError("Oversized JUnit XML")
     tree = ET.parse(path)
