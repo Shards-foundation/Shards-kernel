@@ -8,6 +8,12 @@ production readiness. The immutable release tag is pinned to commit
 
 The existing CI uses an editable source install, so its tests cannot prove
 that a user receives the same behaviour from the published PyPI artifact.
+The published wheel SHA-256 is pinned to
+`baf246e771ceb559d007efafbe8ba66099bd8a65d488ca60294cae5313278df9`
+and is checked **before installation**. The harness source is taken from the
+checked-out Git commit and independently recorded in the evidence manifest;
+the two tagged test modules are extracted from the immutable v0.1.3 commit.
+The workflow also runs negative-path unit tests for the evidence reporter.
 The `published-v0.1.3-acceptance.yml` workflow downloads **only the wheel**,
 installs that wheel in the runner, then copies the test harness into an
 isolated temporary directory outside the Git checkout. It executes:
@@ -23,11 +29,21 @@ isolated temporary directory outside the Git checkout. It executes:
 6. Two exact tagged PostgreSQL integration modules from v0.1.3, not tests
    accidentally fetched from `main`.
 
-The workflow **requires** a reachable, disposable PostgreSQL primary and
-fails if the test suite is missing, skipped, errored, or failed. No secrets or
+The workflow **requires** an explicitly opted-in disposable PostgreSQL primary,
+whose DSN must identify a local-only socket or loopback connection and a
+recognised test database name. The staged `conftest.py` performs this check
+**before** pytest collects *any* tagged or new test module, preventing
+accidental writes to unapproved databases. It fails if the exact 41 test
+identities (including both crash parametrisations) do not match, a test
+fails or skips, or the pytest process exits nonzero. No secrets or
 live downstream services are used. The result is a GitHub Actions artifact
-containing the downloaded wheel, JUnit output, console log, and `acceptance.json`
-with the SHA-256 wheel digest and UTC run timestamp. This record is test
+containing the downloaded wheel, JUnit output, console log,
+`acceptance-sources.json`, harness commit, pytest exit code,
+resolved dependency versions and `acceptance.json` with the
+**expected-versus-actual** wheel SHA-256, exact test identities, staged source
+hashes, PostgreSQL server version and UTC run timestamp.
+A missing wheel, failed setup or missing JUnit generates a machine-readable
+`FAIL` receipt rather than silently omitting evidence. This record is test
 **evidence**, not a signed attestation or a production certificate.
 
 ### Review and release rules
