@@ -59,6 +59,10 @@ jobs:
             'pytest>=7,<10' 'defusedxml==0.7.1'
           python -m pip check
 
+      - name: Exercise failure-path evidence reporter tests
+        shell: bash
+        run: python -m pytest tests/test_published_wheel_report.py -q
+
       - name: Stage immutable tagged tests and committed acceptance harness
         shell: bash
         run: |
@@ -70,7 +74,7 @@ jobs:
           for name in test_distributed_postgres_accounting.py test_distributed_kernel_execution.py; do
             git show "$ACCEPTANCE_TAG_COMMIT:tests/$name" > "$RUNNER_TEMP/shards-acceptance/$name"
           done
-          for name in acceptance_local.py acceptance_postgres.py; do
+          for name in acceptance_local.py acceptance_postgres.py conftest.py; do
             git show "HEAD:scripts/acceptance/$name" > "$RUNNER_TEMP/shards-acceptance/$name"
           done
           python - <<'PY'
@@ -85,6 +89,7 @@ jobs:
               "acceptance_postgres.py",
               "test_distributed_postgres_accounting.py",
               "test_distributed_kernel_execution.py",
+              "conftest.py",
           )
           manifest = {
               name: hashlib.sha256((root / "shards-acceptance" / name).read_bytes()).hexdigest()
@@ -122,6 +127,15 @@ jobs:
         if: always()
         shell: bash
         run: python scripts/acceptance/report.py --output-dir "$RUNNER_TEMP"
+
+      - name: Guarantee machine-readable failure receipt if reporter cannot start
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -f "$RUNNER_TEMP/acceptance.json" ]; then
+            printf '%s\\n' '{"schema":"shards-published-acceptance-v2","status":"FAIL","failures":["REPORT_NOT_EXECUTABLE"]}' > "$RUNNER_TEMP/acceptance.json"
+            exit 1
+          fi
 
       - name: Upload evidence even on earlier failures
         if: always()
