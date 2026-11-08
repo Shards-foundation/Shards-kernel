@@ -1,0 +1,158 @@
+name: Published v0.1.3 artifact acceptance (not production certification)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheel-acceptance:
+    name: Verified PyPI wheel and PostgreSQL acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: shards_acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shards_acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SHARDS_TEST_POSTGRES_DSN: postgresql://postgres:test-only@127.0.0.1:5432/shards_acceptance
+      SHARDS_ACCEPTANCE_DISPOSABLE_DB: YES_TEST_ONLY
+      ACCEPTANCE_TAG_COMMIT: 5f122099d37c241b5388e10ca2b2d65f74840d47
+      EXPECTED_WHEEL_SHA256: baf246e771ceb559d007efafbe8ba66099bd8a65d488ca60294cae5313278df9
+    steps:
+      - name: Checkout acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch hash-pinned published wheel and install
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/wheels"
+          python -m pip download --only-binary=:all: --no-deps \
+            --dest "$RUNNER_TEMP/wheels" 'shards-kernel==0.1.3'
+          test "$(find "$RUNNER_TEMP/wheels" -type f -name '*.whl' | wc -l)" -eq 1
+          wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name '*.whl' -print -quit)"
+          printf '%s  %s\n' "$EXPECTED_WHEEL_SHA256" "$wheel" | sha256sum --check --strict
+          python -m pip install "$wheel" \
+            'cryptography>=43,<51' 'psycopg[binary]>=3.2,<4' \
+            'pytest>=7,<10' 'defusedxml==0.7.1'
+          python -m pip check
+
+      - name: Exercise failure-path evidence reporter tests
+        shell: bash
+        run: python -m pytest tests/test_published_wheel_report.py -q
+
+      - name: Stage immutable tagged tests and committed acceptance harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse v0.1.3^{commit})" = "$ACCEPTANCE_TAG_COMMIT"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/shards-acceptance"
+          git rev-parse HEAD > "$RUNNER_TEMP/harness-commit.txt"
+          for name in test_distributed_postgres_accounting.py test_distributed_kernel_execution.py; do
+            git show "$ACCEPTANCE_TAG_COMMIT:tests/$name" > "$RUNNER_TEMP/shards-acceptance/$name"
+          done
+          for name in acceptance_local.py acceptance_postgres.py; do
+            git show "HEAD:scripts/acceptance/$name" > "$RUNNER_TEMP/shards-acceptance/$name"
+          done
+          # Only activate the strict PostgreSQL guard for this isolated wheel suite.
+          # Do not leave a conftest.py in the repository's ordinary pytest tree.
+          git show "HEAD:scripts/acceptance/postgres_preflight.py" > "$RUNNER_TEMP/shards-acceptance/conftest.py"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          names = (
+              "acceptance_local.py",
+              "acceptance_postgres.py",
+              "test_distributed_postgres_accounting.py",
+              "test_distributed_kernel_execution.py",
+              "conftest.py",
+          )
+          manifest = {
+              name: hashlib.sha256((root / "shards-acceptance" / name).read_bytes()).hexdigest()
+              for name in names
+          }
+          (root / "acceptance-sources.json").write_text(
+              json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run isolated published-wheel acceptance
+        shell: bash
+        working-directory: ${{ runner.temp }}/shards-acceptance
+        run: |
+          set -uo pipefail
+          set +e
+          python -m pytest -q \
+            acceptance_local.py acceptance_postgres.py \
+            test_distributed_postgres_accounting.py \
+            test_distributed_kernel_execution.py \
+            --junitxml="$RUNNER_TEMP/acceptance-junit.xml" \
+            > "$RUNNER_TEMP/acceptance-output.log" 2>&1
+          code=$?
+          printf '%s\n' "$code" > "$RUNNER_TEMP/pytest-exit-code.txt"
+          cat "$RUNNER_TEMP/acceptance-output.log"
+          exit "$code"
+
+      - name: Capture installed dependency versions
+        if: always()
+        shell: bash
+        run: python -m pip freeze --all > "$RUNNER_TEMP/resolved-dependencies.txt"
+
+      - name: Write fail-closed wheel-bound acceptance record
+        if: always()
+        shell: bash
+        run: python scripts/acceptance/report.py --output-dir "$RUNNER_TEMP"
+
+      - name: Guarantee machine-readable failure receipt if reporter cannot start
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -f "$RUNNER_TEMP/acceptance.json" ]; then
+            printf '%s\n' '{"schema":"shards-published-acceptance-v2","status":"FAIL","failures":["REPORT_NOT_EXECUTABLE"]}' > "$RUNNER_TEMP/acceptance.json"
+            exit 1
+          fi
+
+      - name: Upload evidence even on earlier failures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: published-v0.1.3-acceptance-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/acceptance.json
+            ${{ runner.temp }}/acceptance-junit.xml
+            ${{ runner.temp }}/acceptance-output.log
+            ${{ runner.temp }}/acceptance-sources.json
+            ${{ runner.temp }}/harness-commit.txt
+            ${{ runner.temp }}/pytest-exit-code.txt
+            ${{ runner.temp }}/resolved-dependencies.txt
+            ${{ runner.temp }}/wheels/*.whl
+          retention-days: 30
