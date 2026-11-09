@@ -131,3 +131,9 @@ def run_dashboard(*, plain: bool = False, no_animate: bool = False,
         print()
         return None
     return _ACTIONS.get(selection)
+
+
+if __name__ == "__main__":
+    # Also allow the renderer to be previewed as a downloaded standalone file.
+    # This only displays the interface; routing actions lives in __main__.py.
+    run_dashboard()
