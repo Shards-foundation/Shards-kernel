@@ -184,3 +184,9 @@ class MissionControlApp(App[None]):
 def launch(*, no_animate: bool = False) -> None:
     """Launch only after a terminal and the optional Textual extra are present."""
     MissionControlApp(pulse_enabled=not no_animate).run()
+
+
+if __name__ == "__main__":
+    # A downloaded copy can run against an already-installed 0.1.3 kernel.
+    # The full integrated CLI is still pending release.
+    launch()
