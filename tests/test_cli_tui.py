@@ -69,3 +69,21 @@ def test_preflight_does_not_echo_credentials(monkeypatch):
     monkeypatch.setenv("SHARDS_KERNEL_API_KEY", value)
     output = json.dumps(diagnose(profile="service"))
     assert value not in output
+
+
+def test_failed_demo_clears_previous_report(monkeypatch):
+    from shards_kernel.cli import demo
+
+    def failing_demo():
+        raise RuntimeError("do-not-leak-this-secret")
+
+    monkeypatch.setattr(demo, "run_scenario", failing_demo)
+    app = MissionControlApp(pulse_enabled=False)
+    app.last_report = {"library": {"ready": True}}
+    lines = []
+    monkeypatch.setattr(app, "_log", lambda *items: lines.extend(items))
+    app.action_demo()
+    assert app.last_action == "demo"
+    assert app.last_report is None
+    assert "RuntimeError" in str(lines)
+    assert "do-not-leak-this-secret" not in str(lines)
