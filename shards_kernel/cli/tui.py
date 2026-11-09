@@ -149,6 +149,7 @@ class MissionControlApp(App[None]):
 
     def action_demo(self) -> None:
         self.last_action = "demo"
+        self.last_report = None
         try:
             from shards_kernel.cli.demo import run_scenario
 
