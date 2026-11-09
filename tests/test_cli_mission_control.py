@@ -63,3 +63,12 @@ def test_version_output_has_no_banner(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert output.startswith("shards-kernel ")
     assert "SHARDS // KERNEL" not in output
+
+
+def test_standalone_renderer_path(capsys):
+    """Running the downloaded module as a script must render, not silently exit."""
+    import runpy
+
+    runpy.run_path(mission_control.__file__, run_name="__main__")
+    output = capsys.readouterr().out
+    assert "SHARDS // KERNEL" in output
