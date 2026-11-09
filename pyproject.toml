@@ -49,7 +49,8 @@ crypto = ["cryptography>=43,<51"]
 postgres = ["psycopg[binary]>=3.2,<4"]
 # Test and lint tools only. The installed runtime package has no dependencies.
 dev = [
-    "textual>=8.2,<9",  # Exercise the optional terminal UI on every CI Python version.\n    "pytest>=7",
+    "textual>=8.2,<9",  # Exercise the optional terminal UI on every CI Python version.
+    "pytest>=7",
     "pytest-cov>=4",
     "defusedxml>=0.7.1,<1",  # Safe JUnit parsing for acceptance report tests.
     "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
