@@ -39,6 +39,8 @@ Documentation = "https://github.com/Shards-foundation/Shards-kernel/tree/main/do
 Changelog = "https://github.com/Shards-foundation/Shards-kernel/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+# Optional terminal UI: keep the default runtime dependency-free.
+tui = ["rich>=13.7,<16"]
 # Official MCP SDK v2 is optional and requires Python >=3.11.
 # The deterministic library remains standard-library-only on Python 3.9+.
 mcp = ["mcp>=2.2,<3; python_version >= '3.11'"]
