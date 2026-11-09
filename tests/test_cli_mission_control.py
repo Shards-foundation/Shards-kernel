@@ -72,3 +72,9 @@ def test_standalone_renderer_path(capsys):
     runpy.run_path(mission_control.__file__, run_name="__main__")
     output = capsys.readouterr().out
     assert "SHARDS // KERNEL" in output
+
+
+def test_padded_choice_matches_displayed_menu(monkeypatch, capsys):
+    monkeypatch.setattr(builtins, "input", lambda _prompt: "02")
+    assert mission_control.run_dashboard(plain=True, interactive=True) == "doctor"
+    capsys.readouterr()
