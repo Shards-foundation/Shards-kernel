@@ -7,7 +7,11 @@ import sys
 import time
 from typing import Optional
 
-from shards_kernel._version import __version__
+try:
+    from shards_kernel._version import __version__
+except ImportError:
+    # Downloaded presentation preview can render without the installed package.
+    __version__ = "preview"
 
 _ACTIONS = {"1": "info", "2": "doctor", "3": "demo", "4": "help"}
 
@@ -149,10 +153,11 @@ def run_dashboard(*, plain: bool = False, no_animate: bool = False,
     except (EOFError, KeyboardInterrupt):
         print()
         return None
+    if selection.isdigit():
+        selection = selection.lstrip("0") or "0"
     return _ACTIONS.get(selection)
 
 
 if __name__ == "__main__":
-    # Also allow the renderer to be previewed as a downloaded standalone file.
-    # This only displays the interface; routing actions lives in __main__.py.
-    run_dashboard()
+    # Standalone Rich preview only: do not prompt for actions that cannot dispatch.
+    run_dashboard(interactive=False)
