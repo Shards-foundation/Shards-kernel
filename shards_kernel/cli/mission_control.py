@@ -117,7 +117,7 @@ def run_dashboard(*, plain: bool = False, no_animate: bool = False,
         except ImportError as exc:
             # Never hide a broken installation as a missing optional extra.
             if exc.name not in {"textual", "textual.app", "textual.containers",
-                                "textual.widgets"}:
+                                "textual.widgets", "shards_kernel.cli.tui"}:
                 raise
         else:
             launch(no_animate=no_animate or bool(os.environ.get("SHARDS_NO_ANIMATION")))
