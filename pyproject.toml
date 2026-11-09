@@ -40,7 +40,7 @@ Changelog = "https://github.com/Shards-foundation/Shards-kernel/blob/main/CHANGE
 
 [project.optional-dependencies]
 # Optional terminal UI: keep the default runtime dependency-free.
-tui = ["rich>=13.7,<16"]
+tui = ["textual>=8.2,<9"]
 # Official MCP SDK v2 is optional and requires Python >=3.11.
 # The deterministic library remains standard-library-only on Python 3.9+.
 mcp = ["mcp>=2.2,<3; python_version >= '3.11'"]
@@ -49,7 +49,7 @@ crypto = ["cryptography>=43,<51"]
 postgres = ["psycopg[binary]>=3.2,<4"]
 # Test and lint tools only. The installed runtime package has no dependencies.
 dev = [
-    "pytest>=7",
+    "textual>=8.2,<9",  # Exercise the optional terminal UI on every CI Python version.\n    "pytest>=7",
     "pytest-cov>=4",
     "defusedxml>=0.7.1,<1",  # Safe JUnit parsing for acceptance report tests.
     "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
