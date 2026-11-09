@@ -104,6 +104,25 @@ def run_dashboard(*, plain: bool = False, no_animate: bool = False,
     """
     if interactive is None:
         interactive = _is_interactive()
+
+    # Use the full-screen Textual experience only in an attached terminal.
+    # Headless calls, piped output and NO_COLOR remain entirely deterministic.
+    full_screen = (
+        interactive and _is_interactive() and not plain
+        and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
+    )
+    if full_screen:
+        try:
+            from shards_kernel.cli.tui import launch
+        except ImportError as exc:
+            # Never hide a broken installation as a missing optional extra.
+            if exc.name not in {"textual", "textual.app", "textual.containers",
+                                "textual.widgets"}:
+                raise
+        else:
+            launch(no_animate=no_animate or bool(os.environ.get("SHARDS_NO_ANIMATION")))
+            return None
+
     use_plain = (
         plain or not sys.stdout.isatty() or os.environ.get("TERM") == "dumb"
         or "NO_COLOR" in os.environ
