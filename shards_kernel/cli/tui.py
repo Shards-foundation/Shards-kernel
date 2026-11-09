@@ -11,7 +11,7 @@ from textwrap import wrap
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, RichLog, Static
+from textual.widgets import Button, Header, RichLog, Static
 
 from shards_kernel._version import __version__
 
