@@ -7,11 +7,10 @@ Dependencies are loaded only if the optional tui extra was installed.
 from __future__ import annotations
 
 from typing import Any
-from textwrap import wrap
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Header, RichLog, Static
+from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from shards_kernel._version import __version__
 
@@ -20,7 +19,7 @@ class MissionControlApp(App[None]):
     """Narrow-terminal-first dashboard with read-only, explicitly invoked actions."""
 
     TITLE = "SHARDS // KERNEL"
-    SUB_TITLE = ""
+    SUB_TITLE = "Mission Control | Local operator interface"
     BINDINGS = [
         ("1", "info", "Kernel"),
         ("2", "diagnostics", "Preflight"),
@@ -28,11 +27,12 @@ class MissionControlApp(App[None]):
         ("4", "reference", "Commands"),
         ("r", "refresh", "Refresh"),
         ("q", "quit", "Quit"),
+        ("t", "themes", "Themes"),
     ]
     CSS = """
     Screen { background: #060e18; color: #c4e5f0; }
     Header { background: #0b2333; color: #69ecf8; }
-    #shortcuts { background: #0b2333; color: #89deef; height: 1; padding: 0 1; }
+    Footer { background: #0b2333; }
     #body { padding: 0 1; height: 1fr; }
     #banner {
         margin: 1 0 0 0; height: 4; padding: 0 1;
@@ -40,7 +40,7 @@ class MissionControlApp(App[None]):
         color: #78e8f0; text-style: bold;
     }
     #matrix {
-        margin: 0 0 1 0; padding: 0 1; height: 6;
+        margin: 0 0 1 0; padding: 0 1; height: 5;
         border: round #25536b; background: #0a1926;
         color: #bdd4e4;
     }
@@ -55,9 +55,9 @@ class MissionControlApp(App[None]):
     #events {
         height: 1fr; min-height: 5; margin: 1 0 0 0;
         background: #071520; border: round #28566d;
-        padding: 0 1; overflow-x: hidden;
+        padding: 0 1;
     }
-    #footnote { height: 1; color: #79a4b4; padding: 0 1; }
+    #footnote { height: 2; color: #79a4b4; padding: 0 1; }
     """
 
     def __init__(self, *, pulse_enabled: bool = True, **kwargs: Any) -> None:
@@ -75,10 +75,9 @@ class MissionControlApp(App[None]):
                 "PERMIT > DECISION > AUDIT", id="banner"
             )
             yield Static(
-                "POLICY    STRICT (AVAILABLE)\n"
-                "GUARDS    FAIL-CLOSED / AUDIT\n"
-                "SERVICE   NOT INSPECTED\n"
-                "AGENTS    NOT CONNECTED",
+                "POLICY: STRICT AVAILABLE   |   ENFORCEMENT: FAIL-CLOSED\n"
+                "AUDIT: REQUIRED (STRICT)  |   SERVICE: NOT INSPECTED\n"
+                "AGENTS: NOT CONNECTED    |   READINESS: NOT VERIFIED",
                 id="matrix",
             )
             with Horizontal(classes="command-row"):
@@ -88,13 +87,13 @@ class MissionControlApp(App[None]):
                 yield Button("03 DEMO", id="demo")
                 yield Button("04 COMMANDS", id="reference")
             yield RichLog(id="events", highlight=False, markup=False, wrap=True)
-            yield Static("LOCAL UI / SERVICE NOT CHECKED", id="footnote")
-        yield Static("1 Info  2 Check  3 Demo  4 Help  Q Exit", id="shortcuts")
+            yield Static("INTERFACE INITIALISING // LOCAL DATA ONLY", id="footnote")
+        yield Footer()
 
     def on_mount(self) -> None:
-        self._log(
-            "SHARDS FOUNDATION | OPERATOR CONSOLE",
-            "No external issuer, agent or audit-ledger stream is connected.",
+        self.query_one("#events", RichLog).write("SHARDS FOUNDATION | OPERATOR CONSOLE")
+        self.query_one("#events", RichLog).write(
+            "No external issuer, agent or audit-ledger stream is connected."
         )
         if self._pulse_enabled:
             self.set_interval(0.9, self._pulse)
@@ -104,7 +103,7 @@ class MissionControlApp(App[None]):
         self._ticks += 1
         symbol = "◆" if self._ticks % 2 else "◇"
         self.query_one("#footnote", Static).update(
-            symbol + " UI ACTIVE / SERVICE NOT CHECKED"
+            symbol + " INTERFACE ACTIVE // no network services checked"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -120,7 +119,9 @@ class MissionControlApp(App[None]):
 
     @staticmethod
     def _wrap_line(line: str, width: int) -> list[str]:
-        """Wrap terminal text including long command tokens instead of horizontal scrolling."""
+        """Wrap long diagnostic text rather than scrolling sideways on Termux."""
+        from textwrap import wrap
+
         return wrap(
             line,
             width=max(12, width),
@@ -152,13 +153,6 @@ class MissionControlApp(App[None]):
             library = diagnose(profile="library")
             service = diagnose(profile="service")
             self.last_report = {"library": library, "service": service}
-            # This is a checked preflight result, not live service telemetry.
-            self.query_one("#matrix", Static).update(
-                "POLICY    STRICT (AVAILABLE)\n"
-                "GUARDS    FAIL-CLOSED / AUDIT\n"
-                "SERVICE   " + service["assessment"] + " (PREFLIGHT)\n"
-                "AGENTS    NOT CONNECTED"
-            )
             self._log("[PREFLIGHT] Explicit local environment check")
             for profile, report in (("library", library), ("service", service)):
                 self._log(profile.upper() + ": " + report["assessment"])
@@ -202,6 +196,10 @@ class MissionControlApp(App[None]):
     def action_refresh(self) -> None:
         self.last_action = "refresh"
         self._log("[REFRESH] Interface state updated. Press 2 to rerun local preflight.")
+
+    def action_themes(self) -> None:
+        """Open Textual's built-in searchable theme picker."""
+        self.search_themes()
 
 
 def launch(*, no_animate: bool = False) -> None:
