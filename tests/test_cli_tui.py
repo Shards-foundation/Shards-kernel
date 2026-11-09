@@ -23,6 +23,9 @@ def test_keyboard_navigation_and_real_diagnostics():
             assert app.last_report["library"]["profile"] == "library"
             assert app.last_report["service"]["profile"] == "service"
             assert app.last_report["service"]["scope"].startswith("Preflight environment")
+            from textual.widgets import Static
+            matrix = app.query_one("#matrix", Static)
+            assert "NOT_READY (PREFLIGHT)" in str(matrix.render())
             await pilot.press("4")
             assert app.last_action == "reference"
             await pilot.press("r")
@@ -87,3 +90,25 @@ def test_failed_demo_clears_previous_report(monkeypatch):
     assert app.last_report is None
     assert "RuntimeError" in str(lines)
     assert "do-not-leak-this-secret" not in str(lines)
+
+
+def test_long_tokens_wrap_for_small_termux_screen():
+    token = "shards-kernel-" * 12
+    parts = MissionControlApp._wrap_line(token, 24)
+    assert len(parts) > 1
+    assert all(len(part) <= 24 for part in parts)
+    assert "".join(parts) == token
+
+
+def test_shortcut_text_fits_mobile_terminal():
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=(42, 30)):
+            from textual.widgets import Static
+            footer = str(app.query_one("#shortcuts", Static).render())
+            assert len(footer) <= 42
+            app.action_reference()
+            from textual.widgets import RichLog
+            log = app.query_one("#events", RichLog)
+            assert log.scroll_x == 0
+    asyncio.run(scenario())
