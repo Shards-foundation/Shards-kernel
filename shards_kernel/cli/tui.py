@@ -7,6 +7,7 @@ Dependencies are loaded only if the optional tui extra was installed.
 from __future__ import annotations
 
 from typing import Any
+from textwrap import wrap
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -19,7 +20,7 @@ class MissionControlApp(App[None]):
     """Narrow-terminal-first dashboard with read-only, explicitly invoked actions."""
 
     TITLE = "SHARDS // KERNEL"
-    SUB_TITLE = "Mission Control | Local operator interface"
+    SUB_TITLE = ""
     BINDINGS = [
         ("1", "info", "Kernel"),
         ("2", "diagnostics", "Preflight"),
@@ -31,7 +32,7 @@ class MissionControlApp(App[None]):
     CSS = """
     Screen { background: #060e18; color: #c4e5f0; }
     Header { background: #0b2333; color: #69ecf8; }
-    Footer { background: #0b2333; }
+    #shortcuts { background: #0b2333; color: #89deef; height: 1; padding: 0 1; }
     #body { padding: 0 1; height: 1fr; }
     #banner {
         margin: 1 0 0 0; height: 4; padding: 0 1;
@@ -39,7 +40,7 @@ class MissionControlApp(App[None]):
         color: #78e8f0; text-style: bold;
     }
     #matrix {
-        margin: 0 0 1 0; padding: 0 1; height: 5;
+        margin: 0 0 1 0; padding: 0 1; height: 6;
         border: round #25536b; background: #0a1926;
         color: #bdd4e4;
     }
@@ -54,9 +55,9 @@ class MissionControlApp(App[None]):
     #events {
         height: 1fr; min-height: 5; margin: 1 0 0 0;
         background: #071520; border: round #28566d;
-        padding: 0 1;
+        padding: 0 1; overflow-x: hidden;
     }
-    #footnote { height: 2; color: #79a4b4; padding: 0 1; }
+    #footnote { height: 1; color: #79a4b4; padding: 0 1; }
     """
 
     def __init__(self, *, pulse_enabled: bool = True, **kwargs: Any) -> None:
@@ -74,9 +75,10 @@ class MissionControlApp(App[None]):
                 "PERMIT > DECISION > AUDIT", id="banner"
             )
             yield Static(
-                "POLICY: STRICT AVAILABLE   |   ENFORCEMENT: FAIL-CLOSED\n"
-                "AUDIT: REQUIRED (STRICT)  |   SERVICE: NOT INSPECTED\n"
-                "AGENTS: NOT CONNECTED    |   READINESS: NOT VERIFIED",
+                "POLICY    STRICT (AVAILABLE)\n"
+                "GUARDS    FAIL-CLOSED / AUDIT\n"
+                "SERVICE   NOT INSPECTED\n"
+                "AGENTS    NOT CONNECTED",
                 id="matrix",
             )
             with Horizontal(classes="command-row"):
@@ -86,13 +88,13 @@ class MissionControlApp(App[None]):
                 yield Button("03 DEMO", id="demo")
                 yield Button("04 COMMANDS", id="reference")
             yield RichLog(id="events", highlight=False, markup=False, wrap=True)
-            yield Static("INTERFACE INITIALISING // LOCAL DATA ONLY", id="footnote")
-        yield Footer()
+            yield Static("LOCAL UI / SERVICE NOT CHECKED", id="footnote")
+        yield Static("1 Info  2 Check  3 Demo  4 Help  Q Exit", id="shortcuts")
 
     def on_mount(self) -> None:
-        self.query_one("#events", RichLog).write("SHARDS FOUNDATION | OPERATOR CONSOLE")
-        self.query_one("#events", RichLog).write(
-            "No external issuer, agent or audit-ledger stream is connected."
+        self._log(
+            "SHARDS FOUNDATION | OPERATOR CONSOLE",
+            "No external issuer, agent or audit-ledger stream is connected.",
         )
         if self._pulse_enabled:
             self.set_interval(0.9, self._pulse)
@@ -102,7 +104,7 @@ class MissionControlApp(App[None]):
         self._ticks += 1
         symbol = "◆" if self._ticks % 2 else "◇"
         self.query_one("#footnote", Static).update(
-            symbol + " INTERFACE ACTIVE // no network services checked"
+            symbol + " UI ACTIVE / SERVICE NOT CHECKED"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -116,10 +118,23 @@ class MissionControlApp(App[None]):
         if action is not None:
             action()
 
+    @staticmethod
+    def _wrap_line(line: str, width: int) -> list[str]:
+        """Wrap terminal text including long command tokens instead of horizontal scrolling."""
+        return wrap(
+            line,
+            width=max(12, width),
+            break_long_words=True,
+            break_on_hyphens=False,
+            replace_whitespace=False,
+        ) or [""]
+
     def _log(self, *lines: str) -> None:
         log = self.query_one("#events", RichLog)
+        width = max(12, log.size.width - 4)
         for line in lines:
-            log.write(line)
+            for part in self._wrap_line(line, width):
+                log.write(part)
 
     def action_info(self) -> None:
         self.last_action = "info"
@@ -137,6 +152,13 @@ class MissionControlApp(App[None]):
             library = diagnose(profile="library")
             service = diagnose(profile="service")
             self.last_report = {"library": library, "service": service}
+            # This is a checked preflight result, not live service telemetry.
+            self.query_one("#matrix", Static).update(
+                "POLICY    STRICT (AVAILABLE)\n"
+                "GUARDS    FAIL-CLOSED / AUDIT\n"
+                "SERVICE   " + service["assessment"] + " (PREFLIGHT)\n"
+                "AGENTS    NOT CONNECTED"
+            )
             self._log("[PREFLIGHT] Explicit local environment check")
             for profile, report in (("library", library), ("service", service)):
                 self._log(profile.upper() + ": " + report["assessment"])
