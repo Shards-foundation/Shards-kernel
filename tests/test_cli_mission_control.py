@@ -78,3 +78,14 @@ def test_padded_choice_matches_displayed_menu(monkeypatch, capsys):
     monkeypatch.setattr(builtins, "input", lambda _prompt: "02")
     assert mission_control.run_dashboard(plain=True, interactive=True) == "doctor"
     capsys.readouterr()
+
+
+def test_rich_welcome_renders_without_claiming_live_service(capsys):
+    """Exercise the optional Rich fallback used when Textual is unavailable."""
+    mission_control._rich_dashboard(animate=False)
+    output = capsys.readouterr().out
+    assert "SHARDS" in output
+    assert "MISSION COMMANDS" in output
+    assert "SERVICE" in output
+    assert "NOT INSPECTED" in output
+    assert "NOT VERIFIED" in output
