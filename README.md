@@ -25,6 +25,32 @@ shards-kernel info --variant strict
 shards-kernel demo --json
 ```
 
+### Optional mission-control terminal UI
+
+The regular install remains dependency-free. For a colour terminal welcome screen and
+a short operator-menu experience, install the optional `tui` extra:
+
+```bash
+python -m pip install "shards-kernel[tui]"
+shards-kernel
+# Or explicitly:
+shards-kernel dashboard
+shards-kernel dashboard --no-animate --no-interactive
+shards-kernel dashboard --plain --no-interactive
+```
+
+The menu provides only **local, explicitly selected** information, a library preflight,
+an offline demo, and command help. It does not connect to an issuer, verify agent
+connectivity, or certify deployment readiness. Runtime status remains **NOT VERIFIED**
+until the relevant real diagnostics have run.
+
+The CLI preserves plain `--help`, `--version`, `demo --json`, and `doctor --json`
+output for scripts and MCP integrations. Non-interactive launches never prompt.
+Set `NO_COLOR=1` for plain output or `SHARDS_NO_ANIMATION=1` to disable animation.
+The visual UI does **not** run automatically as part of `pip install`.
+
+---
+
 The **PyPI project name** is `shards-kernel`, the **Python import** is `shards_kernel` (not `kernels`), and the **terminal executable** is `shards-kernel`. This demo exercises the built-in `echo` tool; it does not grant an agent access to external systems. See [installation](#install), the [agent quickstart](docs/AGENT_QUICKSTART.md), and the [import migration guide](docs/PACKAGE_MIGRATION.md).
 
 ---
