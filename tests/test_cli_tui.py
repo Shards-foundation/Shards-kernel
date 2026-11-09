@@ -119,3 +119,15 @@ def test_theme_picker_can_open_directly():
             await pilot.press("t")
             assert app.screen.__class__.__name__ == "CommandPalette"
     asyncio.run(scenario())
+
+
+def test_tapping_native_footer_dispatches_action():
+    """Regression: terminal footer keys must be clickable, not static labels."""
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=(42, 30)) as pilot:
+            from textual.widgets import Footer
+            assert app.last_action == "welcome"
+            assert await pilot.click(Footer, offset=(3, 0))
+            assert app.last_action == "info"
+    asyncio.run(scenario())
