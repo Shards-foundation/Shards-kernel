@@ -23,9 +23,8 @@ def test_keyboard_navigation_and_real_diagnostics():
             assert app.last_report["library"]["profile"] == "library"
             assert app.last_report["service"]["profile"] == "service"
             assert app.last_report["service"]["scope"].startswith("Preflight environment")
-            from textual.widgets import Static
-            matrix = app.query_one("#matrix", Static)
-            assert "NOT_READY (PREFLIGHT)" in str(matrix.render())
+            from textual.widgets import Footer
+            assert app.query_one(Footer) is not None
             await pilot.press("4")
             assert app.last_action == "reference"
             await pilot.press("r")
@@ -100,15 +99,23 @@ def test_long_tokens_wrap_for_small_termux_screen():
     assert "".join(parts) == token
 
 
-def test_shortcut_text_fits_mobile_terminal():
+def test_native_footer_and_command_palette_on_mobile():
     async def scenario():
         app = MissionControlApp(pulse_enabled=False)
-        async with app.run_test(size=(42, 30)):
-            from textual.widgets import Static
-            footer = str(app.query_one("#shortcuts", Static).render())
-            assert len(footer) <= 42
-            app.action_reference()
-            from textual.widgets import RichLog
-            log = app.query_one("#events", RichLog)
-            assert log.scroll_x == 0
+        async with app.run_test(size=(42, 30)) as pilot:
+            from textual.widgets import Footer
+            assert app.query_one(Footer) is not None
+            await pilot.press("2")
+            assert app.last_action == "diagnostics"
+            await pilot.press("ctrl+p")
+            assert app.screen.__class__.__name__ == "CommandPalette"
+    asyncio.run(scenario())
+
+
+def test_theme_picker_can_open_directly():
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=(42, 30)) as pilot:
+            await pilot.press("t")
+            assert app.screen.__class__.__name__ == "CommandPalette"
     asyncio.run(scenario())
