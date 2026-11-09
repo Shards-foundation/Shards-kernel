@@ -1,0 +1,71 @@
+"""Headless interaction and safety tests for the optional full-screen TUI."""
+
+import asyncio
+import json
+
+import pytest
+
+pytest.importorskip("textual")
+
+from shards_kernel.cli.tui import MissionControlApp
+
+
+def test_keyboard_navigation_and_real_diagnostics():
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=(45, 30)) as pilot:
+            assert app.last_action == "welcome"
+            await pilot.press("1")
+            assert app.last_action == "info"
+            await pilot.press("2")
+            assert app.last_action == "diagnostics"
+            assert app.last_report is not None
+            assert app.last_report["library"]["profile"] == "library"
+            assert app.last_report["service"]["profile"] == "service"
+            assert app.last_report["service"]["scope"].startswith("Preflight environment")
+            await pilot.press("4")
+            assert app.last_action == "reference"
+            await pilot.press("r")
+            assert app.last_action == "refresh"
+
+    asyncio.run(scenario())
+
+
+def test_touch_target_dispatches_offline_demo():
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=(46, 34)) as pilot:
+            await pilot.click("#demo")
+            assert app.last_action == "demo"
+            assert app.last_report is not None
+            result = app.last_report["demo"]
+            assert result["demo"] == "OFFLINE_ONLY"
+            assert result["production_ready"] is False
+            assert result["passed"] is True
+
+    asyncio.run(scenario())
+
+
+def test_diagnostic_error_does_not_leak_exception_text(monkeypatch):
+    from shards_kernel.cli import doctor
+
+    def failing_diagnostic(profile):
+        raise RuntimeError("secret-should-not-appear " + profile)
+
+    monkeypatch.setattr(doctor, "diagnose", failing_diagnostic)
+    app = MissionControlApp(pulse_enabled=False)
+    lines = []
+    monkeypatch.setattr(app, "_log", lambda *items: lines.extend(items))
+    app.action_diagnostics()
+    assert app.last_report is None
+    assert "RuntimeError" in str(lines)
+    assert "secret-should-not-appear" not in str(lines)
+
+
+def test_preflight_does_not_echo_credentials(monkeypatch):
+    from shards_kernel.cli.doctor import diagnose
+
+    value = "do-not-print-this-example-value-123456789"
+    monkeypatch.setenv("SHARDS_KERNEL_API_KEY", value)
+    output = json.dumps(diagnose(profile="service"))
+    assert value not in output
