@@ -163,6 +163,9 @@ class BaseKernel(Kernel):
         self._pending_result: Optional[Any] = None
         self._nonce_registry: NonceRegistry = NonceRegistry()
         self._keyring: dict[str, bytes] = {}  # Legacy local HMAC only
+        # Explicit set_keyring(..., strict_key_length=) value, reused at
+        # verification. None still follows SHARDS_KERNEL_STRICT_HMAC_KEYS.
+        self._hmac_strict_key_length: Optional[bool] = None
         self._public_verifiers: dict[str, PublicVerificationKey] | None = None
         self._transitions: list[tuple[KernelState, KernelState]] = []
         # Set only after a permit (or the explicit insecure opt-out) has bound
@@ -222,11 +225,13 @@ class BaseKernel(Kernel):
                 major version.
             strict_key_length: Reject keys shorter than 32 bytes now.
                 ``None`` (default) follows ``SHARDS_KERNEL_STRICT_HMAC_KEYS``.
+                The value given here, including ``None``, is stored and reused
+                when this kernel verifies permits.
 
         Raises:
             ValueError: In public-only verifier mode, or for an empty key
-                (or a short key in strict mode). The existing keyring is
-                left unchanged when a key is refused.
+                (or a short key in strict mode). The existing keyring and
+                stored strictness are left unchanged when a key is refused.
         """
         if self._public_verifiers is not None:
             raise ValueError("Public-only verifier mode cannot enable HMAC signing secrets")
@@ -234,6 +239,7 @@ class BaseKernel(Kernel):
         for key_id, key in candidate.items():
             _require_hmac_key(key, key_id, strict_key_length=strict_key_length)
         self._keyring = candidate
+        self._hmac_strict_key_length = strict_key_length
 
     def set_public_verifiers(self, keys: dict[str, PublicVerificationKey]) -> None:
         """Use operator-pinned public-only Ed25519 verification; disable HMAC.
@@ -642,6 +648,7 @@ class BaseKernel(Kernel):
                 commit_use=False,
                 public_keys=self._public_verifiers,
                 expected_audience=self.config.kernel_id,
+                strict_key_length=self._hmac_strict_key_length,
             )
             permit_digest = permit_token.permit_id
             proposal_hash = permit_token.proposal_hash

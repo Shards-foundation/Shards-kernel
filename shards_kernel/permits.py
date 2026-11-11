@@ -635,6 +635,7 @@ def verify_permit(
     *,
     public_keys: dict[str, PublicVerificationKey] | None = None,
     expected_audience: str | None = None,
+    strict_key_length: bool | None = None,
 ) -> PermitVerificationResult:
     """
     Comprehensive fail-closed permit verification.
@@ -666,6 +667,10 @@ def verify_permit(
         request_evidence: Evidence string on the request, if any
         commit_use: When False, replay state is checked but not recorded.
             The kernel records a use only after the request is authorised.
+        strict_key_length: Deny legacy HMAC keys shorter than 32 bytes.
+            ``None`` (default) follows ``SHARDS_KERNEL_STRICT_HMAC_KEYS``.
+            The kernel passes the value stored by ``set_keyring``. Empty
+            keys are always denied.
 
     Returns:
         PermitVerificationResult with ALLOW/DENY and reason codes
@@ -674,7 +679,11 @@ def verify_permit(
 
     # Checks 1-3: Cryptographic verification
     sig_result = verify_signature(
-        permit, keyring, public_keys=public_keys, expected_audience=expected_audience
+        permit,
+        keyring,
+        public_keys=public_keys,
+        expected_audience=expected_audience,
+        strict_key_length=strict_key_length,
     )
     if not sig_result.is_allowed():
         return sig_result

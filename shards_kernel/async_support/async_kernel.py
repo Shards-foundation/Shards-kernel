@@ -45,7 +45,12 @@ class AsyncKernel:
     def set_keyring(
         self, keyring: dict[str, bytes], *, strict_key_length: bool | None = None
     ) -> None:
-        """Install HMAC keys used to verify permits (empty keys are rejected)."""
+        """Install HMAC keys used to verify permits (empty keys are rejected).
+
+        An explicit ``strict_key_length`` is stored on the underlying kernel
+        and reused when that kernel verifies a permit. ``None`` still follows
+        ``SHARDS_KERNEL_STRICT_HMAC_KEYS``.
+        """
         if strict_key_length is None:
             # Preserve compatibility with kernels exposing the original signature.
             self.kernel.set_keyring(keyring)

@@ -8,6 +8,7 @@ can forge such a permit.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import warnings
@@ -228,3 +229,168 @@ def test_non_bytes_key_keeps_previous_type_error():
     for key in ("not-bytes", "", memoryview(b"z" * 32)):
         with pytest.raises(TypeError):
             sign_permit(replace(_permit(), signature=""), key, "k")  # type: ignore[arg-type]
+
+
+# --- Stored strictness is what submit verifies -----------------------------
+
+
+def _request(request_id: str = "req-hmac") -> KernelRequest:
+    return KernelRequest(
+        request_id=request_id,
+        ts_ms=1000,
+        actor="agent1",
+        intent="Echo text",
+        tool_call=ToolCall(name="echo", params={"text": "hi"}),
+        params={"text": "hi"},
+    )
+
+
+def _signed(key: bytes, *, strict_key_length: bool | None = False):
+    """Sign a fresh v1 permit. Explicit False allows a short key under a strict env."""
+    unsigned = replace(_permit(), signature="")
+    return sign_permit(unsigned, key, "k", strict_key_length=strict_key_length)
+
+
+def _quiet_sign_and_install(kernel, key: bytes, *, strict_key_length: bool | None):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        permit = _signed(key, strict_key_length=False)
+        kernel.set_keyring({"k": key}, strict_key_length=strict_key_length)
+    return permit
+
+
+def test_submit_keeps_explicit_false_when_environment_is_strict(monkeypatch):
+    monkeypatch.setenv(STRICT_HMAC_KEYS_ENV, "1")
+    kernel = _kernel()
+    permit = _quiet_sign_and_install(kernel, SHORT_KEY, strict_key_length=False)
+    assert kernel._hmac_strict_key_length is False
+    with pytest.warns(DeprecationWarning, match="shorter than 32 bytes"):
+        receipt = kernel.submit(_request(), permit_token=permit)
+    assert receipt.status == ReceiptStatus.ACCEPTED
+    assert receipt.decision == Decision.ALLOW
+
+
+def test_async_submit_keeps_explicit_false_when_environment_is_strict(monkeypatch):
+    monkeypatch.setenv(STRICT_HMAC_KEYS_ENV, "1")
+    wrapper = AsyncKernel(_kernel())
+    permit = _quiet_sign_and_install(wrapper, SHORT_KEY, strict_key_length=False)
+    assert wrapper.kernel._hmac_strict_key_length is False
+
+    async def scenario():
+        return await wrapper.submit(_request("req-async-false"), permit)
+
+    with pytest.warns(DeprecationWarning, match="shorter than 32 bytes"):
+        receipt = asyncio.run(scenario())
+    assert receipt.status == ReceiptStatus.ACCEPTED
+    assert receipt.decision == Decision.ALLOW
+
+
+def test_explicit_true_rejects_short_key_at_set_keyring_and_at_submit():
+    kernel = _kernel()
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        kernel.set_keyring({"k": SHORT_KEY}, strict_key_length=True)
+    assert kernel._keyring == {}
+    assert kernel._hmac_strict_key_length is None
+
+    wrapper = AsyncKernel(_kernel())
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        wrapper.set_keyring({"k": SHORT_KEY}, strict_key_length=True)
+    assert wrapper.kernel._hmac_strict_key_length is None
+
+    # A later short key is still refused at submit when True was stored.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=True)
+        permit = _signed(SHORT_KEY, strict_key_length=False)
+    assert kernel._hmac_strict_key_length is True
+    kernel._keyring["k"] = SHORT_KEY
+    receipt = kernel.submit(_request("req-strict-true"), permit_token=permit)
+    assert receipt.status == ReceiptStatus.REJECTED
+    assert receipt.decision == Decision.DENY
+    assert "HMAC_KEY_TOO_SHORT" in (receipt.error or "")
+
+
+def test_env_strict_without_explicit_denies_short_key_at_submit(monkeypatch):
+    kernel = _kernel()
+    with pytest.warns(DeprecationWarning):
+        kernel.set_keyring({"k": SHORT_KEY})
+    assert kernel._hmac_strict_key_length is None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        permit = _signed(SHORT_KEY, strict_key_length=False)
+    monkeypatch.setenv(STRICT_HMAC_KEYS_ENV, "1")
+    receipt = kernel.submit(_request(), permit_token=permit)
+    assert receipt.status == ReceiptStatus.REJECTED
+    assert receipt.decision == Decision.DENY
+    assert "HMAC_KEY_TOO_SHORT" in (receipt.error or "")
+
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        _kernel().set_keyring({"k": SHORT_KEY})
+    wrapper = AsyncKernel(_kernel())
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        wrapper.set_keyring({"k": SHORT_KEY})
+
+
+def test_async_submit_denies_short_key_when_stored_strictness_is_unset(monkeypatch):
+    wrapper = AsyncKernel(_kernel())
+    with pytest.warns(DeprecationWarning):
+        wrapper.set_keyring({"k": SHORT_KEY})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        permit = _signed(SHORT_KEY, strict_key_length=False)
+    monkeypatch.setenv(STRICT_HMAC_KEYS_ENV, "1")
+
+    async def scenario():
+        return await wrapper.submit(_request("req-async-env"), permit)
+
+    receipt = asyncio.run(scenario())
+    assert receipt.status == ReceiptStatus.REJECTED
+    assert receipt.decision == Decision.DENY
+    assert "HMAC_KEY_TOO_SHORT" in (receipt.error or "")
+
+
+def test_empty_key_is_denied_at_submit_when_strictness_is_explicitly_false():
+    kernel = _kernel()
+    kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=False)
+    kernel._keyring = {"k": b""}
+    assert kernel._hmac_strict_key_length is False
+    receipt = kernel.submit(
+        _request("req-empty-false"), permit_token=_forged_empty_key_permit()
+    )
+    assert receipt.status == ReceiptStatus.REJECTED
+    assert receipt.decision == Decision.DENY
+    assert "HMAC_KEY_EMPTY" in (receipt.error or "")
+
+    kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=False)
+    with pytest.raises(ValueError, match="must not be empty"):
+        kernel.set_keyring({"k": b""}, strict_key_length=True)
+    assert kernel._keyring == {"k": GOOD_KEY}
+    assert kernel._hmac_strict_key_length is False
+
+
+def test_full_length_key_submit_is_unaffected_by_strictness(monkeypatch):
+    monkeypatch.setenv(STRICT_HMAC_KEYS_ENV, "1")
+    kernel = _kernel()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        permit = _signed(GOOD_KEY, strict_key_length=False)
+        kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=False)
+        receipt = kernel.submit(_request(), permit_token=permit)
+    assert receipt.status == ReceiptStatus.ACCEPTED
+    assert receipt.decision == Decision.ALLOW
+
+    monkeypatch.delenv(STRICT_HMAC_KEYS_ENV, raising=False)
+    kernel = _kernel()
+    wrapper = AsyncKernel(kernel)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        permit = _signed(GOOD_KEY, strict_key_length=True)
+        wrapper.set_keyring({"k": GOOD_KEY}, strict_key_length=True)
+
+        async def scenario():
+            return await wrapper.submit(_request("req-async-32"), permit)
+
+        receipt = asyncio.run(scenario())
+    assert wrapper.kernel._hmac_strict_key_length is True
+    assert receipt.status == ReceiptStatus.ACCEPTED
+    assert receipt.decision == Decision.ALLOW
