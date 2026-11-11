@@ -10,6 +10,77 @@ permissions:
   contents: read
 
 jobs:
+  # Advisory static analysis (audit quick win, 11 Nov 2026). Both jobs use the
+  # repository's own configuration (mypy.ini, [tool.ruff] in pyproject.toml).
+  # They are NON-BLOCKING today because main already carries pre-existing
+  # findings; flip continue-on-error to false once those are paid down.
+  # The blocking Ruff E/F gate in the quality job below is unchanged.
+  typecheck:
+    name: Type check (mypy, advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install type-check dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,crypto,mcp]" "mypy==2.4.1"
+
+      - name: Run mypy with repository mypy.ini (non-blocking)
+        id: mypy
+        continue-on-error: true
+        run: mypy shards_kernel implementations
+
+      - name: Record advisory mypy outcome
+        env:
+          MYPY_OUTCOME: ${{ steps.mypy.outcome }}
+        run: |
+          echo "mypy outcome: $MYPY_OUTCOME (advisory; not yet a blocking gate)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MYPY_OUTCOME" != "success" ]; then
+            echo "::warning title=mypy (advisory)::mypy reported findings; see the 'Run mypy' step log."
+          fi
+
+  lint-full:
+    name: Lint (Ruff full ruleset, advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Ruff
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "ruff==0.17.3"
+
+      - name: Run Ruff with the full configured ruleset (non-blocking)
+        id: ruff
+        continue-on-error: true
+        run: |
+          ruff check . --statistics
+          ruff check . --output-format=concise
+
+      - name: Record advisory Ruff outcome
+        env:
+          RUFF_OUTCOME: ${{ steps.ruff.outcome }}
+        run: |
+          echo "Ruff full-ruleset outcome: $RUFF_OUTCOME (advisory; not yet a blocking gate)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$RUFF_OUTCOME" != "success" ]; then
+            echo "::warning title=Ruff full ruleset (advisory)::Ruff reported findings; see the 'Run Ruff' step log."
+          fi
+
   e2e:
     name: Mandatory local E2E release gate
     runs-on: ubuntu-24.04
