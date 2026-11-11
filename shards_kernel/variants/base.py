@@ -46,6 +46,7 @@ from shards_kernel.permits import (
     PermitToken,
     PublicVerificationKey,
     _params_satisfy_permit,
+    _require_hmac_key,
     verify_permit,
 )
 
@@ -209,15 +210,30 @@ class BaseKernel(Kernel):
         """
         self._policy = policy
 
-    def set_keyring(self, keyring: dict[str, bytes]) -> None:
+    def set_keyring(
+        self, keyring: dict[str, bytes], *, strict_key_length: Optional[bool] = None
+    ) -> None:
         """Set the HMAC keyring for permit verification.
 
         Args:
-            keyring: Map of key_id -> HMAC secret key (32 bytes recommended).
+            keyring: Map of key_id -> HMAC secret key (at least 32 bytes).
+                Empty keys are rejected. Keys of 1-31 bytes emit a
+                ``DeprecationWarning`` and will be rejected in the next
+                major version.
+            strict_key_length: Reject keys shorter than 32 bytes now.
+                ``None`` (default) follows ``SHARDS_KERNEL_STRICT_HMAC_KEYS``.
+
+        Raises:
+            ValueError: In public-only verifier mode, or for an empty key
+                (or a short key in strict mode). The existing keyring is
+                left unchanged when a key is refused.
         """
         if self._public_verifiers is not None:
             raise ValueError("Public-only verifier mode cannot enable HMAC signing secrets")
-        self._keyring = dict(keyring)
+        candidate = dict(keyring)
+        for key_id, key in candidate.items():
+            _require_hmac_key(key, key_id, strict_key_length=strict_key_length)
+        self._keyring = candidate
 
     def set_public_verifiers(self, keys: dict[str, PublicVerificationKey]) -> None:
         """Use operator-pinned public-only Ed25519 verification; disable HMAC.
