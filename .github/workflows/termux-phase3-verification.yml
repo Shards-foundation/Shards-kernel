@@ -1,0 +1,47 @@
+name: Termux Phase 3 offline issuer verification
+
+on:
+  push:
+    branches:
+      - feat/termux-v3-offline-issuer-20261108
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  phase3-offline-contract:
+    name: Phase 3 Ed25519 issuer/verifier local contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install local contract test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[crypto]" "pytest>=7,<10"
+
+      - name: Validate offline issuer and verifier with real cryptography
+        run: |
+          python -m pytest -q \
+            examples/termux_phase3/test_phase3.py \
+            tests/test_termux_phase3_integration.py
+
+      - name: Scope notice
+        run: |
+          echo "This contract tests two logical roles locally. It does not" >> "$GITHUB_STEP_SUMMARY"
+          echo "certify physical host isolation, remote authentication, or production." >> "$GITHUB_STEP_SUMMARY"
