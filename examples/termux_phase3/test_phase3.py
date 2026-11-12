@@ -17,28 +17,36 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(validate_tool('add', {'a': 17, 'b': 25}), ('add', {'a': 17, 'b': 25}))
 
     def test_float_denied(self):
-        with self.assertRaises(ValueError): validate_tool('add', {'a': 1.0, 'b': 2})
+        with self.assertRaises(ValueError):
+            validate_tool('add', {'a': 1.0, 'b': 2})
 
     def test_bool_denied(self):
-        with self.assertRaises(ValueError): validate_tool('add', {'a': True, 'b': 2})
+        with self.assertRaises(ValueError):
+            validate_tool('add', {'a': True, 'b': 2})
 
     def test_extra_arg_denied(self):
-        with self.assertRaises(ValueError): validate_tool('add', {'a': 1, 'b': 2, 'x': 3})
+        with self.assertRaises(ValueError):
+            validate_tool('add', {'a': 1, 'b': 2, 'x': 3})
 
     def test_arbitrary_tool_denied(self):
-        with self.assertRaises(ValueError): validate_tool('shell', {'command': 'id'})
+        with self.assertRaises(ValueError):
+            validate_tool('shell', {'command': 'id'})
 
     def test_note_traversal_denied(self):
-        with self.assertRaises(ValueError): validate_tool('read_note', {'name': '../operator.key'})
+        with self.assertRaises(ValueError):
+            validate_tool('read_note', {'name': '../operator.key'})
 
     def test_mismatched_memory_key(self):
-        with self.assertRaises(ValueError): validate_tool('remember', {'key': '../secret', 'value': 'x'})
+        with self.assertRaises(ValueError):
+            validate_tool('remember', {'key': '../secret', 'value': 'x'})
 
     def test_memory_value_bounds(self):
-        with self.assertRaises(ValueError): validate_tool('remember', {'key': 'foo', 'value': 'x' * 501})
+        with self.assertRaises(ValueError):
+            validate_tool('remember', {'key': 'foo', 'value': 'x' * 501})
 
     def test_no_nan(self):
-        with self.assertRaises(ValueError): validate_tool('add', {'a': float('nan'), 'b': 1})
+        with self.assertRaises(ValueError):
+            validate_tool('add', {'a': float('nan'), 'b': 1})
 
     def test_proposal_roundtrip(self):
         n = time.time_ns() // 1_000_000
@@ -55,23 +63,27 @@ class ProtocolTests(unittest.TestCase):
         n = time.time_ns() // 1_000_000
         p = make_proposal('echo', {'text': 'hello'}, now=n)
         p['actor'] = 'attacker'
-        with self.assertRaises(ValueError): validate_proposal(p, now=n)
+        with self.assertRaises(ValueError):
+            validate_proposal(p, now=n)
 
     def test_proposal_age_denied(self):
         n = time.time_ns() // 1_000_000
         p = make_proposal('echo', {'text': 'hello'}, now=n - 1_000_000)
-        with self.assertRaises(ValueError): validate_proposal(p, now=n)
+        with self.assertRaises(ValueError):
+            validate_proposal(p, now=n)
 
     def test_proposal_future_denied(self):
         n = time.time_ns() // 1_000_000
         p = make_proposal('echo', {'text': 'hello'}, now=n + 60_000)
-        with self.assertRaises(ValueError): validate_proposal(p, now=n)
+        with self.assertRaises(ValueError):
+            validate_proposal(p, now=n)
 
     def test_proposal_added_fields_denied(self):
         n = time.time_ns() // 1_000_000
         p = make_proposal('echo', {'text': 'hello'}, now=n)
         p['authorization'] = 'allow'
-        with self.assertRaises(ValueError): validate_proposal(p, now=n)
+        with self.assertRaises(ValueError):
+            validate_proposal(p, now=n)
 
 
     def test_execution_validation_uses_signed_permit_lifetime_not_proposal_age(self):
@@ -115,19 +127,22 @@ class ProtocolTests(unittest.TestCase):
             q = Path(d) / 'alias.json'
             write_new_file(p, b'{}')
             q.symlink_to(p)
-            with self.assertRaises(OSError): read_json_file(q)
+            with self.assertRaises(OSError):
+                read_json_file(q)
 
     def test_create_existing_file_denied(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / 'proposal.json'
             write_new_file(p, b'{}')
-            with self.assertRaises(FileExistsError): write_new_file(p, b'{}')
+            with self.assertRaises(FileExistsError):
+                write_new_file(p, b'{}')
 
     def test_oversized_file_denied(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / 'proposal.json'
             write_new_file(p, b' ' * 20000)
-            with self.assertRaises(ValueError): read_json_file(p)
+            with self.assertRaises(ValueError):
+                read_json_file(p)
 
 
 if __name__ == '__main__':
