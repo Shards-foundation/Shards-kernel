@@ -4,7 +4,7 @@
 
 This workflow runs on **two independent GitHub-hosted Ubuntu runner jobs**. The
 first VM generates an ephemeral Ed25519 private key and issues one signed
-\`add(17,25)\` permit. It uploads only the proposal, signed permit, public key
+`add(17,25)` permit. It uploads only the proposal, signed permit, public key
 and limited manifest. The second VM downloads the artifact, verifies the
 public key against a separate job output, enrolls the verifier, checks
 tampered-proposal denial, runs the harmless add once, checks replay denial
@@ -16,7 +16,7 @@ execution. It does **not** establish tamper-proof host attestation or
 genuine independently administered security principals. GitHub controls
 both CI jobs, artifacts and workflow configuration.
 
-**Critically, the issuer's \`APPROVE\` is mocked by test code.**
+**Critically, the issuer's `APPROVE` is mocked by test code.**
 No real person approved the permit. This is an automated signed-permit
 contract, *not* the production human-approval or protected-host gate.
 Permit validity is five minutes; excessive GitHub queueing must fail
@@ -24,12 +24,12 @@ closed rather than extending the permit or disabling expiry.
 
 ## Run
 
-Push to \`feat/dual-host-acceptance-20261112\`, or open a PR against its
-parent \`feat/termux-v3-offline-issuer-20261108\`. Workflow:
-\`.github/workflows/phase3-cross-runner-acceptance.yml\`.
+Push to `feat/dual-host-acceptance-20261112`, or open a PR against its
+parent `feat/termux-v3-offline-issuer-20261108`. Workflow:
+`.github/workflows/phase3-cross-runner-acceptance.yml`.
 
 Inspect the two job logs and download
-\`phase3-cross-runner-evidence\`. Do **not** upload private keys,
+`phase3-cross-runner-evidence`. Do **not** upload private keys,
 real service credentials or customer data.
 
 ## What still must happen on real infrastructure
