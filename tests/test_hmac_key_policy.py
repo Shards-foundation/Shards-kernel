@@ -421,3 +421,92 @@ def test_key_rotation_never_exposes_mixed_verifier_configuration():
     writer.join(timeout=10)
     assert not writer.is_alive(), "key rotation worker stalled"
     assert not errors
+
+
+def test_submit_waits_for_atomic_key_rotation_snapshot():
+    """Force a mixed-generation window and submit while the writer owns it.
+
+    This tests the *real submit path*, not merely two test-side locked reads.
+    Without the verifier snapshot lock, a short key is verified against the
+    previous strict=True setting and the permit is incorrectly denied.
+    """
+    installed_key = threading.Event()
+    finish_rotation = threading.Event()
+    reached_verification = threading.Event()
+    completed = threading.Event()
+    failures: list[BaseException] = []
+    receipts = []
+
+    class PausedRotationKernel(StrictKernel):
+        def __setattr__(self, name, value):
+            super().__setattr__(name, value)
+            if name == "_keyring" and getattr(self, "_pause_rotation", False):
+                installed_key.set()
+                if not finish_rotation.wait(timeout=5):
+                    raise RuntimeError("Timed out releasing rotation pause")
+
+    kernel = PausedRotationKernel()
+    kernel.boot(
+        KernelConfig(
+            kernel_id="hmac-key-test", variant="strict", clock=VirtualClock(1000)
+        )
+    )
+    kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        permit = _signed(SHORT_KEY, strict_key_length=False)
+
+    original_tool_parts = kernel._tool_parts
+
+    def signal_tool_parts(request):
+        result = original_tool_parts(request)
+        reached_verification.set()
+        return result
+
+    kernel._tool_parts = signal_tool_parts
+    kernel._pause_rotation = True
+
+    def rotate():
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                kernel.set_keyring({"k": SHORT_KEY}, strict_key_length=False)
+        except BaseException as exc:
+            failures.append(exc)
+
+    def submit():
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                receipts.append(
+                    kernel.submit(
+                        _request("req-rotation-window"), permit_token=permit
+                    )
+                )
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            completed.set()
+
+    writer = threading.Thread(target=rotate, daemon=True)
+    reader = threading.Thread(target=submit, daemon=True)
+    try:
+        writer.start()
+        assert installed_key.wait(3), "Writer did not enter the forced race window"
+        reader.start()
+        assert reached_verification.wait(3), "Submit did not reach permit verification"
+        assert not completed.wait(0.15), (
+            "Submit bypassed rotation lock while key and policy generations differed"
+        )
+    finally:
+        finish_rotation.set()
+        writer.join(timeout=5)
+        if reader.ident is not None:
+            reader.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert not reader.is_alive()
+    assert not failures
+    assert len(receipts) == 1
+    assert receipts[0].status == ReceiptStatus.ACCEPTED
+    assert receipts[0].decision == Decision.ALLOW
