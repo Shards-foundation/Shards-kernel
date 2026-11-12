@@ -471,7 +471,7 @@ def test_submit_waits_for_atomic_key_rotation_snapshot():
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
                 kernel.set_keyring({"k": SHORT_KEY}, strict_key_length=False)
-        except BaseException as exc:
+        except Exception as exc:
             failures.append(exc)
 
     def submit():
@@ -483,7 +483,7 @@ def test_submit_waits_for_atomic_key_rotation_snapshot():
                         _request("req-rotation-window"), permit_token=permit
                     )
                 )
-        except BaseException as exc:
+        except Exception as exc:
             failures.append(exc)
         finally:
             completed.set()
