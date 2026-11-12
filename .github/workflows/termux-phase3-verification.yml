@@ -6,6 +6,7 @@ on:
       - feat/termux-v3-offline-issuer-20261108
   pull_request:
     branches:
+      - termux-qwen3-v2-20261108
       - main
       - master
 
