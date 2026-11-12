@@ -40,7 +40,8 @@ jobs:
         run: |
           python -m pytest -q \
             examples/termux_phase3/test_phase3.py \
-            tests/test_termux_phase3_integration.py
+            tests/test_termux_phase3_integration.py \
+            tests/test_termux_phase3_tools.py
 
       - name: Scope notice
         run: |
