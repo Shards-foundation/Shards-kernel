@@ -203,7 +203,9 @@ def _cmd_dashboard(parser: argparse.ArgumentParser, *, plain: bool = False,
     if selection == "doctor":
         from shards_kernel.cli.doctor import run_doctor
 
-        return run_doctor(profile="library", json_output=False)
+        # This is operational preflight, not merely a local library install
+        # check. Keep fallback and Textual status semantics consistent.
+        return run_doctor(profile="service", json_output=False)
     if selection == "demo":
         from shards_kernel.cli.demo import run_demo
 
