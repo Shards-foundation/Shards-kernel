@@ -68,7 +68,7 @@ def make_proposal(tool: str, params: dict, *, now: int | None = None) -> dict:
     }
 
 
-def validate_proposal(proposal: Any, *, now: int | None = None) -> dict:
+def validate_proposal(proposal: Any, *, now: int | None = None, check_age: bool = True) -> dict:
     if type(proposal) is not dict or set(proposal) != {
         'schema', 'proposal_id', 'kernel_id', 'actor', 'tool', 'params', 'created_ms'
     }:
@@ -81,7 +81,7 @@ def validate_proposal(proposal: Any, *, now: int | None = None) -> dict:
         raise ValueError('Invalid proposal timestamp')
     if now is None:
         now = time.time_ns() // 1_000_000
-    if not (now - MAX_AGE_MS <= proposal['created_ms'] <= now + 10_000):
+    if check_age and not (now - MAX_AGE_MS <= proposal['created_ms'] <= now + 10_000):
         raise ValueError('Proposal stale or from the future')
     validate_tool(proposal['tool'], proposal['params'])
     if len(canonical(proposal)) > 4_096:
@@ -96,7 +96,7 @@ def proposal_hash(proposal: dict) -> str:
 def read_json_file(path, max_bytes: int = 16_384):
     import os
     import stat
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     try:
         meta = os.fstat(fd)
         if not stat.S_ISREG(meta.st_mode) or meta.st_size > max_bytes:
