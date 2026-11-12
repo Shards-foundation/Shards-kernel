@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 from importlib import metadata
-import json
 import os
 from pathlib import Path
 import sys
