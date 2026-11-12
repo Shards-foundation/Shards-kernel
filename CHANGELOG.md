@@ -85,6 +85,27 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Evidence bundles for `python -m kernels.cli.verify`: the command reads `ledger_entries`. The LangChain, Hugging Face, generic, LangGraph, CrewAI, AutoGPT, and Moltbook adapters still export `entries`. Rename `entries` to `ledger_entries` in the bundle, or build the bundle with `evidence_to_mapping`. There is no CLI flag or alias for `entries`.
 - Scripts that parse `verify --json` output: until the separately tracked fix lands, stdout holds the text report followed by the JSON object, so do not pass it directly to a JSON parser.
 
+## [0.1.4] - Release candidate (publication pending)
+
+### Added
+
+- Optional responsive Shards Mission Control CLI (`shards-kernel dashboard`) using Rich/Textual extras. Standard Python APIs, plain help and machine-readable JSON output remain available without the UI.
+
+### Changed
+
+- **CLI default-profile change:** `shards-kernel doctor` now checks the local Python **library**, rather than implying an unconfigured service is the status of the whole SDK. Service operators must use `shards-kernel doctor --profile service` explicitly; existing automation that relied on the former default should update the invocation.
+- Improved README and operator documentation explaining local SDK capabilities, the offline demonstration's scope and separate service preflight.
+
+### Security
+
+- Reject empty HMAC key material before generating or verifying tokens; expand ingress regression coverage and advisory quality checks.
+- Regression tests cover default SDK diagnostics, explicit service checks and Mission Control guidance without relaxing permit or policy enforcement.
+
+### Release boundary
+
+- This is a Python SDK/optional terminal UI maintenance release. Distributed issuer hosting, remote MCP, OS-level process sandboxing and external provider side effects are separate opt-in integration/deployment work, **not** features claimed for this wheel.
+- The candidate build is **not a PyPI publication**. No tag, GitHub Release or deployment is created by its verification workflow.
+
 ## [0.1.3] - 2026-11-06
 
 ### Security
