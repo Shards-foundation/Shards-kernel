@@ -130,13 +130,13 @@ def test_narrow_terminal_touch_buttons_and_preflight_matrix():
         async with app.run_test(size=(42, 30)) as pilot:
             matrix = app.query_one("#matrix", Static)
             assert all(len(line) <= 36 for line in app._matrix_content().splitlines())
-            assert "SERVICE  NOT INSPECTED" in str(matrix.renderable)
+            assert "SERVICE  NOT INSPECTED" in str(matrix.content)
             await pilot.click("#info")
             assert app.last_action == "info"
             await pilot.click("#diagnostics")
             assert app.last_action == "diagnostics"
             assert app.last_report is not None
             expected = str(app.last_report["service"]["assessment"]) + " (PREFLIGHT)"
-            assert ("SERVICE  " + expected) in str(matrix.renderable)
+            assert ("SERVICE  " + expected) in str(matrix.content)
 
     asyncio.run(scenario())
