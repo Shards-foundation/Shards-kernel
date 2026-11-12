@@ -10,7 +10,8 @@ LEGACY = ROOT / ".github" / "workflows" / "publish-v0.1.2.yml"
 
 
 def test_release_0_1_3_version_and_one_shot_protection():
-    assert __version__ == "0.1.3"
+    # Historical v0.1.3 release invariants must survive later package bumps.
+    assert tuple(map(int, __version__.split("."))) >= (0, 1, 3)
     current = WORKFLOW.read_text(encoding="utf-8")
     historical = LEGACY.read_text(encoding="utf-8")
     assert "name: Publish Shards-Kernel v0.1.3" in current
