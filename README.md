@@ -18,7 +18,7 @@ A **kernel** is a deterministic state machine that governs AI agent execution vi
 Install the published package with the optional cryptographic demo support, verify the Python namespace and CLI, and run a **local, offline** permit-and-audit demonstration:
 
 ```bash
-python -m pip install "shards-kernel[crypto]==0.1.3"
+python -m pip install "shards-kernel[crypto]"
 python -c "import shards_kernel; print(shards_kernel.__version__)"
 shards-kernel --version
 shards-kernel info --variant strict
@@ -26,9 +26,9 @@ shards-kernel doctor --profile library --json
 shards-kernel demo --json
 ```
 
-### What the released v0.1.3 package can do today
+### What the installed Python SDK can do today
 
-**v0.1.3 is already published and installable.** The local SDK can evaluate
+**Shards-Kernel is already published and installable.** The local SDK can evaluate
 kernel requests, check exact signed permits, deny unauthorised or replayed
 operations, and produce verifiable audit evidence. You do **not** need a
 hosted MCP gateway, an Android device, a multi-host service, or an OS
@@ -49,11 +49,11 @@ For a separately configured operator service, run
 `NOT_VERIFIED` results describe that specific deployment's prerequisites,
 not local library installability.
 
-**Compatibility note:** the already published v0.1.3 CLI defaults an
-*unqualified* `shards-kernel doctor` invocation to the service profile.
-Always use the explicit `--profile library` flag with v0.1.3. The
-development branch changes the CLI default to library in a future
-distribution update; this README edit does not change the published wheel.
+**Compatibility note:** version 0.1.3 defaults an unqualified
+`shards-kernel doctor` invocation to `service`; version 0.1.4 changes
+the CLI default to `library`. For automation, always specify an
+explicit `--profile library` or `--profile service` so deployers do
+not mistake a successful library preflight for service readiness.
 
 ### Optional mission-control terminal UI
 
@@ -231,12 +231,12 @@ Variants tune posture while preserving invariants:
 The PyPI distribution name is `shards-kernel`, the import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
 
 ```bash
-python -m pip install "shards-kernel==0.1.3"
+python -m pip install shards-kernel
 python -c "import shards_kernel"
 shards-kernel --help
 ```
 
-**Version 0.1.3 is the security and concurrency stabilisation release**: exact signed-parameter scope, audited single-flight admission and unambiguous queued-halt receipts. Verified artifacts are published through [PyPI](https://pypi.org/project/shards-kernel/) only after protected merge, release acceptance and GitHub OIDC Trusted Publishing. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
+**Version 0.1.4 adds the optional Mission Control terminal UI, SDK-first diagnostics and HMAC key hardening. Version 0.1.3 introduced exact signed-parameter scope, audited single-flight admission and unambiguous queued-halt receipts.** Verified artifacts are published through [PyPI](https://pypi.org/project/shards-kernel/) only after protected merge, release acceptance and GitHub OIDC Trusted Publishing. The different PyPI project [`kernels`](https://pypi.org/project/kernels/) belongs to Hugging Face; do **not** install `kernels` when intending to install Shards-Kernel. To use the development checkout instead:
 
 ```bash
 python -m pip install "git+https://github.com/Shards-foundation/Shards-kernel.git"
@@ -427,8 +427,9 @@ service deployment** supplies those guarantees. API credentials are never
 printed. A service result is not an SDK release status.
 
 The current development CLI chooses `library` when no profile is specified;
-**the already released v0.1.3 wheel still defaults to `service`**.
-For scripts across versions, always specify the profile explicitly.
+**the published v0.1.3 wheel defaults to `service`, while the v0.1.4
+candidate defaults to `library`**. For scripts across versions, always
+specify the profile explicitly.
 
 See [operator preflight guide](docs/operations/OPERATOR_PREFLIGHT.md).
 

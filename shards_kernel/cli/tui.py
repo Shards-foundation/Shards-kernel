@@ -223,6 +223,6 @@ def launch(*, no_animate: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    # A downloaded copy can run against an already-installed 0.1.3 kernel.
+    # A downloaded copy can run against an already-installed Shards-Kernel SDK.
     # The full integrated CLI is still pending release.
     launch()
