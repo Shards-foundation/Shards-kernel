@@ -64,6 +64,7 @@ def write_exclusive(path: Path, data: bytes, mode: int) -> None:
         try:
             path.unlink()
         except OSError:
+            # Cleanup is best-effort; preserve the primary write exception.
             pass
         raise
 
@@ -166,7 +167,7 @@ def safe_read_note(workspace: Path, name: str) -> str:
     # Open a fixed directory and a single filename. Refuse symlink traversal.
     dfd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=dfd)
         try:
             meta = os.fstat(fd)
             if not stat.S_ISREG(meta.st_mode) or meta.st_nlink != 1 or meta.st_size > 8192:
@@ -349,12 +350,14 @@ def self_test() -> None:
             validate("read_note", {"name": "../operator.key"})
             raise AssertionError("Traversal was not denied")
         except ValueError:
+            # Expected negative-path rejection in the standalone self-test.
             pass
         (root / "workspace" / "alias.md").symlink_to(root / "operator.key")
         try:
             safe_read_note(root / "workspace", "alias.md")
             raise AssertionError("Symlink was not denied")
         except OSError:
+            # O_NOFOLLOW must reject this symlink; this is the expected outcome.
             pass
         assert check_audit(k)
         k2, c2 = launch(root)

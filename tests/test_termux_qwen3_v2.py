@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,28 @@ def test_note_root_symlink_and_large_files():
             agent.safe_read_note(root, "large.txt")
         with pytest.raises(OSError):
             agent.safe_read_note(root, "symlink.md")
+
+
+
+def test_read_note_rejects_fifo_without_blocking():
+    """An approved read must not hang when a note-looking path is a FIFO."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        os.mkfifo(root / "trap.md")
+        outcome = []
+
+        def attempt():
+            try:
+                agent.safe_read_note(root, "trap.md")
+            except Exception as exc:
+                outcome.append(exc)
+
+        reader = threading.Thread(target=attempt, daemon=True)
+        reader.start()
+        reader.join(timeout=3.0)
+        assert not reader.is_alive(), "read_note blocked on a FIFO"
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], ValueError)
 
 
 def test_memory_key_limits_and_restart():

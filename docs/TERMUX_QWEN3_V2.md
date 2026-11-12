@@ -10,18 +10,18 @@ This is an experimental *same-user* Android integration. It is NOT an OS sandbox
 
 ## Install without ChatGPT attachments
 
-Use the branch's raw source URL (see PR) while that branch exists:
+Use an immutable, commit-pinned source URL for this pilot. It remains valid after the review branch is deleted. Inspect the file before execution; use a tagged release once this example is published:
 
 ```sh
 mkdir -p ~/shards-local-ai && cd ~/shards-local-ai
 curl -fL --retry 3 --connect-timeout 15 -o agent_v2.py \
-  https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/termux-qwen3-v2-20261108/examples/13_termux_qwen3_governed_agent.py
+  https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/bd44a3e19a8a21bafbb9c62c1d83872cb7c49b25/examples/13_termux_qwen3_governed_agent.py
 python -m py_compile agent_v2.py
 python agent_v2.py self-test
 python agent_v2.py init
 ```
 
-When in doubt, inspect `agent_v2.py` before running it; the URL is a development branch, not a tagged release.
+The pinned commit is an immutable review artifact, not a published release or production certification. Review `agent_v2.py` before running it.
 
 ## Try deterministic tools without the LLM
 
