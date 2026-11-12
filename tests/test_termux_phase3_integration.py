@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -120,3 +121,76 @@ def test_enrolment_refuses_bad_fingerprint_and_key_replacement(phase3, tmp_path)
     verifier.enroll(phone, pub.hex(), hashlib.sha256(pub).hexdigest())
     with pytest.raises(ValueError, match="already enrolled"):
         verifier.enroll(phone, pub.hex(), hashlib.sha256(pub).hexdigest())
+
+
+def test_file_write_fsync_failure_does_not_leave_partial_file(phase3, tmp_path, monkeypatch):
+    protocol, _, _ = phase3
+    path = tmp_path / "partial.json"
+
+    def bad_fsync(fd):
+        raise OSError("disk failure")
+
+    with monkeypatch.context() as m:
+        m.setattr(os, "fsync", bad_fsync)
+        with pytest.raises(OSError, match="disk failure"):
+            protocol.write_new_file(path, b'{"test":1}')
+    assert not path.exists()
+    protocol.write_new_file(path, b'{"test":1}')
+    assert protocol.read_json_file(path) == {"test": 1}
+
+
+def test_issuer_partial_setup_rolls_back_private_key(phase3, tmp_path, monkeypatch):
+    _, issuer, _ = phase3
+    home = tmp_path / "issuer"
+    real_write = issuer.write_new_file
+
+    def fail_public(path, data):
+        if path.name == "issuer-public.bin":
+            raise OSError("public key write failed")
+        return real_write(path, data)
+
+    with monkeypatch.context() as m:
+        m.setattr(issuer, "write_new_file", fail_public)
+        with pytest.raises(OSError, match="public key write failed"):
+            issuer.init(home)
+    assert not (home / "issuer-private.key").exists()
+    assert not (home / "issuer-public.bin").exists()
+    issuer.init(home)
+    assert (home / "issuer-private.key").is_file()
+
+
+def test_enrolment_setup_failure_can_retry_without_key_replacement(phase3, tmp_path):
+    _, issuer, verifier = phase3
+    home = tmp_path / "issuer"
+    issuer.init(home)
+    pub = (home / "issuer-public.bin").read_bytes()
+    phone = tmp_path / "phone"
+    phone.mkdir(mode=0o700)
+    blocker = phone / "workspace"
+    blocker.write_text("not a directory")
+    with pytest.raises(OSError):
+        verifier.enroll(phone, pub.hex(), hashlib.sha256(pub).hexdigest())
+    assert not (phone / "operator-v3.pub").exists()
+    blocker.unlink()
+    verifier.enroll(phone, pub.hex(), hashlib.sha256(pub).hexdigest())
+    assert (phone / "operator-v3.pub").read_bytes() == pub
+
+
+def test_issuer_displays_escaped_bidi_but_signs_exact_value(
+    phase3, tmp_path, monkeypatch, capsys
+):
+    protocol, issuer, _ = phase3
+    home = tmp_path / "issuer"
+    issuer.init(home)
+    dangerous_text = "safe" + "\u202e" + "hidden"
+    proposal = protocol.make_proposal("echo", {"text": dangerous_text})
+    proposal_path = tmp_path / "proposal.json"
+    protocol.write_new_file(proposal_path, protocol.canonical(proposal))
+    permit_path = tmp_path / "permit.json"
+    monkeypatch.setattr("builtins.input", lambda prompt: "APPROVE")
+    issuer.issue(home, proposal_path, permit_path)
+    stdout = capsys.readouterr().out
+    assert "\\u202e" in stdout
+    assert "\u202e" not in stdout
+    signed = protocol.read_json_file(permit_path)
+    assert signed["params"]["text"] == dangerous_text
