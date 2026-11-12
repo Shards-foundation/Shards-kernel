@@ -79,6 +79,9 @@ class MissionControlApp(App[None]):
 
     def _update_matrix(self, service_status: str = "NOT INSPECTED") -> None:
         """Refresh the mounted panel after a real preflight; never leave stale state."""
+        # Headless callers can exercise diagnostics before an App screen exists.
+        if not self._screen_stack:
+            return
         for matrix in self.query("#matrix"):
             matrix.update(self._matrix_content(service_status))
 
