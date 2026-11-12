@@ -166,7 +166,7 @@ def safe_read_note(workspace: Path, name: str) -> str:
     # Open a fixed directory and a single filename. Refuse symlink traversal.
     dfd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=dfd)
         try:
             meta = os.fstat(fd)
             if not stat.S_ISREG(meta.st_mode) or meta.st_nlink != 1 or meta.st_size > 8192:
