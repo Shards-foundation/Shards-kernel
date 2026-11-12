@@ -89,3 +89,24 @@ def test_rich_welcome_renders_without_claiming_live_service(capsys):
     assert "SERVICE" in output
     assert "NOT INSPECTED" in output
     assert "NOT VERIFIED" in output
+
+
+def test_dashboard_fallback_preflight_checks_service_not_just_library(monkeypatch):
+    """Interactive fallback must not report a ready service from library-only checks."""
+    from argparse import ArgumentParser
+    from shards_kernel.cli import doctor
+
+    observed = []
+
+    monkeypatch.setattr(
+        mission_control, "run_dashboard", lambda **kwargs: "doctor"
+    )
+
+    def fake_doctor(*, profile, json_output):
+        observed.append((profile, json_output))
+        return 2
+
+    monkeypatch.setattr(doctor, "run_doctor", fake_doctor)
+    result = cli._cmd_dashboard(ArgumentParser(), plain=True, interactive=True)
+    assert result == 2
+    assert observed == [("service", False)]
