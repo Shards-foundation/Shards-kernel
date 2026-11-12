@@ -178,12 +178,22 @@ def iso_to_timestamp(iso_str: str) -> int:
         iso_str: ISO 8601 formatted string.
 
     Returns:
-        Timestamp in milliseconds since epoch.
+        Timestamp in milliseconds since epoch, truncating sub-milliseconds
+        toward zero. Naive datetimes use the local timezone.
     """
     import datetime
 
     dt = datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-    return int(dt.timestamp() * 1000)
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    delta = dt - epoch
+    # Keep the conversion integral: float seconds can lose a millisecond
+    # before int() truncates (for example, 1.001 * 1000 is below 1001).
+    microseconds = (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+    if microseconds < 0:
+        return -(-microseconds // 1000)
+    return microseconds // 1000
 
 
 def monotonic_ms() -> int:
