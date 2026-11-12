@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import hmac
 import warnings
+import threading
 from dataclasses import replace
 
 import pytest
@@ -394,3 +395,29 @@ def test_full_length_key_submit_is_unaffected_by_strictness(monkeypatch):
     assert wrapper.kernel._hmac_strict_key_length is True
     assert receipt.status == ReceiptStatus.ACCEPTED
     assert receipt.decision == Decision.ALLOW
+
+
+def test_key_rotation_never_exposes_mixed_verifier_configuration():
+    """A verifier snapshot must not pair short-key material with strict=True."""
+    kernel = _kernel()
+    kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=True)
+    errors: list[tuple[bytes, bool | None]] = []
+
+    def rotate():
+        for _ in range(1500):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                kernel.set_keyring({"k": SHORT_KEY}, strict_key_length=False)
+            kernel.set_keyring({"k": GOOD_KEY}, strict_key_length=True)
+
+    writer = threading.Thread(target=rotate)
+    writer.start()
+    for _ in range(4000):
+        with kernel._verifier_config_lock:
+            key = kernel._keyring["k"]
+            strict = kernel._hmac_strict_key_length
+        if (key, strict) not in ((SHORT_KEY, False), (GOOD_KEY, True)):
+            errors.append((key, strict))
+    writer.join(timeout=10)
+    assert not writer.is_alive(), "key rotation worker stalled"
+    assert not errors
