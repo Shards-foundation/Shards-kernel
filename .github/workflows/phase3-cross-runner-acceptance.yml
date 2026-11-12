@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/phase3-cross-runner-acceptance.yml'
       - 'scripts/acceptance/phase3_*'
+      - 'scripts/acceptance/termux_device_probe.py'
       - 'examples/termux_phase3/**'
 
 permissions:
