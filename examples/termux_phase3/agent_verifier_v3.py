@@ -14,7 +14,7 @@ import sqlite3
 import stat
 import sys
 
-import agent_v2 as previous  # reuse audited local tool implementations and Qwen3 parser
+import agent_tools as local_tools  # pure verifier-side tools, never a signer
 from implementations.storage import SQLiteAuditStorage
 from shards_kernel.api import (
     Decision, JurisdictionPolicy, KernelConfig, KernelRequest, ReceiptStatus,
@@ -30,6 +30,7 @@ from phase3_protocol import (
 )
 
 ROOT = Path.home() / '.shards-qwen3-v3'
+LEGACY_PHASE2_ROOT = Path.home() / '.shards-qwen3-v2'
 
 
 def ensure_root(root: Path):
@@ -89,10 +90,10 @@ def launch(root: Path):
     ))
     kernel.boot(KernelConfig(kernel_id=KERNEL_ID, variant='strict', clock=clock))
     adapter = GenericAdapter(kernel, actor=ACTOR)
-    adapter.register_tool('list_notes', lambda: previous.list_notes(root / 'workspace'))
-    adapter.register_tool('read_note', lambda name: previous.safe_read_note(root / 'workspace', name))
-    adapter.register_tool('remember', lambda key, value: previous.remember(db, key, value))
-    adapter.register_tool('recall', lambda key: previous.recall(db, key))
+    adapter.register_tool('list_notes', lambda: local_tools.list_notes(root / 'workspace'))
+    adapter.register_tool('read_note', lambda name: local_tools.safe_read_note(root / 'workspace', name))
+    adapter.register_tool('remember', lambda key, value: local_tools.remember(db, key, value))
+    adapter.register_tool('recall', lambda key: local_tools.recall(db, key))
     return kernel, clock
 
 
@@ -173,8 +174,8 @@ def main():
     elif args.cmd == 'status':
         print('VERIFIER ENROLLED:', (ROOT / 'operator-v3.pub').is_file())
         print('PRIVATE SIGNER IN PHASE 3:', (ROOT / 'issuer-private.key').exists())
-        print('PHASE 2 INTACT:', previous.ROOT.is_dir())
-        print('PHASE 2 SIGNING KEY STILL ON PHONE:', (previous.ROOT / 'operator.key').exists())
+        print('PHASE 2 INTACT:', LEGACY_PHASE2_ROOT.is_dir())
+        print('PHASE 2 SIGNING KEY STILL ON PHONE:', (LEGACY_PHASE2_ROOT / 'operator.key').exists())
         print('HOST SEPARATION: requires an independently protected issuer host')
     elif args.cmd == 'audit':
         k, _ = launch(ROOT)
@@ -184,7 +185,7 @@ def main():
         new_proposal(ROOT, *validate_tool(args.tool, json.loads(args.params_json)))
     elif args.cmd == 'ask':
         # Model is only asked for JSON tool proposals, never given signer access.
-        actions = previous.ask_model(' '.join(args.prompt))
+        actions = local_tools.ask_model(' '.join(args.prompt))
         if not actions:
             print('No permissible actions proposed')
         for tool, params in actions:
