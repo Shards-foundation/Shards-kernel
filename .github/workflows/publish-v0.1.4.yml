@@ -37,11 +37,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Exercise actual dispatch shell and negative-continuation gate
-        run: bash scripts/ci/check_release_dispatch_shell.sh
+      - name: Exercise historical and current dispatch shell gates
+        run: |
+          bash scripts/ci/check_release_dispatch_shell.sh
+          RELEASE_TEST_TAG=v0.1.4 bash scripts/ci/check_release_dispatch_shell.sh
 
-      - name: Exercise annotated and lightweight Git tag recovery
-        run: bash scripts/ci/check_release_tag_shell.sh
+      - name: Exercise historical and current annotated/lightweight Git tag recovery
+        run: |
+          bash scripts/ci/check_release_tag_shell.sh
+          RELEASE_TEST_TAG=v0.1.4 bash scripts/ci/check_release_tag_shell.sh
 
       - name: Verify release version
         run: |
