@@ -112,7 +112,16 @@ def read_json_file(path, max_bytes: int = 16_384):
 def write_new_file(path, data: bytes) -> None:
     import os
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, 'wb') as out:
-        out.write(data)
-        out.flush()
-        os.fsync(out.fileno())
+    try:
+        with os.fdopen(fd, 'wb') as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+    except Exception:
+        # The exclusive file was created by this call; do not strand a partial
+        # permit, proposal, or key if a disk/flush/fsync operation fails.
+        try:
+            os.unlink(path)
+        except OSError:
+            pass  # Preserve the original failure.
+        raise
