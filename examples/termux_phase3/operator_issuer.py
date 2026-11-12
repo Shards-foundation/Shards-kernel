@@ -50,16 +50,19 @@ def init(home: Path):
                                    serialization.NoEncryption())
     pub = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     private_path = home / 'issuer-private.key'
+    private_created = False
     try:
         write_new_file(private_path, secret)
+        private_created = True
         write_new_file(home / 'issuer-public.bin', pub)
     except Exception:
-        # Never leave a stranded private key from a partially initialised
-        # identity. Existing identities were rejected before this block.
-        try:
-            private_path.unlink(missing_ok=True)
-        except OSError:
-            pass  # Keep the initial failure; retry will refuse existing files.
+        # Remove only the key successfully created by THIS attempt; never
+        # unlink a pre-existing path if its exclusive creation was refused.
+        if private_created:
+            try:
+                private_path.unlink(missing_ok=True)
+            except OSError:
+                pass  # Preserve the initial failure; retry refuses partial keys.
         raise
     print('ISSUER INITIALISED')
     print('PUBLIC_KEY_HEX:', pub.hex())
