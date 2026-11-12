@@ -1,15 +1,13 @@
 """Offline tests for the shared proposal protocol (no kernel/network required)."""
-import json
 import os
 from pathlib import Path
 import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
 
 from phase3_protocol import (
-    ACTOR, KERNEL_ID, canonical, make_proposal, proposal_hash,
+    canonical, make_proposal, proposal_hash,
     read_json_file, validate_proposal, validate_tool, write_new_file,
 )
 
