@@ -76,6 +76,10 @@ def init(root: Path) -> None:
     if not root.is_dir() or root.is_symlink():
         raise ValueError("Root must be a real directory")
     os.chmod(root, 0o700)
+    db = root / "audit.sqlite3"
+    # Fail before key generation if SQLite would follow an untrusted path.
+    if db.is_symlink() or (db.exists() and not db.is_file()):
+        raise ValueError("Audit database must be a regular file, never a symlink")
     workspace = root / "workspace"
     workspace.mkdir(mode=0o700, exist_ok=True)
     if workspace.is_symlink() or not workspace.is_dir():
@@ -106,7 +110,6 @@ def init(root: Path) -> None:
     )
     if pub_file.read_bytes() != expected_pub:
         raise ValueError("Operator public key does not match private key")
-    db = root / "audit.sqlite3"
     SQLiteAuditStorage(str(db))
     # Memory has a separate transaction boundary from the kernel audit.
     with sqlite3.connect(db) as con:
@@ -213,8 +216,9 @@ def remember(db: Path, key: str, value: str) -> str:
 def launch(root: Path):
     pub_file = root / "operator.pub"
     db = root / "audit.sqlite3"
-    if not pub_file.is_file() or pub_file.is_symlink() or not db.is_file():
-        raise ValueError("Run init first; public verifier or audit DB missing")
+    if (not pub_file.is_file() or pub_file.is_symlink()
+            or not db.is_file() or db.is_symlink()):
+        raise ValueError("Run init first; public verifier or regular audit DB missing")
     storage = SQLiteAuditStorage(str(db))
     clock = PersistentSystemClock(str(db), KERNEL_ID)
     kernel = StrictKernel(audit_storage=storage)
@@ -288,7 +292,12 @@ def check_audit(kernel) -> bool:
 def ask_model(prompt: str) -> list[tuple[str, dict[str, Any]]]:
     with urllib.request.urlopen(MODEL_HOST + "/v1/models", timeout=10) as response:
         models = json.load(response)
-    model = models["data"][0]["id"]
+    entries = models.get("data") if isinstance(models, dict) else None
+    if not isinstance(entries, list) or not entries or not isinstance(entries[0], dict):
+        raise ValueError("MODEL_LIST_EMPTY_OR_INVALID")
+    model = entries[0].get("id")
+    if not isinstance(model, str) or not model:
+        raise ValueError("MODEL_ID_MISSING")
     instruction = (
         "You are a tool proposal engine, not an operator. /no_think "
         "Respond with JSON only: {\"actions\":[{\"tool\":\"add\",\"params\":{\"a\":2,\"b\":3}}]}. "
@@ -310,7 +319,14 @@ def ask_model(prompt: str) -> list[tuple[str, dict[str, Any]]]:
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=180) as response:
         data = json.load(response)
-    return parse_plan(data["choices"][0]["message"]["content"])
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("MODEL_COMPLETION_EMPTY_OR_INVALID")
+    message = choices[0].get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise ValueError("MODEL_COMPLETION_CONTENT_INVALID")
+    return parse_plan(content)
 
 
 def review_plan(root: Path, plan: list[tuple[str, dict[str, Any]]]) -> None:
