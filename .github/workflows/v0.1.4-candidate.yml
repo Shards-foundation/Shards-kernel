@@ -1,0 +1,165 @@
+name: Build v0.1.4 release candidate (NO PUBLISH)
+
+# Explicitly build and verify a candidate on a dedicated branch.
+# Never creates a tag, release, deployment or PyPI upload.
+on:
+  push:
+    branches:
+      - release/v0.1.4-candidate-20261112
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    if: github.repository == 'Shards-foundation/Shards-kernel'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Verify source release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from shards_kernel._version import __version__
+          if __version__ != "0.1.4":
+              raise SystemExit("Wrong candidate version: " + __version__)
+          print("Candidate source version pinned:", __version__)
+          PY
+          test -z "$(git status --porcelain)"
+
+      - name: Build, scan metadata and checksum both distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'build>=1,<2' 'twine>=6,<8'
+          python -m build
+          test "$(find dist -maxdepth 1 -name 'shards_kernel-0.1.4-*.whl' -type f | wc -l)" -eq 1
+          test -f dist/shards_kernel-0.1.4.tar.gz
+          python scripts/ci/check_wheel_identity.py dist/*.whl
+          python -m twine check dist/*.whl dist/*.tar.gz
+          (cd dist && sha256sum ./*.whl ./*.tar.gz > SHA256SUMS && sha256sum --check --strict SHA256SUMS)
+
+      - name: Verify built PyPI description is the reviewed README
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from email import policy
+          from email.parser import BytesParser
+          from pathlib import Path
+          from zipfile import ZipFile
+          files = list(Path("dist").glob("shards_kernel-0.1.4-*.whl"))
+          if len(files) != 1:
+              raise SystemExit("Wrong wheel count")
+          with ZipFile(files[0]) as wheel:
+              entries = [x for x in wheel.namelist() if x.endswith(".dist-info/METADATA")]
+              if len(entries) != 1:
+                  raise SystemExit("Invalid embedded METADATA")
+              meta = BytesParser(policy=policy.default).parsebytes(wheel.read(entries[0]))
+          if meta.get("Name") != "shards-kernel" or meta.get("Version") != "0.1.4":
+              raise SystemExit("Unexpected wheel identity")
+          desc = meta.get_payload(decode=True)
+          if not isinstance(desc, bytes):
+              raise SystemExit("Missing embedded Markdown")
+          if desc.decode("utf-8").strip() != Path("README.md").read_text(encoding="utf-8").strip():
+              raise SystemExit("Wheel README differs from committed README")
+          print("Reviewed README and wheel metadata are identical")
+          PY
+
+      - name: Install exact wheel in an isolated environment and run SDK smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name 'shards_kernel-0.1.4-*.whl' -print -quit)"
+          test -n "$wheel"
+          wheel="$(realpath "$wheel")"
+          python -m venv "$RUNNER_TEMP/sdk-venv"
+          "$RUNNER_TEMP/sdk-venv/bin/python" -m pip install "$wheel[crypto]"
+          "$RUNNER_TEMP/sdk-venv/bin/python" -m pip check
+          (
+            cd "$RUNNER_TEMP"
+            "$RUNNER_TEMP/sdk-venv/bin/shards-kernel" --version | grep -Fx 'shards-kernel 0.1.4'
+            "$RUNNER_TEMP/sdk-venv/bin/shards-kernel" doctor --json > doctor-library.json
+            "$RUNNER_TEMP/sdk-venv/bin/shards-kernel" demo --json > demo.json
+            set +e
+            "$RUNNER_TEMP/sdk-venv/bin/shards-kernel" doctor --profile service --json > doctor-service.json
+            service_exit="$?"
+            set -e
+            test "$service_exit" -eq 2
+            "$RUNNER_TEMP/sdk-venv/bin/python" - <<'PY'
+          import json
+          from importlib.metadata import version
+          from pathlib import Path
+          from shards_kernel._version import __version__
+          library = json.loads(Path("doctor-library.json").read_text())
+          service = json.loads(Path("doctor-service.json").read_text())
+          demo = json.loads(Path("demo.json").read_text())
+          if __version__ != version("shards-kernel") or __version__ != "0.1.4":
+              raise SystemExit("Installed wheel metadata and import version mismatch")
+          if library["profile"] != "library" or library["assessment"] != "LIBRARY_CHECKS_PASS" or not library["ready"]:
+              raise SystemExit("Default SDK diagnostic failed")
+          if service["profile"] != "service" or service["ready"]:
+              raise SystemExit("Unconfigured service preflight incorrectly reported readiness")
+          if demo.get("passed") is not True or not all(item.get("passed") for item in demo.get("checks", [])):
+              raise SystemExit("Offline signed-permit demonstration failed")
+          print("Installed PyPI candidate PASS: default SDK, service fail-closed, signed permits, replay, audit")
+          PY
+          )
+
+      - name: Write immutable commit-bound candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from hashlib import sha256
+          from pathlib import Path
+          import json, os
+          artifacts = {}
+          for path in sorted(Path("dist").iterdir()):
+              if path.is_file():
+                  artifacts[path.name] = sha256(path.read_bytes()).hexdigest()
+          expected = {"shards_kernel-0.1.4-py3-none-any.whl", "shards_kernel-0.1.4.tar.gz", "SHA256SUMS"}
+          if set(artifacts) != expected:
+              raise SystemExit("Unexpected distribution inventory")
+          manifest = {
+              "schema": "shards-kernel.release-candidate.v1",
+              "version": "0.1.4",
+              "commit_sha": os.environ["GITHUB_SHA"],
+              "utc": datetime.now(timezone.utc).isoformat(),
+              "status": "BUILT_AND_SMOKE_VERIFIED_NOT_PUBLISHED",
+              "tests": ["twine", "wheel-identity", "readme-metadata", "checksums",
+                        "clean-installed-wheel", "sdk-default", "service-fail-closed",
+                        "cryptographic-demo"],
+              "artifact_sha256": artifacts,
+              "publishing_authorized": False,
+              "tags_created": False,
+          }
+          Path("release-candidate.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True)+"\n", encoding="utf-8"
+          )
+          print(json.dumps(manifest, sort_keys=True))
+          PY
+
+      - name: Upload candidate wheel, source distribution and evidence only
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shards-kernel-v0.1.4-candidate
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            release-candidate.json
+          if-no-files-found: error
+          retention-days: 14
