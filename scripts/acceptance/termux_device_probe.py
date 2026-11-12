@@ -14,7 +14,6 @@ import os
 from pathlib import Path
 import platform
 import sqlite3
-import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
@@ -38,14 +37,19 @@ def native_android_evidence() -> dict:
     getprop = Path("/system/bin/getprop")
     require(getprop.is_file() and platform.system() == "Linux",
             "Android system property service not available")
-    def prop(name: str) -> str:
-        result = subprocess.run(
-            [str(getprop), name], capture_output=True, text=True,
-            check=True, timeout=5,
-        )
-        return result.stdout.strip()[:32]
-    sdk = prop("ro.build.version.sdk")
-    release = prop("ro.build.version.release")
+    # Read the OS-owned property file directly; no external commands.
+    build_props = Path("/system/build.prop")
+    require(build_props.is_file() and not build_props.is_symlink()
+            and build_props.stat().st_size <= 1_048_576,
+            "Android system build properties not available")
+    observed = {}
+    for line in build_props.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("ro.build.version.") and "=" in line:
+            key, value = line.split("=", 1)
+            if key in ("ro.build.version.sdk", "ro.build.version.release"):
+                observed[key] = value.strip()[:32]
+    sdk = observed.get("ro.build.version.sdk", "")
+    release = observed.get("ro.build.version.release", "")
     require(sdk.isascii() and sdk.isdecimal() and int(sdk) >= 28,
             "Android SDK version missing or unexpectedly old")
     require(bool(release), "Android release unavailable")
@@ -171,7 +175,7 @@ def main() -> int:
                 stream.write(output + "\n")
         print(output)
         return 0
-    except (OSError, RuntimeError, ValueError, LookupError, subprocess.SubprocessError,
+    except (OSError, RuntimeError, ValueError, LookupError,
             sqlite3.Error) as exc:
         print("TERMUX_DEVICE_ACCEPTANCE: FAIL CLOSED:", type(exc).__name__,
               str(exc)[:260], file=sys.stderr)
