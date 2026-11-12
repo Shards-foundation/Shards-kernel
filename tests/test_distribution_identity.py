@@ -46,7 +46,10 @@ def test_documentation_preserves_canonical_distribution_identity():
     install_command = "python -m pip install shards-kernel"
     for relative_path in guides:
         document = (root / relative_path).read_text(encoding="utf-8")
-        assert install_command in document, relative_path
+        lines = {line.strip() for line in document.splitlines()}
+        assert install_command in lines, relative_path
+        assert "python -m pip install shards-kernel==" not in document, relative_path
+        assert 'python -m pip install "shards-kernel==' not in document, relative_path
         assert "from shards_kernel import StrictKernel" in document, relative_path
         assert "shards-kernel --help" in document, relative_path
         assert "release is pending" not in document.lower(), relative_path
