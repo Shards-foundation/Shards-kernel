@@ -40,7 +40,7 @@ class MissionControlApp(App[None]):
         color: #78e8f0; text-style: bold;
     }
     #matrix {
-        margin: 0 0 1 0; padding: 0 1; height: 5;
+        margin: 0 0 1 0; padding: 0 1; height: 6;
         border: round #25536b; background: #0a1926;
         color: #bdd4e4;
     }
@@ -67,6 +67,21 @@ class MissionControlApp(App[None]):
         self._ticks = 0
         self._pulse_enabled = pulse_enabled
 
+    @staticmethod
+    def _matrix_content(service_status: str = "NOT INSPECTED") -> str:
+        """Four bounded lines remain readable on a 42-column Termux screen."""
+        return (
+            "POLICY   STRICT AVAILABLE\n"
+            "GUARDS   FAIL-CLOSED / AUDIT\n"
+            f"SERVICE  {service_status}\n"
+            "AGENTS   NOT CONNECTED"
+        )
+
+    def _update_matrix(self, service_status: str = "NOT INSPECTED") -> None:
+        """Refresh the mounted panel after a real preflight; never leave stale state."""
+        for matrix in self.query("#matrix"):
+            matrix.update(self._matrix_content(service_status))
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         with Vertical(id="body"):
@@ -74,12 +89,7 @@ class MissionControlApp(App[None]):
                 "SHARDS / KERNEL   v" + __version__ + "\n"
                 "PERMIT > DECISION > AUDIT", id="banner"
             )
-            yield Static(
-                "POLICY: STRICT AVAILABLE   |   ENFORCEMENT: FAIL-CLOSED\n"
-                "AUDIT: REQUIRED (STRICT)  |   SERVICE: NOT INSPECTED\n"
-                "AGENTS: NOT CONNECTED    |   READINESS: NOT VERIFIED",
-                id="matrix",
-            )
+            yield Static(self._matrix_content(), id="matrix")
             with Horizontal(classes="command-row"):
                 yield Button("01 KERNEL", id="info")
                 yield Button("02 PREFLIGHT", id="diagnostics")
@@ -153,6 +163,7 @@ class MissionControlApp(App[None]):
             library = diagnose(profile="library")
             service = diagnose(profile="service")
             self.last_report = {"library": library, "service": service}
+            self._update_matrix(str(service["assessment"]) + " (PREFLIGHT)")
             self._log("[PREFLIGHT] Explicit local environment check")
             for profile, report in (("library", library), ("service", service)):
                 self._log(profile.upper() + ": " + report["assessment"])
@@ -161,6 +172,7 @@ class MissionControlApp(App[None]):
             self._log("Scope: preflight only; deployment readiness NOT VERIFIED.")
         except Exception as exc:
             self.last_report = None
+            self._update_matrix()
             self._log("[PREFLIGHT] ERROR (" + type(exc).__name__ + ")")
 
     def action_demo(self) -> None:
