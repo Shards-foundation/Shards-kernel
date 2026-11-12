@@ -163,7 +163,9 @@ def test_mounted_preflight_failure_restores_status_panel(monkeypatch):
                 return original(profile=profile)
 
             monkeypatch.setattr(doctor, "diagnose", reject_service)
-            await pilot.click("#diagnostics")
+            # Exercise the error-reset path directly; the separate touch test
+            # verifies click dispatch, and repeated clicks can be coalesced.
+            app.action_diagnostics()
             assert app.last_report is None
             assert "SERVICE  NOT INSPECTED" in str(matrix.content)
             assert "sensitive-failure-detail" not in str(matrix.content)
