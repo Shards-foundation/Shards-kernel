@@ -10,18 +10,22 @@ This is an experimental *same-user* Android integration. It is NOT an OS sandbox
 
 ## Install without ChatGPT attachments
 
-Use an immutable, commit-pinned source URL for this pilot. It remains valid after the review branch is deleted. Inspect the file before execution; use a tagged release once this example is published:
+For a review build, set `REVIEW_COMMIT` to the **full current GitHub PR head SHA that has passed CI and independent review**. Do not reuse an old commit after newer fixes. Prefer a tagged release when available:
 
 ```sh
 mkdir -p ~/shards-local-ai && cd ~/shards-local-ai
+# Copy the FULL reviewed commit SHA from GitHub PR #133. Never use a branch URL.
+REVIEW_COMMIT="<paste-full-reviewed-40-character-sha>"
+case "$REVIEW_COMMIT" in *[!0-9a-f]*|"") echo "Invalid commit SHA"; exit 1 ;; esac
+test "${#REVIEW_COMMIT}" -eq 40 || { echo "Commit SHA must be 40 hex characters"; exit 1; }
 curl -fL --retry 3 --connect-timeout 15 -o agent_v2.py \
-  https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/bd44a3e19a8a21bafbb9c62c1d83872cb7c49b25/examples/13_termux_qwen3_governed_agent.py
+  "https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/${REVIEW_COMMIT}/examples/13_termux_qwen3_governed_agent.py"
 python -m py_compile agent_v2.py
 python agent_v2.py self-test
 python agent_v2.py init
 ```
 
-The pinned commit is an immutable review artifact, not a published release or production certification. Review `agent_v2.py` before running it.
+The selected SHA identifies the source reviewed and tested, not a production certification. Compare that SHA with the current PR head and inspect `agent_v2.py` before running it.
 
 ## Try deterministic tools without the LLM
 
