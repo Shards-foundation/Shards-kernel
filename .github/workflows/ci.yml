@@ -69,7 +69,7 @@ jobs:
         id: ruff
         continue-on-error: true
         run: |
-          ruff check . --statistics
+          # Show file/line diagnostics even when errors exist.
           ruff check . --output-format=concise
 
       - name: Record advisory Ruff outcome
