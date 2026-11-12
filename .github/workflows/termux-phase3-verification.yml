@@ -52,8 +52,8 @@ jobs:
             examples/termux_phase3/phase3_protocol.py \
             tests/test_termux_phase3_integration.py \
             tests/test_termux_phase3_tools.py \
-            scripts/ci/smoke_termux_phase3_wheel.py
-          ruff check --select F examples/termux_phase3/test_phase3.py
+            scripts/ci/smoke_termux_phase3_wheel.py \
+            examples/termux_phase3/test_phase3.py
 
       - name: Clean-room published wheel smoke (immutable pinned v0.1.3)
         if: matrix.python-version == '3.12'
