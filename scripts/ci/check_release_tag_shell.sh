@@ -50,8 +50,8 @@ if [ "$release_tag" = "v0.1.3" ]; then
 else
   git tag -a "$release_tag" -m "synthetic annotated release"
 fi
-git push --quiet origin refs/tags/$release_tag
-tag_object="$(git ls-remote --tags --refs origin refs/tags/$release_tag | cut -f1)"
+git push --quiet origin "refs/tags/$release_tag"
+tag_object="$(git ls-remote --tags --refs origin "refs/tags/$release_tag" | cut -f1)"
 test "$tag_object" != "$commit"
 test "$(release_tag_commit)" = "$commit" || {
   echo "Annotated tag failed to peel to the verified commit" >&2
@@ -60,17 +60,17 @@ test "$(release_tag_commit)" = "$commit" || {
 
 # A lightweight tag has no peeled ^{} ref and must use the direct SHA.
 git tag -d "$release_tag" >/dev/null
-git --git-dir="$tmp/origin.git" update-ref -d refs/tags/$release_tag
+git --git-dir="$tmp/origin.git" update-ref -d "refs/tags/$release_tag"
 git tag "$release_tag" "$commit"
-git push --quiet origin refs/tags/$release_tag
-test -z "$(git ls-remote --tags origin 'refs/tags/${release_tag}^{}' | cut -f1)"
+git push --quiet origin "refs/tags/$release_tag"
+test -z "$(git ls-remote --tags origin "refs/tags/${release_tag}^{}" | cut -f1)"
 test "$(release_tag_commit)" = "$commit" || {
   echo "Lightweight tag failed to resolve to the verified commit" >&2
   exit 1
 }
 
 # Missing ref must yield an empty value, never an unrelated object.
-git --git-dir="$tmp/origin.git" update-ref -d refs/tags/$release_tag
+git --git-dir="$tmp/origin.git" update-ref -d "refs/tags/$release_tag"
 test -z "$(release_tag_commit)" || {
   echo "Missing tag unexpectedly resolved to a commit" >&2
   exit 1
