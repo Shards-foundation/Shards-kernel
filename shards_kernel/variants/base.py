@@ -162,6 +162,9 @@ class BaseKernel(Kernel):
         self._pending_decision: Optional[Decision] = None
         self._pending_result: Optional[Any] = None
         self._nonce_registry: NonceRegistry = NonceRegistry()
+        # Protect verifier configuration updates and read snapshots as one unit.
+        # Never hold this lock across signature checking or tool dispatch.
+        self._verifier_config_lock = Lock()
         self._keyring: dict[str, bytes] = {}  # Legacy local HMAC only
         # Explicit set_keyring(..., strict_key_length=) value, reused at
         # verification. None still follows SHARDS_KERNEL_STRICT_HMAC_KEYS.
@@ -238,8 +241,12 @@ class BaseKernel(Kernel):
         candidate = dict(keyring)
         for key_id, key in candidate.items():
             _require_hmac_key(key, key_id, strict_key_length=strict_key_length)
-        self._keyring = candidate
-        self._hmac_strict_key_length = strict_key_length
+        with self._verifier_config_lock:
+            # Re-check within the lock to prevent racing public-only mode.
+            if self._public_verifiers is not None:
+                raise ValueError("Public-only verifier mode cannot enable HMAC signing secrets")
+            self._keyring = candidate
+            self._hmac_strict_key_length = strict_key_length
 
     def set_public_verifiers(self, keys: dict[str, PublicVerificationKey]) -> None:
         """Use operator-pinned public-only Ed25519 verification; disable HMAC.
@@ -256,7 +263,10 @@ class BaseKernel(Kernel):
             for key_id, record in keys.items()
         ):
             raise ValueError("Expected key-id to PublicVerificationKey mapping")
-        self._public_verifiers = dict(keys)
+        with self._verifier_config_lock:
+            if self._keyring:
+                raise ValueError("Refusing public-only mode while HMAC secrets are configured")
+            self._public_verifiers = dict(keys)
 
     @property
     def transition_log(self) -> tuple[tuple[KernelState, KernelState], ...]:
@@ -628,9 +638,15 @@ class BaseKernel(Kernel):
             if "*" in allowed_actions:
                 allowed_actions = frozenset({permit_token.action, "*"})
 
+            # Capture one consistent config generation. Key rotation can
+            # replace both the keyring and its strictness policy concurrently.
+            with self._verifier_config_lock:
+                verifier_keyring = self._keyring
+                verifier_public_keys = self._public_verifiers
+                verifier_strictness = self._hmac_strict_key_length
             permit_verification_result = verify_permit(
                 permit=permit_token,
-                keyring=self._keyring,
+                keyring=verifier_keyring,
                 # In shared mode the PostgreSQL primary is the sole replay
                 # and consumption authority. A process-local cache must
                 # never reject *after* the global reservation has committed.
@@ -646,9 +662,9 @@ class BaseKernel(Kernel):
                 request_params=canonical_params or {},
                 request_evidence=request.evidence,
                 commit_use=False,
-                public_keys=self._public_verifiers,
+                public_keys=verifier_public_keys,
                 expected_audience=self.config.kernel_id,
-                strict_key_length=self._hmac_strict_key_length,
+                strict_key_length=verifier_strictness,
             )
             permit_digest = permit_token.permit_id
             proposal_hash = permit_token.proposal_hash
