@@ -140,3 +140,32 @@ def test_narrow_terminal_touch_buttons_and_preflight_matrix():
             assert ("SERVICE  " + expected) in str(matrix.content)
 
     asyncio.run(scenario())
+
+
+def test_mounted_preflight_failure_restores_status_panel(monkeypatch):
+    """A failed refresh must not display an earlier successful service result."""
+    from shards_kernel.cli import doctor
+    from textual.widgets import Static
+
+    original = doctor.diagnose
+
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=(42, 30)) as pilot:
+            await pilot.click("#diagnostics")
+            assert app.last_report is not None
+            matrix = app.query_one("#matrix", Static)
+            assert "PREFLIGHT" in str(matrix.content)
+
+            def reject_service(profile):
+                if profile == "service":
+                    raise RuntimeError("sensitive-failure-detail")
+                return original(profile=profile)
+
+            monkeypatch.setattr(doctor, "diagnose", reject_service)
+            await pilot.click("#diagnostics")
+            assert app.last_report is None
+            assert "SERVICE  NOT INSPECTED" in str(matrix.content)
+            assert "sensitive-failure-detail" not in str(matrix.content)
+
+    asyncio.run(scenario())
