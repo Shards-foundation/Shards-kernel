@@ -64,7 +64,7 @@ Phase 3 uses a distinct kernel ID and `~/.shards-qwen3-v3/audit-v3.sqlite3`. It 
 
 Phase 2 can still issue local permits for its **own** v2 kernel while the old key exists; it cannot sign valid permits for the v3 audience/key ID. Once v3 live acceptance is complete, plan explicit removal of the *legacy* key from the Android phone, and separately address the fact that local code and data remain writable to a compromised Termux UID. Do not confuse removing that key with an OS sandbox.
 
-The proposal envelope expires after fifteen minutes. On expiry, generate a new proposal; signed permits expire five minutes after approval. Avoid transferring private keys, and verify the public-key fingerprint out of band before enrolment. Human approvals are required per action.
+The proposal must be less than fifteen minutes old when the operator approves it. After approval, the kernel validates the independently signed permit's five-minute expiry and its exact proposal-hash binding; it does not reapply the proposal's pre-approval age gate. Expired permits are always denied. Generate a fresh proposal if approval is delayed beyond fifteen minutes. Avoid transferring private keys, and verify the public-key fingerprint out of band before enrolment. Human approvals are required per action.
 
 ## Test boundary
 
