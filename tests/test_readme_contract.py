@@ -94,7 +94,7 @@ class ReadmeDocumentationContractTests(unittest.TestCase):
         readme = README.read_text(encoding="utf-8")
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         package = importlib.import_module("shards_kernel")
-        self.assertTrue(package.__version__.count(".") >= 2)
+        self.assertGreaterEqual(package.__version__.count("."), 2)
         self.assertIn('name = "shards-kernel"', project)
         self.assertIn('shards-kernel = "shards_kernel.__main__:main"', project)
         # README intentionally installs the current published version, not an
