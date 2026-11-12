@@ -1,7 +1,7 @@
 # Native Android/Termux acceptance (operator-run; not a CI simulation)
 
 This probe refuses ordinary Ubuntu/GitHub-hosted CI or a Linux container.
-It requires native Termux's `PREFIX`, Android's real `/system/bin/getprop`,
+It requires native Termux's `PREFIX`, Android's real `/system/bin/getprop` and read-only `/system/build.prop`,
 a package installed in `site-packages`, SQLite restart integrity and,
 optionally, the live local Qwen endpoint and externally signed harmless permit.
 
