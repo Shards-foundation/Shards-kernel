@@ -171,3 +171,33 @@ def test_mounted_preflight_failure_restores_status_panel(monkeypatch):
             assert "sensitive-failure-detail" not in str(matrix.content)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("size", [(80, 24), (42, 24)])
+def test_dashboard_widgets_fit_standard_80x24_terminal(size):
+    """Verify geometry, not merely widget content, on short terminal screens."""
+    from textual.widgets import Footer
+
+    async def scenario():
+        app = MissionControlApp(pulse_enabled=False)
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            footer = app.query_one(Footer)
+            assert footer.region.height >= 1
+            ids = (
+                "#banner", "#matrix", "#info", "#diagnostics",
+                "#demo", "#reference", "#events", "#footnote",
+            )
+            for widget_id in ids:
+                widget = app.query_one(widget_id)
+                assert widget.region.height > 0, widget_id
+                assert widget.region.y >= 0, widget_id
+                assert widget.region.bottom <= footer.region.y, widget_id
+                assert widget.region.x >= 0, widget_id
+                assert widget.region.right <= size[0], widget_id
+            assert app.query_one("#matrix").region.height >= 6
+            assert app.query_one("#events").region.height >= 3
+            await pilot.click("#info")
+            assert app.last_action == "info"
+
+    asyncio.run(scenario())
