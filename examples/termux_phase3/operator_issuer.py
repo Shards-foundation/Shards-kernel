@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import hashlib
+import json
 import os
 from pathlib import Path
 import stat
@@ -48,8 +49,18 @@ def init(home: Path):
     secret = private.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
                                    serialization.NoEncryption())
     pub = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    write_new_file(home / 'issuer-private.key', secret)
-    write_new_file(home / 'issuer-public.bin', pub)
+    private_path = home / 'issuer-private.key'
+    try:
+        write_new_file(private_path, secret)
+        write_new_file(home / 'issuer-public.bin', pub)
+    except Exception:
+        # Never leave a stranded private key from a partially initialised
+        # identity. Existing identities were rejected before this block.
+        try:
+            private_path.unlink(missing_ok=True)
+        except OSError:
+            pass  # Keep the initial failure; retry will refuse existing files.
+        raise
     print('ISSUER INITIALISED')
     print('PUBLIC_KEY_HEX:', pub.hex())
     print('PUBLIC_KEY_SHA256:', hashlib.sha256(pub).hexdigest())
@@ -66,7 +77,11 @@ def issue(home: Path, proposal_file: Path, permit_file: Path):
         raise ValueError('Public/private issuer key mismatch')
     print('PROPOSAL ID:', proposal['proposal_id'])
     print('ACTION:', proposal['tool'])
-    print('EXACT PARAMETERS:', canonical(proposal['params']).decode('utf-8'))
+    # Display approval data with Unicode/control characters escaped to
+    # prevent bidi and invisible-character deception. Signing remains exact.
+    print('EXACT PARAMETERS (escaped):', json.dumps(
+        proposal['params'], sort_keys=True, separators=(',', ':'), ensure_ascii=True
+    ))
     print('PROPOSAL SHA256:', proposal_hash(proposal))
     print('AUDIENCE:', KERNEL_ID, 'ACTOR:', ACTOR)
     confirmation = input('Type APPROVE to sign ONE execution: ')
