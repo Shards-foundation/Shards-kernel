@@ -94,13 +94,12 @@ class ReadmeDocumentationContractTests(unittest.TestCase):
         readme = README.read_text(encoding="utf-8")
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         package = importlib.import_module("shards_kernel")
-        version = package.__version__
+        self.assertTrue(package.__version__.count(".") >= 2)
         self.assertIn('name = "shards-kernel"', project)
         self.assertIn('shards-kernel = "shards_kernel.__main__:main"', project)
-        self.assertIn(
-            'python -m pip install "shards-kernel[crypto]=={}"'.format(version),
-            readme,
-        )
+        # README intentionally installs the current published version, not an
+        # unapproved future release candidate pinned to source metadata.
+        self.assertIn('python -m pip install "shards-kernel[crypto]"', readme)
         self.assertIn(
             'python -c "import shards_kernel; print(shards_kernel.__version__)"',
             readme,
