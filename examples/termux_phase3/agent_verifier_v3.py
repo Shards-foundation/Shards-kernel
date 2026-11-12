@@ -7,16 +7,12 @@ Existing v2 installation and audit remain untouched.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 import hashlib
 import json
-import os
 from pathlib import Path
 import sqlite3
 import stat
 import sys
-import time
-import uuid
 
 import agent_v2 as previous  # reuse audited local tool implementations and Qwen3 parser
 from implementations.storage import SQLiteAuditStorage
@@ -49,18 +45,25 @@ def enroll(root: Path, hex_public: str, fingerprint: str):
     public = bytes.fromhex(hex_public)
     if len(public) != 32 or hashlib.sha256(public).hexdigest() != fingerprint.lower():
         raise ValueError('Public-key fingerprint mismatch; verify with the operator out of band')
-    if (root / 'operator-v3.pub').exists():
+    key_path = root / 'operator-v3.pub'
+    if key_path.exists() or key_path.is_symlink():
         raise ValueError('Operator public key already enrolled; refusing silent replacement')
-    write_new_file(root / 'operator-v3.pub', public)
     workspace = root / 'workspace'
     if workspace.is_symlink():
         raise ValueError('Workspace cannot be a symlink')
     workspace.mkdir(mode=0o700, exist_ok=True)
+    if not workspace.is_dir():
+        raise ValueError('Workspace must be a real directory')
     db = root / 'audit-v3.sqlite3'
+    if db.is_symlink() or (db.exists() and not db.is_file()):
+        raise ValueError('Audit database must be a regular file')
     SQLiteAuditStorage(str(db))
     with sqlite3.connect(db) as conn:
         conn.execute('CREATE TABLE IF NOT EXISTS agent_memory '
                      '(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_ms INTEGER NOT NULL)')
+    # Publish trust only after everything else has been installed successfully.
+    # A setup failure leaves no enrolled identity and can be retried safely.
+    write_new_file(key_path, public)
     print('ENROLLED: verifier-only Phase 3; no signing key installed')
     print('PUBLIC_KEY_SHA256:', fingerprint.lower())
     print('EXISTING PHASE 2 FILES WERE NOT MODIFIED.')
