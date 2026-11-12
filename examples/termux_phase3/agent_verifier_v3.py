@@ -116,7 +116,9 @@ def check_audit(kernel):
 
 
 def execute(root: Path, proposal_file: Path, permit_file: Path):
-    proposal = validate_proposal(read_json_file(proposal_file))
+    # Freshness is enforced before operator signing. At execution the signed
+    # permit expiry is authoritative; the proposal hash binds exact content.
+    proposal = validate_proposal(read_json_file(proposal_file), check_age=False)
     raw_permit = read_json_file(permit_file)
     if type(raw_permit) is not dict:
         raise ValueError('Invalid permit file')
