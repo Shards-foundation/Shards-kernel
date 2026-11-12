@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import importlib.util
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -19,21 +17,14 @@ pytest.importorskip("cryptography")
 
 from shards_kernel.api import Decision, ReceiptStatus
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-PHASE3 = EXAMPLES / "termux_phase3"
+PHASE3 = Path(__file__).resolve().parents[1] / "examples" / "termux_phase3"
 
 
 @pytest.fixture
 def phase3(monkeypatch):
-    """Use the Phase 2 module by its documented Termux import name."""
+    """Import the standalone verifier-only Phase 3 modules, no local signer."""
     monkeypatch.syspath_prepend(str(PHASE3))
-    agent_spec = importlib.util.spec_from_file_location(
-        "agent_v2", EXAMPLES / "13_termux_qwen3_governed_agent.py"
-    )
-    assert agent_spec is not None and agent_spec.loader is not None
-    agent_v2 = importlib.util.module_from_spec(agent_spec)
-    monkeypatch.setitem(sys.modules, "agent_v2", agent_v2)
-    agent_spec.loader.exec_module(agent_v2)
+    importlib.invalidate_caches()
     protocol = importlib.import_module("phase3_protocol")
     issuer = importlib.import_module("operator_issuer")
     verifier = importlib.import_module("agent_verifier_v3")
