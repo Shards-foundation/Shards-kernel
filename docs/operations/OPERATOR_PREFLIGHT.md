@@ -13,10 +13,14 @@ shards-kernel doctor --profile service
 shards-kernel doctor --profile service --json
 ```
 
-`--profile service` is the default. The process exits **0** only when every
-diagnostic is `PASS`; otherwise it exits **2**. Any `NOT_VERIFIED` release
-gate prevents a misleading `ready: true` result. The `library` profile
-establishes basic runtime prerequisites only, not deployment readiness.
+In the development CLI, `library` is the default profile; the already
+published v0.1.3 wheel still defaults to `service`. For consistent,
+unambiguous results, **always specify the intended profile**. A service
+operator must run `shards-kernel doctor --profile service` explicitly.
+The process exits **0** only when all checks in the selected profile are
+`PASS`; otherwise it exits **2**. The `library` profile establishes
+basic local SDK prerequisites, **never** readiness of the operator service.
+A `NOT_VERIFIED` service gate must not be relabelled as a library failure.
 
 ## Diagnostic contract
 
