@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -73,6 +74,35 @@ class ProtocolTests(unittest.TestCase):
         p = make_proposal('echo', {'text': 'hello'}, now=n)
         p['authorization'] = 'allow'
         with self.assertRaises(ValueError): validate_proposal(p, now=n)
+
+
+    def test_execution_validation_uses_signed_permit_lifetime_not_proposal_age(self):
+        # Operator issuance still rejects stale proposals. After approval the
+        # signed permit's 5-minute expiry is authoritative at execution.
+        n = time.time_ns() // 1_000_000
+        proposal = make_proposal('echo', {'text': 'hello'}, now=n - 16 * 60_000)
+        with self.assertRaises(ValueError):
+            validate_proposal(proposal, now=n)
+        self.assertEqual(validate_proposal(proposal, now=n, check_age=False), proposal)
+
+    def test_fifo_json_input_is_rejected_without_hanging(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'proposal.json'
+            os.mkfifo(p)
+            outcome = []
+
+            def read():
+                try:
+                    read_json_file(p)
+                except Exception as exc:
+                    outcome.append(exc)
+
+            worker = threading.Thread(target=read, daemon=True)
+            worker.start()
+            worker.join(timeout=3)
+            self.assertFalse(worker.is_alive(), 'read_json_file blocked on FIFO')
+            self.assertEqual(len(outcome), 1)
+            self.assertIsInstance(outcome[0], ValueError)
 
     def test_file_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:
