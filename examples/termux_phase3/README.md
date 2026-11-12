@@ -2,12 +2,12 @@
 
 **Status:** review-only offline signer + phone verifier. Not a deployed issuer, production sandbox, remote gateway or authenticated web service.
 
-This is a deliberately limited design: a separate, human-operated device signs exact Ed25519 permits and copies only the resulting public key and signed permit to the phone. The phone never needs the private v3 issuer key. It uses `StrictKernel` 0.1.3 and the existing Phase 2 `agent_v2.py` **only for tool implementations and model JSON proposals**, not for permit issuance.
+This is a deliberately limited design: a separately protected operator device signs exact Ed25519 permits and transfers only the public key and signed permit to the phone. The phone never needs a private issuer key. It uses `StrictKernel` 0.1.3 and the standalone `agent_tools.py` module for restricted local tools and Qwen3 JSON proposals. **Phase 2 and its local signing key are neither loaded nor required.**
 
 ## Key trust boundaries
 
 - Operator host: `operator_issuer.py` + `phase3_protocol.py`; private key stays here. Install `shards-kernel[crypto]==0.1.3`.
-- Android Termux: `agent_verifier_v3.py`, `phase3_protocol.py` and its already-working `agent_v2.py`. Install `shards-kernel[crypto]==0.1.3`. Use `127.0.0.1:8080` llama.cpp for `ask` only.
+- Android Termux: `agent_verifier_v3.py`, `phase3_protocol.py` and `agent_tools.py` (no Phase 2 dependency). Install `shards-kernel[crypto]==0.1.3`. Use `127.0.0.1:8080` llama.cpp for proposals only. The parser refuses proxying and HTTP redirects.
 - Only `echo`, `add`, `list_notes`, `read_note`, `remember`, and `recall` can execute. Each permit covers one action and exact JSON parameters. No shell, repository writes, external network actions or autonomous authority.
 - No HTTP signing endpoint. The issuer requires a local terminal operator typing `APPROVE` for every proposal. Never give its private key to Termux or an AI agent.
 - **No real isolation until the issuer actually runs under a different host/OS security principal.** Same-UID simulated testing is not isolation. Kernel is not an OS sandbox.
@@ -26,7 +26,7 @@ Record `PUBLIC_KEY_HEX` and `PUBLIC_KEY_SHA256` through an independently authent
 
 ## B. Termux — non-destructive enrolment
 
-Do not remove or rename your working Phase 2 installation. Place the two Android-side files next to `~/shards-local-ai/agent_v2.py` and run:
+Do not remove or rename any Phase 2 installation. Place the **three Android-side files** (`agent_verifier_v3.py`, `phase3_protocol.py`, `agent_tools.py`) together in `~/shards-local-ai/` and run:
 
 ```bash
 cd ~/shards-local-ai
@@ -60,7 +60,7 @@ This produces unsigned proposals only; it **does not issue or execute permits au
 
 ## Continuity and cutover
 
-Phase 3 uses a distinct kernel ID and `~/.shards-qwen3-v3/audit-v3.sqlite3`. It does **not** touch your old `~/.shards-qwen3-v2/audit.sqlite3`, old `operator.key`, or old memory. V2 history stays independently verifiable with `python agent_v2.py audit`. New V3 memory starts empty; deliberate import could be added after validation. Never run an unreviewed delete or migrate action on the old DB.
+Phase 3 uses a distinct kernel ID and `~/.shards-qwen3-v3/audit-v3.sqlite3`. It does **not** touch your old `~/.shards-qwen3-v2/audit.sqlite3`, old `operator.key`, or old memory. If you previously installed V2, its history stays independently verifiable using its own `python agent_v2.py audit` command; Phase 3 does not import the V2 signer. New V3 memory starts empty; deliberate import could be added after validation. Never run an unreviewed delete or migrate action on the old DB.
 
 Phase 2 can still issue local permits for its **own** v2 kernel while the old key exists; it cannot sign valid permits for the v3 audience/key ID. Once v3 live acceptance is complete, plan explicit removal of the *legacy* key from the Android phone, and separately address the fact that local code and data remain writable to a compromised Termux UID. Do not confuse removing that key with an OS sandbox.
 
