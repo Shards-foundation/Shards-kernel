@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from importlib import metadata
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -116,12 +117,17 @@ def externally_signed_execution(args) -> dict:
     root = args.state_dir.expanduser()
     require(not (root / "issuer-private.key").exists(),
             "Private issuer key discovered on phone; stop and investigate")
+    # Always validate independently pinned fingerprint, including on already
+    # enrolled phones. A matching enrolled public key alone is not sufficient.
+    public = bytes.fromhex(args.public_key_hex)
+    require(len(public) == 32 and sha256(public).hexdigest() ==
+            args.fingerprint.lower(), "Public key does not match out-of-band fingerprint")
     enrolled = root / "operator-v3.pub"
-    if enrolled.exists():
-        require(not enrolled.is_symlink() and enrolled.read_bytes().hex() ==
-                args.public_key_hex, "Enrolled public key differs from out-of-band input")
+    if enrolled.exists() or enrolled.is_symlink():
+        require(not enrolled.is_symlink() and enrolled.read_bytes() == public,
+                "Enrolled public key differs from out-of-band input")
     else:
-        verifier.enroll(root, args.public_key_hex, args.fingerprint)
+        verifier.enroll(root, public.hex(), args.fingerprint.lower())
     result = verifier.execute(root, args.proposal, args.permit)
     require(result.decision is Decision.ALLOW and
             result.status is ReceiptStatus.ACCEPTED and result.tool_result == 42,
