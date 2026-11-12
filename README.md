@@ -22,8 +22,38 @@ python -m pip install "shards-kernel[crypto]==0.1.3"
 python -c "import shards_kernel; print(shards_kernel.__version__)"
 shards-kernel --version
 shards-kernel info --variant strict
+shards-kernel doctor --profile library --json
 shards-kernel demo --json
 ```
+
+### What the released v0.1.3 package can do today
+
+**v0.1.3 is already published and installable.** The local SDK can evaluate
+kernel requests, check exact signed permits, deny unauthorised or replayed
+operations, and produce verifiable audit evidence. You do **not** need a
+hosted MCP gateway, an Android device, a multi-host service, or an OS
+sandbox to use those supported local features.
+
+Use `shards-kernel doctor --profile library --json` to check the local
+SDK, then `shards-kernel demo --json` to exercise the offline
+cryptographic workflow. A passing demo has `passed: true` even though
+its `production_ready: false` field correctly describes the **synthetic
+single-process demo environment**; it is **not** a blanket verdict on
+the entire installed Python distribution.
+
+The standalone SDK controls only the requests and tools routed **through**
+its policy/permit boundary. It does **not** isolate arbitrary Python code,
+automatically govern tools which bypass it, or provide an OS-level sandbox.
+For a separately configured operator service, run
+`shards-kernel doctor --profile service --json`. Service-level
+`NOT_VERIFIED` results describe that specific deployment's prerequisites,
+not local library installability.
+
+**Compatibility note:** the already published v0.1.3 CLI defaults an
+*unqualified* `shards-kernel doctor` invocation to the service profile.
+Always use the explicit `--profile library` flag with v0.1.3. The
+development branch changes the CLI default to library in a future
+distribution update; this README edit does not change the published wheel.
 
 ### Optional mission-control terminal UI
 
@@ -368,24 +398,37 @@ an explicit development-only `--allow-unsigned-local` flag. See the
 [operator service guide](docs/operations/LOOPBACK_OPERATOR_SERVICE.md)
 for config fields, trust boundaries and unverified production requirements.
 
-## Operator readiness checks
+## SDK and optional service diagnostics
 
-The `shards-kernel doctor` CLI is a **preflight inspection**, not a
-production deployment certificate. By default it checks service prerequisites,
-reports every unverified runtime guarantee, and exits **2** when operational
-readiness is not demonstrated:
+The `shards-kernel doctor` CLI performs **preflight checks**, not a
+certification of a deployed production service. To inspect the published
+v0.1.3 SDK independently of optional service infrastructure, specify the
+library profile:
 
 ```bash
-shards-kernel doctor
-shards-kernel doctor --json
 shards-kernel doctor --profile library --json
 ```
 
-The `library` profile checks local package prerequisites and may pass with
-exit code **0**; it does **not** imply the control plane is safely deployed.
-The `service` profile intentionally reports `NOT_VERIFIED` for issuer trust,
-durable audit/replay recovery and remote agent identity until independent
-runtime validation exists. API credentials are never printed.
+A passing local `library` preflight exits **0**, reports
+`LIBRARY_CHECKS_PASS` and checks only the supported Python runtime and
+clock primitive. It does **not** certify a live agent, network endpoint,
+provider, OS sandbox or cryptographic deployment.
+
+To assess an actual operator service and optional MCP/issuer components:
+
+```bash
+shards-kernel doctor --profile service --json
+```
+
+The `service` profile exits **2** when requirements are blocked or cannot
+be verified. It intentionally reports `NOT_VERIFIED` for issuer trust,
+durable replay recovery and remote client security until the **specific
+service deployment** supplies those guarantees. API credentials are never
+printed. A service result is not an SDK release status.
+
+The current development CLI chooses `library` when no profile is specified;
+**the already released v0.1.3 wheel still defaults to `service`**.
+For scripts across versions, always specify the profile explicitly.
 
 See [operator preflight guide](docs/operations/OPERATOR_PREFLIGHT.md).
 
