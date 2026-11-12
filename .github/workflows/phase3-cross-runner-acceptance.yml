@@ -27,6 +27,27 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - name: Compile acceptance programs and reject Android impersonation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/acceptance/phase3_issuer_host.py \
+            scripts/acceptance/phase3_verifier_host.py \
+            scripts/acceptance/termux_device_probe.py
+          set +e
+          response="$(python scripts/acceptance/termux_device_probe.py 2>&1)"
+          status="$?"
+          set -e
+          test "$status" -eq 2
+          printf '%s\n' "$response" | grep -Fq 'No native Termux PREFIX found'
+          # Spoofing an environment variable must not satisfy native Android.
+          set +e
+          response="$(PREFIX=/data/data/com.termux/files/usr python scripts/acceptance/termux_device_probe.py 2>&1)"
+          status="$?"
+          set -e
+          test "$status" -eq 2
+          printf '%s\n' "$response" | grep -Fq 'Android system property service not available'
       - name: Install exact published package outside checkout
         shell: bash
         run: |
