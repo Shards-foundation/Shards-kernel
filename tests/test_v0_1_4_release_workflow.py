@@ -5,6 +5,10 @@ GitHub Release assets as authority instead of the verified Actions artifact.
 """
 
 from pathlib import Path
+import os
+import subprocess
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -53,3 +57,20 @@ def test_publisher_verifies_after_owner_approved_publication():
     assert "Published PyPI artifact hash differs from verified GitHub release" in verification
     assert "shards-kernel[crypto]==0.1.4" in verification
     assert "    environment:\n      name: pypi" in publisher
+
+
+@pytest.mark.parametrize("version", ("v0.1.3", "v0.1.4"))
+@pytest.mark.parametrize("probe", ("check_release_dispatch_shell.sh", "check_release_tag_shell.sh"))
+def test_actual_release_shell_probes(version: str, probe: str):
+    env = dict(os.environ, RELEASE_TEST_TAG=version)
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "ci" / probe)],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, f"{version} {probe}: {result.stdout}\n{result.stderr}"
