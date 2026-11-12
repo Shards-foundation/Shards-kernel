@@ -121,13 +121,22 @@ def test_theme_picker_can_open_directly():
     asyncio.run(scenario())
 
 
-def test_tapping_native_footer_dispatches_action():
-    """Regression: terminal footer keys must be clickable, not static labels."""
+def test_narrow_terminal_touch_buttons_and_preflight_matrix():
+    """Touch targets must work at 42 columns; the matrix must show actual preflight."""
+    from textual.widgets import Static
+
     async def scenario():
         app = MissionControlApp(pulse_enabled=False)
         async with app.run_test(size=(42, 30)) as pilot:
-            from textual.widgets import Footer
-            assert app.last_action == "welcome"
-            assert await pilot.click(Footer, offset=(3, 0))
+            matrix = app.query_one("#matrix", Static)
+            assert all(len(line) <= 36 for line in app._matrix_content().splitlines())
+            assert "SERVICE  NOT INSPECTED" in str(matrix.renderable)
+            await pilot.click("#info")
             assert app.last_action == "info"
+            await pilot.click("#diagnostics")
+            assert app.last_action == "diagnostics"
+            assert app.last_report is not None
+            expected = str(app.last_report["service"]["assessment"]) + " (PREFLIGHT)"
+            assert ("SERVICE  " + expected) in str(matrix.renderable)
+
     asyncio.run(scenario())
