@@ -35,12 +35,12 @@ class MissionControlApp(App[None]):
     Footer { background: #0b2333; }
     #body { padding: 0 1; height: 1fr; }
     #banner {
-        margin: 1 0 0 0; height: 4; padding: 0 1;
+        margin: 0; height: 4; padding: 0 1;
         border: round #3198ab; background: #0c1d2d;
         color: #78e8f0; text-style: bold;
     }
     #matrix {
-        margin: 0 0 1 0; padding: 0 1; height: 6;
+        margin: 0; padding: 0 1; height: 6;
         border: round #25536b; background: #0a1926;
         color: #bdd4e4;
     }
@@ -53,7 +53,7 @@ class MissionControlApp(App[None]):
     Button:hover { background: #24617a; }
     Button:focus { background: #215e74; border: round #7af3ff; }
     #events {
-        height: 1fr; min-height: 5; margin: 1 0 0 0;
+        height: 1fr; min-height: 3; margin: 0;
         background: #071520; border: round #28566d;
         padding: 0 1;
     }
