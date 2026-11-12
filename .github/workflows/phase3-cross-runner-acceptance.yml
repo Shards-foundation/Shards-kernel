@@ -12,6 +12,7 @@ on:
       - '.github/workflows/phase3-cross-runner-acceptance.yml'
       - 'scripts/acceptance/phase3_*'
       - 'scripts/acceptance/termux_device_probe.py'
+      - 'tests/test_termux_device_probe_contract.py'
       - 'examples/termux_phase3/**'
 
 permissions:
@@ -67,6 +68,12 @@ jobs:
           cd "$RUNNER_TEMP/issuer-run"
           "$RUNNER_TEMP/venv/bin/python" -O phase3_issuer_host.py \
             "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/private-issuer"
+      - name: Verify native-probe fingerprint trust-anchor regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/venv/bin/python" -m unittest discover \
+            -s tests -p test_termux_device_probe_contract.py -v
       - name: Publish public fingerprint
         id: public
         shell: bash
