@@ -13,7 +13,7 @@ on:
         default: "v0.1.0"
         type: string
       verified_run_id:
-        description: "Source workflow run ID; verified independently by the publisher for v0.1.3"
+        description: "Source verification run ID for v0.1.3 and v0.1.4"
         required: false
         type: string
   release:
@@ -67,28 +67,43 @@ jobs:
           }
           # Inputs are *only* selectors, never authority. Independently verify
           # the GitHub API run record, its protected-main SHA, workflow path,
-          # and both completed gate jobs before accepting v0.1.3 artifacts.
-          if [ "$RELEASE_TAG" = "v0.1.3" ]; then
+          # and both completed gate jobs before accepting v0.1.3/v0.1.4 artifacts.
+          if [ "$RELEASE_TAG" = "v0.1.3" ] || [ "$RELEASE_TAG" = "v0.1.4" ]; then
             [[ "$GITHUB_EVENT_NAME" = "workflow_dispatch" && "$VERIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
-              echo "v0.1.3 requires a trusted verification run selector" >&2
+              echo "$RELEASE_TAG requires a trusted verification run selector" >&2
               exit 1
             }
             gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN_ID" \
               > "$RUNNER_TEMP/shards-verified-run.json"
-            jq -e --arg sha "$(git rev-parse HEAD)" '
+            jq -e --arg sha "$(git rev-parse HEAD)" --arg version "$RELEASE_TAG" '
               .event == "push"
               and .head_branch == "main"
               and .head_sha == $sha
-              and .path == ".github/workflows/publish-v0.1.3.yml"
+              and (
+                ($version == "v0.1.3" and .path == ".github/workflows/publish-v0.1.3.yml")
+                or ($version == "v0.1.4" and .path == ".github/workflows/publish-v0.1.4.yml")
+              )
             ' "$RUNNER_TEMP/shards-verified-run.json" >/dev/null || {
               echo "Untrusted workflow run, main branch, or source revision" >&2
               exit 1
             }
             gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN_ID/jobs?per_page=100&filter=latest" \
               > "$RUNNER_TEMP/shards-verified-jobs.json"
-            jq -e '
-              ([.jobs[] | select(.name == "Verify v0.1.3 source and clean installed wheel" and .conclusion == "success")] | length) == 1
-              and ([.jobs[] | select(.name == "Publish immutable v0.1.3 GitHub assets" and .conclusion == "success")] | length) == 1
+            jq -e --arg version "$RELEASE_TAG" '
+              ([.jobs[] | select(
+                .conclusion == "success"
+                and (
+                  ($version == "v0.1.3" and .name == "Verify v0.1.3 source and clean installed wheel")
+                  or ($version == "v0.1.4" and .name == "Verify v0.1.4 source and clean installed wheel")
+                )
+              )] | length) == 1
+              and ([.jobs[] | select(
+                .conclusion == "success"
+                and (
+                  ($version == "v0.1.3" and .name == "Publish immutable v0.1.3 GitHub assets")
+                  or ($version == "v0.1.4" and .name == "Publish immutable v0.1.4 GitHub assets")
+                )
+              )] | length) == 1
             ' "$RUNNER_TEMP/shards-verified-jobs.json" >/dev/null || {
               echo "Verified workflow gate jobs must both have succeeded" >&2
               exit 1
@@ -120,17 +135,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [ "$RELEASE_TAG" = "v0.1.3" ]; then
+          if [ "$RELEASE_TAG" = "v0.1.3" ] || [ "$RELEASE_TAG" = "v0.1.4" ]; then
             # The source of truth is the immutable Actions artifact produced by
             # the successful protected-main verification job, NOT checksum
             # values supplied by the caller or mutable GitHub Release assets.
             gh run download "$VERIFIED_RUN_ID" \
               --repo "$GITHUB_REPOSITORY" \
-              --name shards-kernel-v0.1.3-verified \
+              --name "shards-kernel-$RELEASE_TAG-verified" \
               --dir dist
             test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
-            test -f dist/shards_kernel-0.1.3-py3-none-any.whl
-            test -f dist/shards_kernel-0.1.3.tar.gz
+            version="${RELEASE_TAG#v}"
+            test -f "dist/shards_kernel-$version-py3-none-any.whl"
+            test -f "dist/shards_kernel-$version.tar.gz"
             test -f dist/SHA256SUMS
             (cd dist && sha256sum --check --strict SHA256SUMS)
 
@@ -244,3 +260,91 @@ jobs:
 
       - name: Publish to PyPI (trusted publishing, no API token)
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1 (pinned 2026-11-02)
+
+  verify-v0-1-4-pypi:
+    name: Verify published PyPI v0.1.4 artifacts and installed runtime
+    needs: publish
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Download exact verified build for independent PyPI comparison
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-pypi-distributions
+          path: dist
+
+      - name: Verify published PyPI artifacts and fresh installation
+        shell: bash
+        timeout-minutes: 27
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          version = "0.1.4"
+          expected = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in Path("dist").iterdir()
+              if path.name.startswith(f"shards_kernel-{version}")
+          }
+          wheel_name = f"shards_kernel-{version}-py3-none-any.whl"
+          source_name = f"shards_kernel-{version}.tar.gz"
+          if set(expected) != {wheel_name, source_name}:
+              raise SystemExit("Incorrect verified local artifact set")
+          url = f"https://pypi.org/pypi/shards-kernel/{version}/json"
+          for attempt in range(48):
+              try:
+                  with urllib.request.urlopen(
+                      urllib.request.Request(url, headers={"Cache-Control": "no-cache"}),
+                      timeout=15,
+                  ) as response:
+                      published = json.load(response)
+              except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                  print(f"PyPI publication not visible yet: {type(exc).__name__}", flush=True)
+              else:
+                  metadata = published.get("info") or {}
+                  files = {
+                      item.get("filename"): item.get("digests", {}).get("sha256")
+                      for item in published.get("urls") or []
+                  }
+                  if metadata.get("name", "").lower().replace("_", "-") != "shards-kernel":
+                      raise SystemExit("PyPI project identity mismatch")
+                  if metadata.get("version") != version:
+                      raise SystemExit("PyPI package version mismatch")
+                  unexpected = set(files) - set(expected)
+                  if unexpected:
+                      raise SystemExit(f"Unexpected PyPI distributions: {sorted(unexpected)}")
+                  if set(expected).issubset(files):
+                      if any(files[name] != digest for name, digest in expected.items()):
+                          raise SystemExit("Published PyPI artifact hash differs from verified GitHub release")
+                      print("Verified published PyPI wheel and source hashes", flush=True)
+                      break
+              if attempt == 47:
+                  raise SystemExit("PyPI v0.1.4 publication did not become verifiable in time")
+              time.sleep(10)
+          PY
+          verified_venv="$RUNNER_TEMP/shards-kernel-published-pypi-venv"
+          python -m venv "$verified_venv"
+          "$verified_venv/bin/python" -m pip install --no-cache-dir \
+            --index-url https://pypi.org/simple \
+            "shards-kernel[crypto]==0.1.4"
+          "$verified_venv/bin/python" -m pip check
+          (
+            cd "$RUNNER_TEMP"
+            "$verified_venv/bin/python" -c 'import shards_kernel; assert shards_kernel.__version__ == "0.1.4"'
+            "$verified_venv/bin/shards-kernel" --version
+            "$verified_venv/bin/shards-kernel" demo --json
+          )
