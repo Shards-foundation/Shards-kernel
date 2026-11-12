@@ -12,7 +12,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import uuid
+import warnings
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -307,7 +309,75 @@ def deterministic_nonce(proposal_hash: str, sequence: int) -> str:
 # ============================================================================
 
 
-def sign_permit(permit: PermitToken, key: bytes, key_id: str) -> PermitToken:
+#: Minimum legacy HMAC key length. Shorter non-empty keys are deprecated and
+#: will be rejected in the next major version; empty keys are always rejected.
+MIN_HMAC_KEY_BYTES = 32
+
+#: Opt-in environment switch that rejects HMAC keys shorter than
+#: ``MIN_HMAC_KEY_BYTES`` today (``1``/``true``/``yes``/``on``).
+STRICT_HMAC_KEYS_ENV = "SHARDS_KERNEL_STRICT_HMAC_KEYS"
+
+
+def _strict_hmac_keys(strict_key_length: bool | None) -> bool:
+    """Resolve strict mode: an explicit argument wins over the environment."""
+    if strict_key_length is not None:
+        return bool(strict_key_length)
+    value = os.environ.get(STRICT_HMAC_KEYS_ENV, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _hmac_key_problem(
+    key: Any, *, strict_key_length: bool | None = None, stacklevel: int = 3
+) -> str | None:
+    """Return a DENY reason for an unusable legacy HMAC key, else ``None``.
+
+    * An empty key is never legitimate and is always refused (fail closed).
+    * A 1-31 byte key emits ``DeprecationWarning`` and is refused only in
+      strict mode (argument or ``SHARDS_KERNEL_STRICT_HMAC_KEYS``).
+    * Non-bytes keys are left to ``hmac`` so existing error behaviour holds.
+    """
+    if not isinstance(key, (bytes, bytearray)):
+        return None
+    length = len(key)
+    if length == 0:
+        return "HMAC_KEY_EMPTY"
+    if length < MIN_HMAC_KEY_BYTES:
+        if _strict_hmac_keys(strict_key_length):
+            return "HMAC_KEY_TOO_SHORT"
+        warnings.warn(
+            f"HMAC permit keys shorter than {MIN_HMAC_KEY_BYTES} bytes are "
+            "deprecated and will be rejected in the next major version of "
+            f"shards-kernel (got {length} bytes). Set {STRICT_HMAC_KEYS_ENV}=1 "
+            "to reject them now.",
+            DeprecationWarning,
+            stacklevel=stacklevel,
+        )
+    return None
+
+
+def _require_hmac_key(
+    key: Any, key_id: str, *, strict_key_length: bool | None = None, stacklevel: int = 4
+) -> None:
+    """Raise ``ValueError`` when a legacy HMAC key must be refused."""
+    problem = _hmac_key_problem(
+        key, strict_key_length=strict_key_length, stacklevel=stacklevel
+    )
+    if problem == "HMAC_KEY_EMPTY":
+        raise ValueError(f"HMAC key for key_id '{key_id}' must not be empty")
+    if problem == "HMAC_KEY_TOO_SHORT":
+        raise ValueError(
+            f"HMAC key for key_id '{key_id}' must be at least "
+            f"{MIN_HMAC_KEY_BYTES} bytes in strict mode"
+        )
+
+
+def sign_permit(
+    permit: PermitToken,
+    key: bytes,
+    key_id: str,
+    *,
+    strict_key_length: bool | None = None,
+) -> PermitToken:
     """
     Sign a permit token with HMAC-SHA256.
 
@@ -318,12 +388,18 @@ def sign_permit(permit: PermitToken, key: bytes, key_id: str) -> PermitToken:
 
     Args:
         permit: Permit with permit_id computed but signature empty
-        key: HMAC secret key (32 bytes recommended)
+        key: HMAC secret key (at least 32 bytes; empty keys are rejected)
         key_id: Key identifier for rotation support
+        strict_key_length: Reject keys shorter than 32 bytes. ``None``
+            (default) follows ``SHARDS_KERNEL_STRICT_HMAC_KEYS``.
 
     Returns:
         New permit with signature and key_id fields populated
+
+    Raises:
+        ValueError: If the key is empty, or shorter than 32 bytes in strict mode
     """
+    _require_hmac_key(key, key_id, strict_key_length=strict_key_length)
     canonical = canonical_permit_bytes(
         permit, exclude_signature=True, exclude_permit_id=False
     )
@@ -379,6 +455,7 @@ def verify_signature(
     *,
     public_keys: dict[str, PublicVerificationKey] | None = None,
     expected_audience: str | None = None,
+    strict_key_length: bool | None = None,
 ) -> PermitVerificationResult:
     """
     Verify permit signature against keyring.
@@ -391,6 +468,9 @@ def verify_signature(
     Args:
         permit: Permit to verify
         keyring: Map of key_id -> HMAC secret key
+        strict_key_length: Deny keys shorter than 32 bytes. ``None``
+            (default) follows ``SHARDS_KERNEL_STRICT_HMAC_KEYS``. Empty keys
+            are always denied with ``HMAC_KEY_EMPTY``.
 
     Returns:
         PermitVerificationResult with ALLOW/DENY and reason codes
@@ -410,6 +490,12 @@ def verify_signature(
         )
 
     key = keyring[permit.key_id]
+
+    # Fail closed on an unusable key before any signature comparison: an empty
+    # key would let anyone who knows that fact forge a valid v1 signature.
+    key_problem = _hmac_key_problem(key, strict_key_length=strict_key_length)
+    if key_problem is not None:
+        return PermitVerificationResult(status=Decision.DENY, reasons=[key_problem])
 
     # Check 2: Signature valid
     canonical = canonical_permit_bytes(
@@ -549,6 +635,7 @@ def verify_permit(
     *,
     public_keys: dict[str, PublicVerificationKey] | None = None,
     expected_audience: str | None = None,
+    strict_key_length: bool | None = None,
 ) -> PermitVerificationResult:
     """
     Comprehensive fail-closed permit verification.
@@ -580,6 +667,10 @@ def verify_permit(
         request_evidence: Evidence string on the request, if any
         commit_use: When False, replay state is checked but not recorded.
             The kernel records a use only after the request is authorised.
+        strict_key_length: Deny legacy HMAC keys shorter than 32 bytes.
+            ``None`` (default) follows ``SHARDS_KERNEL_STRICT_HMAC_KEYS``.
+            The kernel passes the value stored by ``set_keyring``. Empty
+            keys are always denied.
 
     Returns:
         PermitVerificationResult with ALLOW/DENY and reason codes
@@ -588,7 +679,11 @@ def verify_permit(
 
     # Checks 1-3: Cryptographic verification
     sig_result = verify_signature(
-        permit, keyring, public_keys=public_keys, expected_audience=expected_audience
+        permit,
+        keyring,
+        public_keys=public_keys,
+        expected_audience=expected_audience,
+        strict_key_length=strict_key_length,
     )
     if not sig_result.is_allowed():
         return sig_result
@@ -857,7 +952,8 @@ class PermitBuilder:
             Fully constructed and signed PermitToken
 
         Raises:
-            ValueError: If required fields missing or key_id not in keyring
+            ValueError: If required fields missing, key_id not in keyring, or
+                the HMAC key is empty (or too short in strict mode)
         """
         # Generate nonce if not set
         if not self._nonce:

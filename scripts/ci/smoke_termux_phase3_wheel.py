@@ -21,10 +21,17 @@ import operator_issuer as issuer
 import agent_verifier_v3 as verifier
 
 
+def require(condition: bool, message: str) -> None:
+    """Enforce acceptance invariants even under python -O."""
+    if not condition:
+        raise RuntimeError(message)
+
+
 def main() -> int:
     installed = Path(shards_kernel.__file__).resolve()
-    assert metadata.version("shards-kernel") == "0.1.3"
-    assert "site-packages" in installed.parts or "dist-packages" in installed.parts
+    require(metadata.version("shards-kernel") == "0.1.3", "Published wheel version mismatch")
+    require("site-packages" in installed.parts or "dist-packages" in installed.parts,
+            "Kernel imported from source checkout instead of installed wheel")
     with TemporaryDirectory(prefix="shards-phase3-wheel-") as temp:
         operator_home = Path(temp) / "operator"
         agent_home = Path(temp) / "agent"
@@ -40,12 +47,12 @@ def main() -> int:
             issuer.issue(operator_home, proposal_file, signed_file)
 
         result = verifier.execute(agent_home, proposal_file, signed_file)
-        assert result.decision is Decision.ALLOW, result
-        assert result.status is ReceiptStatus.ACCEPTED, result
-        assert result.tool_result == 42, result
+        require(result.decision is Decision.ALLOW, f"Expected ALLOW: {result!r}")
+        require(result.status is ReceiptStatus.ACCEPTED, f"Expected ACCEPTED: {result!r}")
+        require(result.tool_result == 42, f"Expected 42: {result!r}")
         repeated = verifier.execute(agent_home, proposal_file, signed_file)
-        assert repeated.decision is Decision.DENY, repeated
-        assert repeated.status is ReceiptStatus.REJECTED, repeated
+        require(repeated.decision is Decision.DENY, f"Expected replay DENY: {repeated!r}")
+        require(repeated.status is ReceiptStatus.REJECTED, f"Expected replay REJECTED: {repeated!r}")
     print("PHASE3_PUBLISHED_WHEEL_SMOKE: PASS (issuer/verifier locally simulated)")
     return 0
 

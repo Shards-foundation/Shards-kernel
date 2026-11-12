@@ -25,6 +25,40 @@ shards-kernel info --variant strict
 shards-kernel demo --json
 ```
 
+### Optional mission-control terminal UI
+
+The regular install remains dependency-free. For a full-screen, keyboard- and
+touch-navigable mission-control terminal, install the optional `tui` extra.
+Textual powers the interactive interface; a Rich welcome screen remains available
+when Textual is not installed. The interface is designed for narrow Termux
+screens as well as desktop terminals:
+
+```bash
+python -m pip install "shards-kernel[tui]"
+shards-kernel
+# Or explicitly:
+shards-kernel dashboard
+shards-kernel dashboard --no-animate --no-interactive
+shards-kernel dashboard --plain --no-interactive
+```
+
+Use **1-4** to switch actions, **R** to refresh the display and **Q** to exit.
+Buttons are also clickable or tappable where supported by the terminal.
+
+The interface only shows real, explicitly selected local diagnostics from the
+existing `doctor.diagnose()` API and a cryptographically backed **offline** demo.
+It does not connect to an issuer, execute arbitrary tools, inspect live agent
+sessions or certify a deployment. Agent and audit-stream panels remain
+**NOT CONNECTED** until an authenticated data source exists. Passing library
+preflight does not imply that an operational service is ready.
+
+The CLI preserves plain `--help`, `--version`, `demo --json`, and `doctor --json`
+output for scripts and MCP integrations. Non-interactive launches never prompt.
+Set `NO_COLOR=1` for plain output or `SHARDS_NO_ANIMATION=1` to disable animation.
+The visual UI does **not** run automatically as part of `pip install`.
+
+---
+
 The **PyPI project name** is `shards-kernel`, the **Python import** is `shards_kernel` (not `kernels`), and the **terminal executable** is `shards-kernel`. This demo exercises the built-in `echo` tool; it does not grant an agent access to external systems. See [installation](#install), the [agent quickstart](docs/AGENT_QUICKSTART.md), and the [import migration guide](docs/PACKAGE_MIGRATION.md).
 
 ---

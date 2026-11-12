@@ -29,29 +29,56 @@ def canonical(obj: Any) -> bytes:
                       allow_nan=False).encode('utf-8')
 
 
+_PARAMETER_SHAPES = {
+    'add': {'a', 'b'}, 'echo': {'text'}, 'list_notes': set(),
+    'read_note': {'name'}, 'remember': {'key', 'value'}, 'recall': {'key'},
+}
+
+
+def _validate_add(params: dict) -> None:
+    if any(type(params[key]) is not int or abs(params[key]) > 1_000_000
+           for key in ('a', 'b')):
+        raise ValueError('add arguments must be bounded integers')
+
+
+def _validate_echo(params: dict) -> None:
+    if type(params['text']) is not str or not 1 <= len(params['text']) <= 200:
+        raise ValueError('Invalid echo text')
+
+
+def _validate_note(params: dict) -> None:
+    name = params['name']
+    if type(name) is not str or not NOTE_PATTERN.fullmatch(name) or '..' in name:
+        raise ValueError('Invalid note name')
+
+
+def _validate_memory_key(params: dict) -> None:
+    key = params['key']
+    if type(key) is not str or not KEY_PATTERN.fullmatch(key):
+        raise ValueError('Invalid memory key')
+
+
+def _validate_remember(params: dict) -> None:
+    _validate_memory_key(params)
+    value = params['value']
+    if type(value) is not str or not 1 <= len(value) <= 500:
+        raise ValueError('Invalid memory value')
+
+
+_PARAM_VALIDATORS = {
+    'add': _validate_add, 'echo': _validate_echo, 'read_note': _validate_note,
+    'remember': _validate_remember, 'recall': _validate_memory_key,
+}
+
+
 def validate_tool(tool: Any, params: Any) -> tuple[str, dict]:
     if type(tool) is not str or tool not in ALLOWED or type(params) is not dict:
         raise ValueError('Unknown tool or malformed parameters')
-    shapes = {'add': {'a', 'b'}, 'echo': {'text'}, 'list_notes': set(),
-              'read_note': {'name'}, 'remember': {'key', 'value'}, 'recall': {'key'}}
-    if set(params) != shapes[tool]:
+    if set(params) != _PARAMETER_SHAPES[tool]:
         raise ValueError('Unexpected/missing tool parameters')
-    if tool == 'add':
-        if any(type(params[k]) is not int or abs(params[k]) > 1_000_000 for k in ('a', 'b')):
-            raise ValueError('add arguments must be bounded integers')
-    elif tool == 'echo':
-        if type(params['text']) is not str or not 1 <= len(params['text']) <= 200:
-            raise ValueError('Invalid echo text')
-    elif tool == 'read_note':
-        if (type(params['name']) is not str or
-            not NOTE_PATTERN.fullmatch(params['name']) or '..' in params['name']):
-            raise ValueError('Invalid note name')
-    elif tool in ('remember', 'recall'):
-        if type(params['key']) is not str or not KEY_PATTERN.fullmatch(params['key']):
-            raise ValueError('Invalid memory key')
-        if tool == 'remember':
-            if type(params['value']) is not str or not 1 <= len(params['value']) <= 500:
-                raise ValueError('Invalid memory value')
+    validator = _PARAM_VALIDATORS.get(tool)
+    if validator is not None:
+        validator(params)
     # Enforce JSON serializability and no NaN or other non-JSON values.
     canonical(params)
     return tool, dict(params)

@@ -147,7 +147,7 @@ def test_live_loopback_model_http_and_redirect_denial(tools, monkeypatch):
     mode = {"redirect": False, "posts": 0}
 
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):
+        def log_message(self, format_string, *args):
             return None
 
         def respond(self, data):

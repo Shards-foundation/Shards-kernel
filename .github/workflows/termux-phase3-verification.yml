@@ -77,6 +77,9 @@ jobs:
             examples/termux_phase3/operator_issuer.py \
             scripts/ci/smoke_termux_phase3_wheel.py "$temp_dir/run/"
           (cd "$temp_dir/run" && "$temp_dir/venv/bin/python" smoke_termux_phase3_wheel.py)
+          # Assertions must never disappear under -O; run the same acceptance
+          # with Python optimisations enabled to catch regression in this gate.
+          (cd "$temp_dir/run" && "$temp_dir/venv/bin/python" -O smoke_termux_phase3_wheel.py)
 
       - name: Scope notice
         run: |

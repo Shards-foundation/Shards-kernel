@@ -1,6 +1,7 @@
 """CLI entrypoint for Shards-Kernel."""
 
 import argparse
+import os
 import sys
 from shards_kernel._version import __version__
 
@@ -17,6 +18,19 @@ def main() -> int:
         version=f"shards-kernel {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    dashboard_parser = subparsers.add_parser(
+        "dashboard", help="Open the optional Shards mission-control interface"
+    )
+    dashboard_parser.add_argument(
+        "--plain", action="store_true", help="Disable colour and panels"
+    )
+    dashboard_parser.add_argument(
+        "--no-animate", action="store_true", help="Disable startup animation"
+    )
+    dashboard_parser.add_argument(
+        "--no-interactive", action="store_true", help="Display without input prompt"
+    )
 
     # Info command
     info_parser = subparsers.add_parser("info", help="Display kernel information")
@@ -120,9 +134,19 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command is None:
+        # Preserve plain help for scripts, piped output, and existing CLI tests.
+        if sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get("CI"):
+            return _cmd_dashboard(parser)
         parser.print_help()
         return 0
 
+    if args.command == "dashboard":
+        return _cmd_dashboard(
+            parser,
+            plain=args.plain,
+            no_animate=args.no_animate,
+            interactive=False if args.no_interactive else None,
+        )
     if args.command == "info":
         return _cmd_info(args.variant)
     elif args.command == "validate":
@@ -163,6 +187,31 @@ def main() -> int:
             args.config, allow_remote_listen=args.allow_remote_listen
         )
 
+    return 0
+
+
+def _cmd_dashboard(parser: argparse.ArgumentParser, *, plain: bool = False,
+                   no_animate: bool = False, interactive=None) -> int:
+    """Presentation-only selection of existing safe CLI commands."""
+    from shards_kernel.cli.mission_control import run_dashboard
+
+    selection = run_dashboard(
+        plain=plain, no_animate=no_animate, interactive=interactive
+    )
+    if selection == "info":
+        return _cmd_info("strict")
+    if selection == "doctor":
+        from shards_kernel.cli.doctor import run_doctor
+
+        # This is operational preflight, not merely a local library install
+        # check. Keep fallback and Textual status semantics consistent.
+        return run_doctor(profile="service", json_output=False)
+    if selection == "demo":
+        from shards_kernel.cli.demo import run_demo
+
+        return run_demo(json_output=False)
+    if selection == "help":
+        parser.print_help()
     return 0
 
 
