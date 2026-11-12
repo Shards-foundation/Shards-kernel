@@ -5,6 +5,7 @@ These run against the real Shards-kernel source in CI.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import tempfile
@@ -99,3 +100,52 @@ def test_memory_key_limits_and_restart():
 def test_reproducible_local_kernel_e2e():
     # Real StrictKernel + SQLite, with no Qwen server required.
     agent.self_test()
+
+
+def test_symlink_audit_db_refused_before_init_changes_outside_file():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / "agent"
+        root.mkdir()
+        outside = Path(d) / "outside.sqlite3"
+        outside.write_bytes(b"DO-NOT-MODIFY")
+        (root / "audit.sqlite3").symlink_to(outside)
+        with pytest.raises(ValueError, match="Audit database"):
+            agent.init(root)
+        assert outside.read_bytes() == b"DO-NOT-MODIFY"
+        assert not (root / "operator.key").exists()
+
+
+def test_symlink_audit_db_refused_on_launch():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / "agent"
+        agent.init(root)
+        db = root / "audit.sqlite3"
+        outside = Path(d) / "outside.sqlite3"
+        outside.write_bytes(b"DO-NOT-MODIFY")
+        db.unlink()
+        db.symlink_to(outside)
+        with pytest.raises(ValueError, match="regular audit DB"):
+            agent.launch(root)
+        assert outside.read_bytes() == b"DO-NOT-MODIFY"
+
+
+@pytest.mark.parametrize(
+    "model_body,completion_body",
+    [
+        ({"data": []}, None),
+        ({"data": [{"id": "qwen-test"}]}, {"choices": []}),
+        ({"data": [{"id": "qwen-test"}]}, {"choices": [{"message": {}}]}),
+    ],
+)
+def test_model_empty_or_invalid_responses_fail_closed(monkeypatch, model_body, completion_body):
+    payloads = [model_body]
+    if completion_body is not None:
+        payloads.append(completion_body)
+
+    def fake_urlopen(request, timeout):
+        assert payloads, "Unexpected extra model HTTP request"
+        return io.BytesIO(json.dumps(payloads.pop(0)).encode("utf-8"))
+
+    monkeypatch.setattr(agent.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(ValueError, match="MODEL_"):
+        agent.ask_model("Add two numbers")
