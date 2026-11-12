@@ -1,0 +1,132 @@
+name: Phase 3 cross-runner issuer/verifier pilot (not production certification)
+
+on:
+  push:
+    branches:
+      - feat/dual-host-acceptance-20261112
+  pull_request:
+    branches:
+      - feat/termux-v3-offline-issuer-20261108
+      - main
+    paths:
+      - '.github/workflows/phase3-cross-runner-acceptance.yml'
+      - 'scripts/acceptance/phase3_*'
+      - 'scripts/acceptance/termux_device_probe.py'
+      - 'tests/test_termux_device_probe_contract.py'
+      - 'examples/termux_phase3/**'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-issuer-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      fingerprint: ${{ steps.public.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Compile acceptance programs and reject Android impersonation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/acceptance/phase3_issuer_host.py \
+            scripts/acceptance/phase3_verifier_host.py \
+            scripts/acceptance/termux_device_probe.py
+          set +e
+          response="$(python scripts/acceptance/termux_device_probe.py 2>&1)"
+          status="$?"
+          set -e
+          test "$status" -eq 2
+          printf '%s\n' "$response" | grep -Fq 'No native Termux PREFIX found'
+          # Spoofing an environment variable must not satisfy native Android.
+          set +e
+          response="$(PREFIX=/data/data/com.termux/files/usr python scripts/acceptance/termux_device_probe.py 2>&1)"
+          status="$?"
+          set -e
+          test "$status" -eq 2
+          printf '%s\n' "$response" | grep -Fq 'Android system property service not available'
+      - name: Install exact published package outside checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/venv"
+          mkdir -p "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/issuer-run"
+          "$RUNNER_TEMP/venv/bin/python" -m pip download --only-binary=:all: --no-deps \
+            -d "$RUNNER_TEMP/wheels" 'shards-kernel==0.1.3'
+          wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'shards_kernel-0.1.3-*.whl' -print -quit)"
+          test -n "$wheel"
+          printf 'baf246e771ceb559d007efafbe8ba66099bd8a65d488ca60294cae5313278df9  %s\n' "$wheel" | sha256sum -c -
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "$wheel[crypto]"
+          cp examples/termux_phase3/operator_issuer.py \
+             examples/termux_phase3/phase3_protocol.py \
+             scripts/acceptance/phase3_issuer_host.py "$RUNNER_TEMP/issuer-run/"
+          cd "$RUNNER_TEMP/issuer-run"
+          "$RUNNER_TEMP/venv/bin/python" -O phase3_issuer_host.py \
+            "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/private-issuer"
+      - name: Verify native-probe fingerprint trust-anchor regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/venv/bin/python" -m unittest discover \
+            -s tests -p test_termux_device_probe_contract.py -v
+      - name: Publish public fingerprint
+        id: public
+        shell: bash
+        run: |
+          printf 'fingerprint=%s\n' "$(sha256sum "$RUNNER_TEMP/handoff/issuer-public.bin" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Transfer strictly public permit material
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase3-cross-runner-handoff
+          path: ${{ runner.temp }}/handoff/
+          if-no-files-found: error
+          retention-days: 1
+
+  verifier-host:
+    needs: synthetic-issuer-host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      EXPECTED_ISSUER_FINGERPRINT: ${{ needs.synthetic-issuer-host.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Download public handoff across runner boundary
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: phase3-cross-runner-handoff
+          path: ${{ runner.temp }}/handoff
+      - name: Verify and execute using pinned published wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/venv"
+          mkdir -p "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/verifier-run"
+          "$RUNNER_TEMP/venv/bin/python" -m pip download --only-binary=:all: --no-deps \
+            -d "$RUNNER_TEMP/wheels" 'shards-kernel==0.1.3'
+          wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'shards_kernel-0.1.3-*.whl' -print -quit)"
+          test -n "$wheel"
+          printf 'baf246e771ceb559d007efafbe8ba66099bd8a65d488ca60294cae5313278df9  %s\n' "$wheel" | sha256sum -c -
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "$wheel[crypto]"
+          # Do not copy operator_issuer.py or ANY issuer private key.
+          cp examples/termux_phase3/agent_verifier_v3.py \
+             examples/termux_phase3/agent_tools.py \
+             examples/termux_phase3/phase3_protocol.py \
+             scripts/acceptance/phase3_verifier_host.py "$RUNNER_TEMP/verifier-run/"
+          cd "$RUNNER_TEMP/verifier-run"
+          "$RUNNER_TEMP/venv/bin/python" -O phase3_verifier_host.py \
+            "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/verifier-state" "$RUNNER_TEMP/verifier-evidence.json"
+      - name: Preserve redacted acceptance evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase3-cross-runner-evidence
+          path: ${{ runner.temp }}/verifier-evidence.json
+          if-no-files-found: error
+          retention-days: 7
