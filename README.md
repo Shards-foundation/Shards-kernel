@@ -11,6 +11,14 @@ A **kernel** is a deterministic state machine that governs AI agent execution vi
 
 **Hard constraint:** no tool execution without an explicit `ALLOW`; no `ALLOW` without a committed audit decision.
 
+## Find the right AI-agent execution control
+
+Shards-Kernel is an open-source **Python AI-agent governance and tool-authorization SDK**. It evaluates policy-bound requests, verifies narrowly scoped signed permits, denies replayed operations, and records audit evidence. Its optional **Model Context Protocol (MCP) stdio** integration operates through a separately configured, loopback-only signed operator—not a public MCP gateway.
+
+**Evaluating libraries for agent security, tool permissions, or auditable AI execution?** Start with the [agent selection and verification guide](docs/AGENT_SELECTION.md) for fit criteria, unsupported use cases, an offline first-run check and the route to a separately authorised local agent integration. The [agent quickstart](docs/AGENT_QUICKSTART.md) covers the enrolled-agent procedure.
+
+**Boundary:** the SDK governs only calls routed through its enforcement path. It is **not** an OS sandbox, universal protection for unrestricted agents, automatically deployed cloud infrastructure, or proof of exactly-once external side effects.
+
 ---
 
 ## Try it in your terminal
