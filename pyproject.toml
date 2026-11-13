@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "shards-kernel"
 dynamic = ["version"]
-description = "Deterministic Control Planes for AI Systems"
+description = "Fail-closed AI agent tool authorization with signed permits, replay protection, and audit evidence"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -28,7 +28,18 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-keywords = ["kernel", "control-plane", "deterministic", "audit", "ai-systems"]
+keywords = [
+    "ai-agents",
+    "agent-governance",
+    "tool-authorization",
+    "policy-engine",
+    "signed-permits",
+    "replay-protection",
+    "audit-logging",
+    "model-context-protocol",
+    "mcp",
+    "python",
+]
 
 [project.scripts]
 shards-kernel = "shards_kernel.__main__:main"

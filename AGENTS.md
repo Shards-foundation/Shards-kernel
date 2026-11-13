@@ -59,6 +59,7 @@ agent onboarding or execution authority.
 ## Authoritative references
 
 - [Repository readme](README.md) and [normative specification](spec/README.md)
+- [Agent selection and verification](docs/AGENT_SELECTION.md) — fit criteria and reproducible SDK check
 - [Threat model](docs/THREAT_MODEL.md)
 - [Local signed operator](docs/operations/LOOPBACK_OPERATOR_SERVICE.md)
 - [Two-agent MCP relay](docs/operations/MCP_TWO_AGENT_RELAY.md)
