@@ -1,0 +1,54 @@
+name: Independent v0.1.2 Verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'independent_verification/**'
+      - '.github/workflows/independent-verification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published-wheel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout verification scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install hash-verified PyPI distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/wheel"
+          python -m pip download --only-binary=:all: --no-deps -d "$RUNNER_TEMP/wheel" 'shards-kernel==0.1.2'
+          echo '08dc0df1ade8769a3c9cd7560fd22362e1a313aa78de5d1063c67d64a59fa057' > "$RUNNER_TEMP/wheel.sha256"
+          cd "$RUNNER_TEMP/wheel"
+          echo '08dc0df1ade8769a3c9cd7560fd22362e1a313aa78de5d1063c67d64a59fa057  shards_kernel-0.1.2-py3-none-any.whl' | sha256sum --check
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "$RUNNER_TEMP/wheel/shards_kernel-0.1.2-py3-none-any.whl[crypto]"
+      - name: Execute independently authored tests outside source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CERT_OUTPUT="$GITHUB_WORKSPACE/independent-results.json"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/python" "$GITHUB_WORKSPACE/independent_verification/verify.py"
+      - name: Upload evidence even when acceptance fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: independent-v012-evidence
+          path: independent-results.json
+          if-no-files-found: warn
+      - name: Evaluate independently recorded findings
+        shell: bash
+        run: |
+          export CERT_OUTPUT="$GITHUB_WORKSPACE/independent-results.json"
+          "$RUNNER_TEMP/venv/bin/python" independent_verification/assert_results.py
