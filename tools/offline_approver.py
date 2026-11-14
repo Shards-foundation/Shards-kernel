@@ -146,7 +146,7 @@ def ensure_secure_private() -> None:
 
 
 def require_interactive_tty() -> None:
-    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+    if not (sys.stdin.isatty() and sys.stdout.isatty() and sys.stderr.isatty()):
         raise ValueError("Interactive terminal required for human approval")
 
 
