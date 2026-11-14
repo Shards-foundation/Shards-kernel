@@ -131,6 +131,28 @@ async function signerReady(env) {
     return false;
   }
 }
+// A short-lived, isolate-local cache bounds expensive readiness signing on
+// authenticated status probes. Issuance deliberately bypasses this cache.
+const STATUS_PROBE_TTL_MS=15000;
+let lastStatusProbe=null;
+let activeStatusProbe=null;
+async function statusSignerReady(env) {
+  if (!present(env)) return false;
+  // Hash configuration into an opaque cache key; never retain private key
+  // material or bearer credentials in the isolate's cache.
+  const fingerprint=await digest(enc(JSON.stringify(REQUIRED_SECRETS.map((name)=>env[name]))));
+  if (lastStatusProbe && lastStatusProbe.fingerprint===fingerprint
+      && Date.now()<lastStatusProbe.expiresAt) return lastStatusProbe.ready;
+  if (activeStatusProbe?.fingerprint===fingerprint) return activeStatusProbe.promise;
+  const work=signerReady(env).then((ready)=>{
+    lastStatusProbe={fingerprint,ready,expiresAt:Date.now()+STATUS_PROBE_TTL_MS};
+    return ready;
+  }).finally(()=>{
+    if (activeStatusProbe?.promise===work) activeStatusProbe=null;
+  });
+  activeStatusProbe={fingerprint,promise:work};
+  return work;
+}
 async function matchesBearer(header,actual) {
   if (typeof header !== 'string' || !header.startsWith('Bearer ') || typeof actual !== 'string' || actual.length<32) return false;
   const provided=header.slice(7);
@@ -248,7 +270,13 @@ export default {
         service:'shards-permit-issuer-pilot',revision:REVISION,status:'UP',scope:'local-integration-not-production'
       });
       if (path==='/v1/status' && request.method==='GET') {
-        const ready=await signerReady(env);
+        // Public monitoring uses /health. A provisioned issuer's cryptographic
+        // readiness probe is accessible only with the explicit caller bearer.
+        if (!present(env)) return json(200,{service:'shards-permit-issuer-pilot',
+          status:'LOCKED',signing_enabled:false,scope:'approval-gated-echo-add-only'});
+        if (!await matchesBearer(request.headers.get('authorization'),env.ISSUANCE_ACCESS_TOKEN))
+          return json(401,{status:'DENY',code:'AUTH_REQUIRED'});
+        const ready=await statusSignerReady(env);
         return json(200,{service:'shards-permit-issuer-pilot',status:ready?'PROVISIONED':'LOCKED',
           signing_enabled:ready,scope:'approval-gated-echo-add-only'});
       }
