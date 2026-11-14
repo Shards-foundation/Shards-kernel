@@ -4,7 +4,6 @@ import json
 import os
 import secrets
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -40,7 +39,8 @@ def test_self_test(capsys):
 
 
 def test_signed_approval_matches_canonical_domain():
-    now=int(time.time()*1000); d=make_draft(now)
+    now=int(time.time()*1000)
+    d=make_draft(now)
     key=Ed25519PrivateKey.generate()
     approval=mod.sign_approval(d,key,now,'trusted-human')
     signed=mod.APPROVAL_DOMAIN+mod.canonical({k:v for k,v in approval.items() if k!='signature_hex'})
@@ -74,14 +74,18 @@ def test_signed_approval_matches_canonical_domain():
     lambda d: d.update(other_field='unexpected'),
 ])
 def test_denials(change):
-    now=int(time.time()*1000); d=make_draft(now);change(d)
+    now=int(time.time()*1000)
+    d=make_draft(now)
+    change(d)
     with pytest.raises((ValueError,KeyError,TypeError)):
         validate(d,now)
 
 
 def test_tamper_after_rebinding_denied():
-    now=int(time.time()*1000);d=make_draft(now)
-    d['action']='wallet.transfer';bind(d)
+    now=int(time.time()*1000)
+    d=make_draft(now)
+    d['action']='wallet.transfer'
+    bind(d)
     with pytest.raises(ValueError,match='add'):
         validate(d,now)
 
@@ -92,28 +96,39 @@ def test_duplicate_json_rejected():
 
 
 def test_canonical_non_js_numbers_rejected():
-    with pytest.raises(ValueError):mod.canonical({'n':2**53})
-    with pytest.raises(ValueError):mod.canonical({'n':float('nan')})
-    with pytest.raises(ValueError):mod.canonical({'text':'\ud800'})
+    with pytest.raises(ValueError):
+        mod.canonical({'n':2**53})
+    with pytest.raises(ValueError):
+        mod.canonical({'n':float('nan')})
+    with pytest.raises(ValueError):
+        mod.canonical({'text':'\ud800'})
 
 
 def test_real_approve_path_with_encrypted_ephemeral_key(tmp_path,monkeypatch):
-    work=tmp_path/'offline';work.mkdir(mode=0o700)
+    work=tmp_path/'offline'
+    work.mkdir(mode=0o700)
     key=Ed25519PrivateKey.generate()
     password=b'ephemeral-test-passphrase-not-real'
-    private=work/'approver-private.pem';public=work/'approver-public.pem';hexf=work/'approver-public.hex'
+    private=work/'approver-private.pem'
+    public=work/'approver-public.pem'
+    hexf=work/'approver-public.hex'
     private.write_bytes(key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.BestAvailableEncryption(password)))
     os.chmod(private,0o600)
     raw=key.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw)
     public.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
     hexf.write_text(raw.hex())
-    for x in (public,hexf):os.chmod(x,0o600)
-    monkeypatch.setattr(mod,'DIR',work);monkeypatch.setattr(mod,'PRIVATE',private)
-    monkeypatch.setattr(mod,'PUBLIC',public);monkeypatch.setattr(mod,'PUBLIC_HEX',hexf)
+    for x in (public,hexf):
+        os.chmod(x,0o600)
+    monkeypatch.setattr(mod,'DIR',work)
+    monkeypatch.setattr(mod,'PRIVATE',private)
+    monkeypatch.setattr(mod,'PUBLIC',public)
+    monkeypatch.setattr(mod,'PUBLIC_HEX',hexf)
     monkeypatch.setattr(mod.getpass,'getpass',lambda prompt:password.decode())
     monkeypatch.setattr('builtins.input',lambda prompt:'APPROVE add(7,8)')
-    now=int(time.time()*1000);d=make_draft(now)
-    f=tmp_path/'draft.json';f.write_text(json.dumps(d))
+    now=int(time.time()*1000)
+    d=make_draft(now)
+    f=tmp_path/'draft.json'
+    f.write_text(json.dumps(d))
     args=SimpleNamespace(draft=str(f),issuer='pilot-issuer',key_id='pilot-key',audience='pilot-kernel',reviewer='trusted-human')
     mod.approve(args)
     approval=work/f"approval-{d['permit_id'][:16]}.json"
@@ -122,15 +137,19 @@ def test_real_approve_path_with_encrypted_ephemeral_key(tmp_path,monkeypatch):
     a=json.loads(approval.read_text())
     key.public_key().verify(bytes.fromhex(a['signature_hex']), mod.APPROVAL_DOMAIN+mod.canonical({k:v for k,v in a.items() if k!='signature_hex'}))
     assert a['permit_sha256']==hashlib.sha256(mod.canonical({k:v for k,v in d.items() if k!='signature'})).hexdigest()
-    with pytest.raises(FileExistsError):mod.approve(args)
+    with pytest.raises(FileExistsError):
+        mod.approve(args)
     assert private.exists() and private.stat().st_size > 100
 
 
 def test_passphrase_delay_causes_rejection_no_signed_output(tmp_path,monkeypatch):
-    work=tmp_path/'offline';work.mkdir(mode=0o700)
+    work=tmp_path/'offline'
+    work.mkdir(mode=0o700)
     monkeypatch.setattr(mod,'DIR',work)
-    now=int(time.time()*1000);d=make_draft(now)
-    f=tmp_path/'draft.json';f.write_text(json.dumps(d))
+    now=int(time.time()*1000)
+    d=make_draft(now)
+    f=tmp_path/'draft.json'
+    f.write_text(json.dumps(d))
     monkeypatch.setattr('builtins.input',lambda prompt:'APPROVE add(7,8)')
     key=Ed25519PrivateKey.generate()
     def delayed_key():
