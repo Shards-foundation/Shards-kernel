@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import warnings
 import os
 import secrets
 import time
@@ -42,7 +43,7 @@ def test_signed_approval_matches_canonical_domain():
     now=int(time.time()*1000)
     d=make_draft(now)
     key=Ed25519PrivateKey.generate()
-    approval=mod.sign_approval(d,key,now,'trusted-human')
+    approval=mod.sign_approval(d,key,now,'trusted-human',issuer='pilot-issuer',key_id='pilot-key',audience='pilot-kernel')
     signed=mod.APPROVAL_DOMAIN+mod.canonical({k:v for k,v in approval.items() if k!='signature_hex'})
     key.public_key().verify(bytes.fromhex(approval['signature_hex']), signed)
     assert approval['permit_id']==d['permit_id']
@@ -124,7 +125,8 @@ def test_real_approve_path_with_encrypted_ephemeral_key(tmp_path,monkeypatch):
     monkeypatch.setattr(mod,'PUBLIC',public)
     monkeypatch.setattr(mod,'PUBLIC_HEX',hexf)
     monkeypatch.setattr(mod.getpass,'getpass',lambda prompt:password.decode())
-    monkeypatch.setattr('builtins.input',lambda prompt:'APPROVE add(7,8)')
+    monkeypatch.setattr(mod,'require_interactive_tty',lambda:None)
+    monkeypatch.setattr('builtins.input',lambda prompt:prompt.split("'")[1])
     now=int(time.time()*1000)
     d=make_draft(now)
     f=tmp_path/'draft.json'
@@ -150,7 +152,8 @@ def test_passphrase_delay_causes_rejection_no_signed_output(tmp_path,monkeypatch
     d=make_draft(now)
     f=tmp_path/'draft.json'
     f.write_text(json.dumps(d))
-    monkeypatch.setattr('builtins.input',lambda prompt:'APPROVE add(7,8)')
+    monkeypatch.setattr(mod,'require_interactive_tty',lambda:None)
+    monkeypatch.setattr('builtins.input',lambda prompt:prompt.split("'")[1])
     key=Ed25519PrivateKey.generate()
     def delayed_key():
         monkeypatch.setattr(mod.time,'time',lambda:(now+130_000)/1000)
@@ -163,3 +166,243 @@ def test_passphrase_delay_causes_rejection_no_signed_output(tmp_path,monkeypatch
         assert not list(work.glob('approval-*.json'))
     finally:
         monkeypatch.undo()
+
+
+def test_sign_helper_rejects_rebound_unauthorised_action():
+    now = int(time.time() * 1000)
+    d = make_draft(now)
+    d['action'] = 'wallet.transfer'
+    bind(d)
+    key = Ed25519PrivateKey.generate()
+    with pytest.raises(ValueError, match='add'):
+        mod.sign_approval(d, key, now, 'human', issuer='pilot-issuer',
+                          key_id='pilot-key', audience='pilot-kernel')
+
+
+def test_sign_helper_rejects_rebound_wrong_parameters():
+    now = int(time.time() * 1000)
+    d = make_draft(now)
+    d['params'] = {'a': 7, 'b': 9}
+    bind(d)
+    with pytest.raises(ValueError, match='add'):
+        mod.sign_approval(d, Ed25519PrivateKey.generate(), now, 'human',
+                          issuer='pilot-issuer', key_id='pilot-key', audience='pilot-kernel')
+
+
+def test_bounded_draft_read_and_path_swap_prevented(tmp_path):
+    f = tmp_path / 'oversize.json'
+    f.write_bytes(b'{' + b' ' * 8200 + b'}')
+    with pytest.raises(ValueError, match='exceeds'):
+        mod.load_draft(str(f))
+    target = tmp_path / 'target.json'
+    target.write_text('{}')
+    link = tmp_path / 'link.json'
+    link.symlink_to(target)
+    with pytest.raises(OSError):
+        mod.load_draft(str(link))
+    fifo = tmp_path / 'pipe'
+    os.mkfifo(fifo)
+    with pytest.raises(ValueError, match='regular file'):
+        mod.load_draft(str(fifo))
+
+
+def test_world_writable_draft_rejected(tmp_path):
+    f = tmp_path / 'draft.json'
+    f.write_text('{}')
+    os.chmod(f, 0o666)
+    with pytest.raises(ValueError, match='writable'):
+        mod.load_draft(str(f))
+
+
+def test_non_interactive_confirmation_rejected_before_any_key_access(tmp_path, monkeypatch):
+    draft = make_draft(int(time.time() * 1000))
+    path = tmp_path / 'draft.json'
+    path.write_text(json.dumps(draft))
+    monkeypatch.setattr(mod, 'DIR', tmp_path)
+    monkeypatch.setattr(mod, 'get_operator_key',
+                        lambda: pytest.fail('private key must not be loaded'))
+    monkeypatch.setattr('builtins.input',
+                        lambda prompt: pytest.fail('input() must not be reached'))
+    args = SimpleNamespace(draft=str(path), issuer='pilot-issuer',
+                           key_id='pilot-key', audience='pilot-kernel', reviewer='operator')
+    # The pytest session has no controlling TTY, just as a piped child process.
+    assert not mod.sys.stdin.isatty()
+    with pytest.raises(ValueError, match='Interactive terminal required'):
+        mod.approve(args)
+    assert not list(tmp_path.glob('approval-*.json'))
+
+
+def test_wrong_challenge_fails_before_unlock(tmp_path, monkeypatch):
+    draft = make_draft(int(time.time() * 1000))
+    path = tmp_path / 'draft.json'
+    path.write_text(json.dumps(draft))
+    monkeypatch.setattr(mod, 'DIR', tmp_path)
+    monkeypatch.setattr(mod, 'require_interactive_tty', lambda: None)
+    monkeypatch.setattr('builtins.input', lambda prompt: 'APPROVE add(7,8)')
+    monkeypatch.setattr(mod, 'get_operator_key',
+                        lambda: pytest.fail('private key accessed before exact permit confirmation'))
+    args = SimpleNamespace(draft=str(path), issuer='pilot-issuer',
+                           key_id='pilot-key', audience='pilot-kernel', reviewer='operator')
+    with pytest.raises(ValueError, match='Human approval not given'):
+        mod.approve(args)
+    assert not list(tmp_path.glob('approval-*.json'))
+
+
+def test_exact_challenge_precedes_key_unlock(tmp_path, monkeypatch):
+    draft = make_draft(int(time.time() * 1000))
+    path = tmp_path / 'draft.json'
+    path.write_text(json.dumps(draft))
+    events = []
+    monkeypatch.setattr(mod, 'DIR', tmp_path)
+    monkeypatch.setattr(mod, 'require_interactive_tty', lambda: None)
+
+    def confirm(prompt):
+        expected = 'APPROVE ' + draft['permit_id']
+        assert expected in prompt
+        events.append('confirm')
+        return expected
+
+    def unlock():
+        events.append('unlock')
+        return Ed25519PrivateKey.generate()
+
+    monkeypatch.setattr('builtins.input', confirm)
+    monkeypatch.setattr(mod, 'get_operator_key', unlock)
+    args = SimpleNamespace(draft=str(path), issuer='pilot-issuer',
+                           key_id='pilot-key', audience='pilot-kernel', reviewer='operator')
+    mod.approve(args)
+    assert events == ['confirm', 'unlock']
+
+
+def test_getpass_echo_fallback_fails_before_opening_private_file(tmp_path, monkeypatch):
+    work = tmp_path / 'approver'
+    work.mkdir(mode=0o700)
+    private = work / 'approver-private.pem'
+    private.write_text('does-not-matter')
+    public = work / 'approver-public.pem'
+    public.write_text('does-not-matter')
+    os.chmod(private, 0o600)
+    os.chmod(public, 0o600)
+    monkeypatch.setattr(mod, 'DIR', work)
+    monkeypatch.setattr(mod, 'PRIVATE', private)
+    monkeypatch.setattr(mod, 'PUBLIC', public)
+    monkeypatch.setattr(mod, 'PUBLIC_HEX', work / 'approver-public.hex')
+    monkeypatch.setattr(mod, 'require_interactive_tty', lambda: None)
+
+    def echo_warning(prompt):
+        warnings.warn('terminal echo', mod.getpass.GetPassWarning)
+        raise AssertionError('warning must have stopped us')
+
+    monkeypatch.setattr(mod.getpass, 'getpass', echo_warning)
+    with pytest.raises(mod.getpass.GetPassWarning):
+        mod.get_operator_key()
+
+
+def test_approval_file_write_failure_is_retryable(tmp_path, monkeypatch):
+    path = tmp_path / 'approval.json'
+    original = mod.os.link
+    def broken_link(source, dest):
+        raise OSError('injected install failure')
+    monkeypatch.setattr(mod.os, 'link', broken_link)
+    with pytest.raises(OSError, match='injected'):
+        mod.write_once(path, {'ok': True})
+    assert not path.exists()
+    assert not list(tmp_path.glob('.approval-*'))
+    monkeypatch.setattr(mod.os, 'link', original)
+    mod.write_once(path, {'ok': True})
+    assert json.loads(path.read_text()) == {'ok': True}
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_atomic_install_never_overwrites_existing_approval(tmp_path):
+    path = tmp_path / 'approval.json'
+    path.write_text('existing record')
+    with pytest.raises(FileExistsError):
+        mod.write_once(path, {'new': True})
+    assert path.read_text() == 'existing record'
+    assert not list(tmp_path.glob('.approval-*'))
+
+
+def test_approval_install_fsync_failure_cleans_partial_state(tmp_path, monkeypatch):
+    path = tmp_path / 'approval.json'
+    original = mod.os.fsync
+    counter = {'n': 0}
+
+    def fail_directory_sync(fd):
+        counter['n'] += 1
+        if counter['n'] == 2:
+            raise OSError('injected directory fsync failure')
+        return original(fd)
+
+    monkeypatch.setattr(mod.os, 'fsync', fail_directory_sync)
+    with pytest.raises(OSError, match='directory fsync failure'):
+        mod.write_once(path, {'ok': True})
+    assert not path.exists()
+    assert not list(tmp_path.glob('.approval-*'))
+
+
+def test_external_node_crypto_reference_vector():
+    """Fixture independently produced by Node 22 createPrivateKey + crypto.sign."""
+    now = 1800000000000
+    d = make_draft(now)
+    d['nonce'] = 'a' * 32
+    bind(d)
+    assert d['permit_id'] == '9127cd34399edeaa0418da7389e8796204dae18c9fdb3039bf6de045475758f8'
+    seed = bytes(range(32))  # Public, nonsecret reference vector only.
+    key = Ed25519PrivateKey.from_private_bytes(seed)
+    approval = mod.sign_approval(d, key, now, 'trusted-human',
+                                 issuer='pilot-issuer', key_id='pilot-key', audience='pilot-kernel')
+    assert approval['permit_sha256'] == '9b2bd2b6f1f0fd55e8379c067dc2a25d8611a8ddb0bf893a19f5b8b683136fe7'
+    assert approval['signature_hex'] == (
+        '5a82a6f0c86c798c3d690962f1fe2225847c7c55799e6d22c9c9b941a0b376d'
+        '6653d730969300419757aa5f90e67b29c2f9585699a75e2bc0833a124bf4a2705'
+    )
+
+
+def test_mismatched_public_key_and_hex_identity_rejected(tmp_path, monkeypatch):
+    work = tmp_path / 'approver'
+    work.mkdir(mode=0o700)
+    real = Ed25519PrivateKey.generate()
+    wrong = Ed25519PrivateKey.generate()
+    private = work / 'approver-private.pem'
+    public = work / 'approver-public.pem'
+    hexf = work / 'approver-public.hex'
+    password = b'temporary-synthetic-password'
+    private.write_bytes(real.private_bytes(serialization.Encoding.PEM,
+                                           serialization.PrivateFormat.PKCS8,
+                                           serialization.BestAvailableEncryption(password)))
+    os.chmod(private, 0o600)
+    public.write_bytes(wrong.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+    hexf.write_text(wrong.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex())
+    monkeypatch.setattr(mod, 'DIR', work)
+    monkeypatch.setattr(mod, 'PRIVATE', private)
+    monkeypatch.setattr(mod, 'PUBLIC', public)
+    monkeypatch.setattr(mod, 'PUBLIC_HEX', hexf)
+    monkeypatch.setattr(mod, 'require_interactive_tty', lambda: None)
+    monkeypatch.setattr(mod.getpass, 'getpass', lambda prompt: password.decode())
+    with pytest.raises(ValueError, match='Private and public keys disagree'):
+        mod.get_operator_key()
+    public.write_bytes(real.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+    with pytest.raises(ValueError, match='Hex public identity mismatch'):
+        mod.get_operator_key()
+    assert not list(work.glob('approval-*.json'))
+
+
+def test_failed_file_fsync_cleans_temporary_and_allows_retry(tmp_path, monkeypatch):
+    dest = tmp_path / 'approval.json'
+    original_fsync = mod.os.fsync
+
+    def broken_fsync(fd):
+        raise OSError('injected flush failure')
+
+    monkeypatch.setattr(mod.os, 'fsync', broken_fsync)
+    with pytest.raises(OSError, match='injected flush failure'):
+        mod.write_once(dest, {'ok': True})
+    assert not dest.exists()
+    assert not list(tmp_path.glob('.approval-*'))
+    monkeypatch.setattr(mod.os, 'fsync', original_fsync)
+    mod.write_once(dest, {'ok': True})
+    assert json.loads(dest.read_text()) == {'ok': True}
