@@ -12,10 +12,11 @@ approval-gated service, **not** a production signing authority or KMS/HSM.
 - Public preview URLs: **disabled**.
 - 2026-11-14 deployment: **100% traffic by Cloudflare API**, confirmed via
   `GET /workers/scripts/{script_name}/deployments`.
-- Public HTTPS verification: **PASS** from GitHub-hosted CI. GET /health
-  returned 200, /v1/status reported LOCKED, and POST /v1/issue was denied
-  with HTTP 503 ISSUER_NOT_PROVISIONED. This chat's direct network is restricted,
-  so the externally executed CI check is the evidence source.
+- Public HTTPS verification: the **previous** deployed revision passed GitHub-hosted
+  CI on 2026-11-14 (GET /health 200, /v1/status LOCKED, POST /v1/issue 503).
+  **Current deployed revision: NOT REVERIFIED** after the liveness-only change.
+  The manual `issuer-pilot-live.yml` workflow must be run and recorded.
+  These live results are not evidence for PR source correctness.
 
 ## Deployment safety defaults
 
@@ -41,10 +42,11 @@ approval-gated service, **not** a production signing authority or KMS/HSM.
 - This is a **cross-host protocol pilot only**: Worker secrets can be
   changed/exfiltrated by sufficiently privileged Cloudflare administrators.
   A Cloudflare Worker secret is **not** a hardware-attested private key or a
-  defence against the account owner. The connected ChatGPT OAuth session
-  currently has write privileges. **Do not activate signer until issuer account
-  administration is isolated from AI agents and independent approver custody
-  is established.**
+  defence against the account owner. On 2026-11-14 the Cloudflare MCP OAuth
+  connection was restricted to Shards-inc only; issuer-account API access
+  returned HTTP 403. The separate Cloudflare Access application's
+  all-account grant remains unclassified. **Do not activate the signer until
+  all administrative paths and independent approver custody are verified.**
 
 ## D1 ledger
 
@@ -73,8 +75,9 @@ and recovery requires a **new independent approval**, never an automatic retry.
 node --test tests/cloudflare-issuer-pilot/test_worker.mjs
 ```
 
-The GitHub-hosted Node job passed **12/12** tests on the committed source.
-A separate Python 3.13 CI gate installs exactly
+The GitHub-hosted Node security suite must pass on the exact reviewed commit;
+the test count is tracked by the workflow rather than frozen in this document.
+The Python 3.13 CI gate installs exactly
 `shards-kernel[crypto]==0.1.4` and checks the complete Python approver →
 JavaScript issuer → Python Kernel verifier round-trip using ephemeral keys.
 This interop gate must pass before activation.
