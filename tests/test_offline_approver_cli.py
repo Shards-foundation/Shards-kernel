@@ -209,15 +209,25 @@ def test_bounded_draft_read_and_path_swap_prevented(tmp_path):
 def test_world_writable_draft_rejected(tmp_path, monkeypatch):
     f = tmp_path / 'draft.json'
     f.write_text('{}')
-    real_fstat = mod.os.fstat
+    target = f.stat()
+    real_fstat = os.fstat
 
     def writable_metadata(fd):
         metadata = real_fstat(fd)
-        return SimpleNamespace(st_mode=metadata.st_mode | 0o022, st_uid=metadata.st_uid)
+        if (metadata.st_dev, metadata.st_ino) != (target.st_dev, target.st_ino):
+            return metadata
+        # Preserve the complete fstat shape, including st_size, because other
+        # libraries may also call os.fstat while this test hook is installed.
+        values = list(metadata)
+        values[0] |= 0o022
+        result = os.stat_result(values)
+        assert result.st_size == metadata.st_size
+        return result
 
-    monkeypatch.setattr(mod.os, 'fstat', writable_metadata)
-    with pytest.raises(ValueError, match='writable'):
-        mod.load_draft(str(f))
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mod.os, 'fstat', writable_metadata)
+        with pytest.raises(ValueError, match='writable'):
+            mod.load_draft(str(f))
 
 
 def test_non_interactive_confirmation_rejected_before_any_key_access(tmp_path, monkeypatch):
