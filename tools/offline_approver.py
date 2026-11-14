@@ -18,7 +18,6 @@ import hashlib
 import json
 import os
 import re
-import stat
 import sys
 import time
 from pathlib import Path
@@ -251,7 +250,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, KeyError, TypeError) as exc:
+    except (ValueError, OSError, KeyError, TypeError):
         # Avoid printing exception details which might include user-provided JSON.
         print("DENY: Local approval failed (invalid draft, credentials, or environment)", file=sys.stderr)
         sys.exit(2)
