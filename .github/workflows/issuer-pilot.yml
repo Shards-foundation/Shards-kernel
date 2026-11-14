@@ -1,0 +1,23 @@
+name: Cloudflare issuer pilot (no secrets)
+on:
+  pull_request:
+    paths:
+      - 'deploy/cloudflare/issuer-pilot/**'
+      - 'tests/cloudflare-issuer-pilot/**'
+      - '.github/workflows/issuer-pilot.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare/issuer-pilot/**'
+      - 'tests/cloudflare-issuer-pilot/**'
+      - '.github/workflows/issuer-pilot.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node 22 built-in cryptography tests
+        run: node --test tests/cloudflare-issuer-pilot/test_worker.mjs
