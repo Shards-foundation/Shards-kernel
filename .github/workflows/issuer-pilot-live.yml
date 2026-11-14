@@ -15,15 +15,26 @@ jobs:
           from urllib import request, error
 
           origin = 'https://shards-permit-issuer-pilot.ayais12210.workers.dev'
+
+          class NoRedirect(request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise AssertionError(('UNEXPECTED_REDIRECT', code))
+
+          opener = request.build_opener(NoRedirect)
+
           def checked(path, method='GET'):
               req = request.Request(origin + path, method=method,
                                     headers={'User-Agent': 'shards-issuer-pilot-smoke/1.0'})
               try:
-                  response = request.urlopen(req, timeout=20)
+                  response = opener.open(req, timeout=20)
               except error.HTTPError as exc:
+                  if 300 <= exc.code < 400:
+                      raise AssertionError(('UNEXPECTED_REDIRECT', exc.code)) from exc
                   response = exc
               with response:
                   code = response.status
+                  final_url = response.geturl()
+                  assert final_url == origin + path, ('UNEXPECTED_FINAL_URL', final_url)
                   mime = response.headers.get('content-type', '')
                   raw = response.read(1024)
               try:
