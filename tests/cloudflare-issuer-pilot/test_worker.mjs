@@ -28,6 +28,21 @@ async function fixture(){
  const req=(body,token=env.ISSUANCE_ACCESS_TOKEN)=>new Request('https://issuer.example/v1/issue',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});
  return {env,draft,approval,req,issuer,approver};
 }
+async function reapprove(f) {
+  // A coherent proposal: recompute ID, digest AND independent approver signature.
+  f.draft.permit_id=await sha(draftCanonical(f.draft,true));
+  f.approval.permit_id=f.draft.permit_id;
+  f.approval.permit_sha256=await sha(draftCanonical(f.draft));
+  const unsigned=Object.fromEntries(Object.entries(f.approval).filter(([key])=>key!=='signature_hex'));
+  f.approval.signature_hex=hex(await crypto.subtle.sign('Ed25519',f.approver.privateKey,join(appdomain,enc(canonical(unsigned)))));
+}
+async function expectRefusal(f,code,status=403) {
+  const response=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);
+  assert.equal(response.status,status);
+  const body=await response.json();
+  assert.equal(body.code,code);
+  assert.equal(Object.hasOwn(body,'permit'),false);
+}
 test('disabled: no keys, no ledger, no signing',async()=>{const req=new Request('https://issuer.test/v1/issue',{method:'POST'}); const r=await worker.fetch(req,{});assert.equal(r.status,503);assert.equal((await r.json()).code,'ISSUER_NOT_PROVISIONED')});
 test('GET /health is liveness only, not a signing-readiness assertion',async()=>{let r=await worker.fetch(new Request('https://issuer.test/health'),{});assert.equal(r.status,200);const body=await r.json();assert.equal(body.status,'UP');assert.equal(Object.hasOwn(body,'signing_enabled'),false)});
 test('GET /v1/status reports locked without secrets and provisioned with complete bindings',async()=>{let f=await fixture();let locked=await (await worker.fetch(new Request('https://issuer.test/v1/status'),{})).json();assert.equal(locked.status,'LOCKED');assert.equal(locked.signing_enabled,false);let active=await (await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();assert.equal(active.status,'PROVISIONED');assert.equal(active.signing_enabled,true);});
@@ -37,7 +52,36 @@ test('unauthenticated requests refused',async()=>{let f=await fixture();let r=aw
 test('valid independent approval issues signed v2 permit once, then replay denied',async()=>{const f=await fixture();const r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,200);const body=await r.json();assert.equal(body.status,'ISSUED');const sig=Uint8Array.from(body.permit.signature.match(/.{2}/g).map(h=>parseInt(h,16)));assert.equal(await crypto.subtle.verify('Ed25519',f.issuer.publicKey,sig,join(permitdomain,draftCanonical(body.permit))),true);const second=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(second.status,409)});
 test('bad approval signature denied',async()=>{const f=await fixture();f.approval.signature_hex='f'.repeat(128);let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,403)});
 test('approver and issuer same key refused',async()=>{const f=await fixture();f.env.ISSUER_PUBLIC_KEY_HEX=f.env.APPROVER_PUBLIC_KEY_HEX;let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,503)});
-test('modified permit params rejected before signer',async()=>{const f=await fixture();f.draft.params={a:7,b:9};let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,403)});
-test('unsupported tool denied',async()=>{const f=await fixture();f.draft.action='wallet.transfer';let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,403)});
+test('post-approval mutation is rejected by canonical binding',async()=>{
+ const f=await fixture();f.draft.params={a:7,b:9};await expectRefusal(f,'CANONICAL_MISMATCH');
+});
+test('independently approved, correctly rebound invalid add params rejected by tool validator',async()=>{
+ const f=await fixture();f.draft.params={a:-1,b:8};await reapprove(f);
+ assert.equal(f.approval.permit_id,f.draft.permit_id);await expectRefusal(f,'INVALID_ADD');
+});
+test('independently approved and rebound unsupported action triggers explicit allowlist',async()=>{
+ const f=await fixture();f.draft.action='wallet.transfer';await reapprove(f);
+ assert.equal(f.approval.permit_id,f.draft.permit_id);await expectRefusal(f,'TOOL_NOT_ALLOWED');
+});
+test('reject unpaired surrogate even with coherent independently signed echo approval',async()=>{
+ const f=await fixture();f.draft.action='echo';f.draft.params={text:'\\uD800'};await reapprove(f);
+ await expectRefusal(f,'NON_CANONICAL_UNICODE');
+});
+test('reject evidence hashes outside empty or hex-64 formats',async()=>{
+ const f=await fixture();f.draft.evidence_hash='x'.repeat(350);await reapprove(f);
+ await expectRefusal(f,'INVALID_BINDING');
+});
+test('malformed issuer keys never report ready or issue permits',async()=>{
+ const f=await fixture();f.env.ISSUER_PRIVATE_KEY_PKCS8_B64='not-a-key';
+ const status=await(await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();
+ assert.equal(status.status,'LOCKED');assert.equal(status.signing_enabled,false);
+ await expectRefusal(f,'CONFIG_INVALID',503);
+});
+test('wrong issuer public key cannot report signing ready',async()=>{
+ const f=await fixture();const other=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
+ f.env.ISSUER_PUBLIC_KEY_HEX=hex(await crypto.subtle.exportKey('raw',other.publicKey));
+ const status=await(await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();
+ assert.equal(status.signing_enabled,false);await expectRefusal(f,'CONFIG_INVALID',503);
+});
 test('missing ledger denies',async()=>{const f=await fixture();delete f.env.ISSUANCE_DB;let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,503)});
-test('database error means signed permit never returned',async()=>{const f=await fixture();f.env.ISSUANCE_DB.prepare=()=>({bind:()=>({run:async()=>{throw Error('SQLITE_IOERR')}})});let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,403)});
+test('database error is 503 unavailable and signed permit never returned',async()=>{const f=await fixture();f.env.ISSUANCE_DB.prepare=()=>({bind:()=>({run:async()=>{throw Error('SQLITE_IOERR')}})});await expectRefusal(f,'LEDGER_UNAVAILABLE',503)});
