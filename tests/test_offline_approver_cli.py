@@ -241,8 +241,10 @@ def test_non_interactive_confirmation_rejected_before_any_key_access(tmp_path, m
                         lambda prompt: pytest.fail('input() must not be reached'))
     args = SimpleNamespace(draft=str(path), issuer='pilot-issuer',
                            key_id='pilot-key', audience='pilot-kernel', reviewer='operator')
-    # The pytest session has no controlling TTY, just as a piped child process.
-    assert not mod.sys.stdin.isatty()
+    terminal = SimpleNamespace(isatty=lambda: True)
+    pipe = SimpleNamespace(isatty=lambda: False)
+    monkeypatch.setattr(mod, 'sys', SimpleNamespace(stdin=pipe, stdout=terminal,
+                                                     stderr=terminal))
     with pytest.raises(ValueError, match='Interactive terminal required'):
         mod.approve(args)
     assert not list(tmp_path.glob('approval-*.json'))
@@ -264,7 +266,7 @@ def test_wrong_challenge_fails_before_unlock(tmp_path, monkeypatch):
     assert not list(tmp_path.glob('approval-*.json'))
 
 
-def test_exact_challenge_precedes_key_unlock(tmp_path, monkeypatch):
+def test_exact_challenge_precedes_key_unlock(tmp_path, monkeypatch, capsys):
     draft = make_draft(int(time.time() * 1000))
     path = tmp_path / 'draft.json'
     path.write_text(json.dumps(draft))
@@ -273,6 +275,15 @@ def test_exact_challenge_precedes_key_unlock(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, 'require_interactive_tty', lambda: None)
 
     def confirm(prompt):
+        rendered = capsys.readouterr().out
+        digest = hashlib.sha256(mod.canonical({k: v for k, v in draft.items()
+                                                if k != 'signature'})).hexdigest()
+        assert 'HUMAN APPROVAL' in rendered
+        assert '"action": "add"' in rendered
+        assert '"a": 7' in rendered and '"b": 8' in rendered
+        assert '"subject": "pilot-agent"' in rendered
+        assert '"audience": "pilot-kernel"' in rendered
+        assert digest in rendered and draft['permit_id'] in rendered
         expected = 'APPROVE ' + draft['permit_id']
         assert expected in prompt
         events.append('confirm')
@@ -316,15 +327,15 @@ def test_getpass_echo_fallback_fails_before_opening_private_file(tmp_path, monke
 
 def test_approval_file_write_failure_is_retryable(tmp_path, monkeypatch):
     path = tmp_path / 'approval.json'
-    original = mod.os.link
-    def broken_link(source, dest):
+    original = mod._link_unnamed_file
+    def broken_link(fd, directory_fd, name):
         raise OSError('injected install failure')
-    monkeypatch.setattr(mod.os, 'link', broken_link)
+    monkeypatch.setattr(mod, '_link_unnamed_file', broken_link)
     with pytest.raises(OSError, match='injected'):
         mod.write_once(path, {'ok': True})
     assert not path.exists()
     assert not list(tmp_path.glob('.approval-*'))
-    monkeypatch.setattr(mod.os, 'link', original)
+    monkeypatch.setattr(mod, '_link_unnamed_file', original)
     mod.write_once(path, {'ok': True})
     assert json.loads(path.read_text()) == {'ok': True}
     assert path.stat().st_mode & 0o777 == 0o600
@@ -431,3 +442,61 @@ def test_hidden_review_output_is_rejected_before_approval(monkeypatch):
                                                      stderr=terminal))
     with pytest.raises(ValueError, match='Interactive terminal required'):
         mod.require_interactive_tty()
+
+
+def test_noninteger_approval_timestamps_denied():
+    now = int(time.time() * 1000)
+    draft = make_draft(now)
+    key = Ed25519PrivateKey.generate()
+    for invalid in (True, False, None, 3.14, '1700000000000', 2**53, -1):
+        with pytest.raises(ValueError, match='timestamp'):
+            mod.sign_approval(draft, key, invalid, 'human', issuer='pilot-issuer',
+                              key_id='pilot-key', audience='pilot-kernel')
+
+
+def test_approval_expiring_while_fsync_denied_before_link(tmp_path, monkeypatch):
+    now_ms = int(time.time() * 1000)
+    data = {'schema': 'shards.operator-approval.v1', 'expires_at_ms': now_ms + 15_000}
+    target = tmp_path / 'approval.json'
+    original = mod.os.fsync
+    called = {'n': 0}
+
+    def slow_fsync(fd):
+        called['n'] += 1
+        result = original(fd)
+        monkeypatch.setattr(mod.time, 'time', lambda: (now_ms + 16_000) / 1000)
+        return result
+
+    monkeypatch.setattr(mod.os, 'fsync', slow_fsync)
+    with pytest.raises(ValueError, match='expired before publication'):
+        mod.write_once(target, data)
+    assert called['n'] >= 1
+    assert not target.exists()
+
+
+def test_unnamed_inode_installation_resists_temporary_path_substitution(tmp_path, monkeypatch):
+    target = tmp_path / 'approval.json'
+    real_link = mod._link_unnamed_file
+    observed = {'invoked': False}
+
+    def simulate_attacker(fd, dirfd, filename):
+        # No temporary filename exists to replace: the only publication source
+        # is the open unnamed inode represented by fd.
+        observed['invoked'] = True
+        assert os.fstat(fd).st_nlink == 0
+        assert not list(tmp_path.glob('.approval-*'))
+        (tmp_path / '.approval-guess.tmp').write_text('attacker-controlled')
+        real_link(fd, dirfd, filename)
+
+    monkeypatch.setattr(mod, '_link_unnamed_file', simulate_attacker)
+    mod.write_once(target, {'safe': True})
+    assert observed['invoked']
+    assert json.loads(target.read_text()) == {'safe': True}
+
+
+def test_preexisting_approval_path_blocks_unnamed_install(tmp_path):
+    target = tmp_path / 'approval.json'
+    target.write_text('existing target')
+    with pytest.raises(FileExistsError):
+        mod.write_once(target, {'safe': True})
+    assert target.read_text() == 'existing target'
