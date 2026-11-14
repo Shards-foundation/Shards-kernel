@@ -64,7 +64,7 @@ test('independently approved and rebound unsupported action triggers explicit al
  assert.equal(f.approval.permit_id,f.draft.permit_id);await expectRefusal(f,'TOOL_NOT_ALLOWED');
 });
 test('reject unpaired surrogate even with coherent independently signed echo approval',async()=>{
- const f=await fixture();f.draft.action='echo';f.draft.params={text:'\\uD800'};await reapprove(f);
+ const f=await fixture();f.draft.action='echo';f.draft.params={text:String.fromCharCode(0xD800)};await reapprove(f);
  await expectRefusal(f,'NON_CANONICAL_UNICODE');
 });
 test('reject evidence hashes outside empty or hex-64 formats',async()=>{
