@@ -20,7 +20,7 @@ approval-gated service, **not** a production signing authority or KMS/HSM.
 
 ## Deployment safety defaults
 
-- Only `GET /health` and `GET /v1/status` are public read endpoints.
+- `GET /health` is public liveness-only. `GET /v1/status` reports LOCKED publicly only while unprovisioned; **once provisioned, it requires the caller bearer**. Authenticated status crypto probes are cached for at most 15 seconds per isolate (concurrent requests share one probe). Issuance always rechecks signing keys independently; cached status never authorises any permit.
 - `POST /v1/issue` returns HTTP **503 LOCKED** until all custody bindings
   are supplied. **No private key or bearer token was provisioned**.
 - Unrecognised routes: 404. Unexpected methods on issue: 405.
