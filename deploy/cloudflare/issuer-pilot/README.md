@@ -12,8 +12,10 @@ approval-gated service, **not** a production signing authority or KMS/HSM.
 - Public preview URLs: **disabled**.
 - 2026-11-14 deployment: **100% traffic by Cloudflare API**, confirmed via
   `GET /workers/scripts/{script_name}/deployments`.
-- Public HTTP endpoint probes by this environment: **BLOCKED by outbound
-  network policy**; separate external response verification remains required.
+- Public HTTPS verification: **PASS** from GitHub-hosted CI. GET /health
+  returned 200, /v1/status reported LOCKED, and POST /v1/issue was denied
+  with HTTP 503 ISSUER_NOT_PROVISIONED. This chat's direct network is restricted,
+  so the externally executed CI check is the evidence source.
 
 ## Deployment safety defaults
 
@@ -71,10 +73,11 @@ and recovery requires a **new independent approval**, never an automatic retry.
 node --test tests/cloudflare-issuer-pilot/test_worker.mjs
 ```
 
-The local Node 22 reference run passed **12/12** on equivalent pilot source.
-GitHub CI and exact source interop tests are separate gates; verify this
-repository version before activating. Additionally verify that the exact
-permit verifies under `shards-kernel==0.1.4` in an independent process.
+The GitHub-hosted Node job passed **12/12** tests on the committed source.
+A separate Python 3.13 CI gate installs exactly
+`shards-kernel[crypto]==0.1.4` and checks the complete Python approver →
+JavaScript issuer → Python Kernel verifier round-trip using ephemeral keys.
+This interop gate must pass before activation.
 
 ## Remaining security gates
 
