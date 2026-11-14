@@ -117,7 +117,7 @@ export default {
   async fetch(request,env) {
     try {
       const url = new URL(request.url);
-      if (request.method === 'GET' && url.pathname === '/health') return json(200,{service:'shards-permit-issuer-pilot',revision:REVISION,status:'LOCKED',signing_enabled:false,scope:'local-integration-not-production'});
+      if (request.method === 'GET' && url.pathname === '/health') return json(200,{service:'shards-permit-issuer-pilot',revision:REVISION,status:'UP',scope:'local-integration-not-production'});
       if (request.method === 'GET' && url.pathname === '/v1/status') return json(200,{service:'shards-permit-issuer-pilot',status:configured(env)?'PROVISIONED':'LOCKED',signing_enabled:configured(env),scope:'approval-gated-echo-add-only'});
       if (url.pathname === '/v1/issue' && request.method === 'POST') return issue(request,env);
       if (url.pathname === '/v1/issue') return json(405,{status:'DENY',code:'METHOD_NOT_ALLOWED'});
