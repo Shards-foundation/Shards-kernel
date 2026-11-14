@@ -141,15 +141,35 @@ async function matchesBearer(header,actual) {
   for (let i=0;i<aa.length;i++) difference|=aa[i]^bb[i];
   return difference===0;
 }
+async function boundedBodyText(request,maximumBytes=8192) {
+  if (!request.body) deny('BAD_JSON',400);
+  const reader=request.body.getReader();
+  let total=0;
+  const parts=[];
+  try {
+    for (;;) {
+      const chunk=await reader.read();
+      if (chunk.done) break;
+      total+=chunk.value.byteLength;
+      if (total>maximumBytes) deny('BODY_TOO_LARGE',413);
+      parts.push(chunk.value);
+    }
+  } finally {
+    try { await reader.cancel(); } catch { /* already closed */ }
+    reader.releaseLock();
+  }
+  const buffer=new Uint8Array(total);
+  let pos=0;
+  for (const part of parts) { buffer.set(part,pos); pos+=part.byteLength; }
+  return new TextDecoder('utf-8',{fatal:true}).decode(buffer);
+}
 async function parseIssueRequest(request) {
   if ((request.headers.get('content-type')||'').split(';',1)[0] !== 'application/json') deny('CONTENT_TYPE_REQUIRED',415);
   const length=Number(request.headers.get('content-length'));
   if (Number.isFinite(length) && length>8192) deny('BODY_TOO_LARGE',413);
   let body;
   try {
-    const raw=await request.text();
-    if (raw.length>8192) deny('BODY_TOO_LARGE',413);
-    body=JSON.parse(raw);
+    body=JSON.parse(await boundedBodyText(request));
   } catch(err) {
     if (err instanceof PolicyRefusal) throw err;
     deny('BAD_JSON',400);
@@ -181,6 +201,12 @@ async function authoriseAndSign(body,env) {
   await verifyPinnedApproval(approval,env);
   return signDraft(draft,env);
 }
+function assertUnexpired(draft,approval) {
+  const now=Date.now();
+  if (now < draft.valid_from_ms || now >= draft.valid_until_ms || now >= approval.expires_at_ms) {
+    deny('EXPIRED_DURING_ISSUANCE');
+  }
+}
 async function reservePermit(permit,approval,env) {
   try {
     const record=await env.ISSUANCE_DB.prepare(
@@ -204,7 +230,11 @@ async function issue(request,env) {
   try {
     const body=await parseIssueRequest(request);
     const permit=await authoriseAndSign(body,env);
+    assertUnexpired(permit,body.approval);
     await reservePermit(permit,body.approval,env);
+    // If expiry occurs during D1 I/O, do not return even a signed permit.
+    // The one-use ledger entry stays consumed; a new approval is required.
+    assertUnexpired(permit,body.approval);
     return json(200,{status:'ISSUED',permit});
   } catch(err) {
     return issueError(err);
