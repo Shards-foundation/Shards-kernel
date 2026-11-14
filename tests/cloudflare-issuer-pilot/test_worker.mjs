@@ -152,3 +152,26 @@ test('unauthenticated status cannot invoke expensive signer check; valid bearer 
    crypto.subtle.sign=actualSign;
  }
 });
+
+test('storage failures produce category-only diagnostics, never secret or exception content',async()=>{
+ const f=await fixture();
+ const logs=[];
+ const previous=console.error;
+ f.env.ISSUANCE_DB.prepare=()=>({bind:()=>({run:async()=>{
+   throw Error('sensitive-ledger-error-'+f.env.ISSUANCE_ACCESS_TOKEN);
+ }})});
+ console.error=(entry)=>logs.push(String(entry));
+ try {
+   await expectRefusal(f,'LEDGER_UNAVAILABLE',503);
+ } finally {
+   console.error=previous;
+ }
+ assert.equal(logs.length,1);
+ const body=JSON.parse(logs[0]);
+ assert.equal(body.event,'issuer_fail_closed');
+ assert.equal(body.stage,'issue');
+ assert.equal(body.code,'LEDGER_UNAVAILABLE');
+ assert.equal(logs[0].includes(f.env.ISSUANCE_ACCESS_TOKEN),false);
+ assert.equal(logs[0].includes(f.env.ISSUER_PRIVATE_KEY_PKCS8_B64),false);
+ assert.equal(logs[0].includes('sensitive-ledger-error'),false);
+});
