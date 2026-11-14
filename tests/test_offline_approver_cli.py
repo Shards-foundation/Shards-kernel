@@ -206,10 +206,16 @@ def test_bounded_draft_read_and_path_swap_prevented(tmp_path):
         mod.load_draft(str(fifo))
 
 
-def test_world_writable_draft_rejected(tmp_path):
+def test_world_writable_draft_rejected(tmp_path, monkeypatch):
     f = tmp_path / 'draft.json'
     f.write_text('{}')
-    os.chmod(f, 0o666)
+    real_fstat = mod.os.fstat
+
+    def writable_metadata(fd):
+        metadata = real_fstat(fd)
+        return SimpleNamespace(st_mode=metadata.st_mode | 0o022, st_uid=metadata.st_uid)
+
+    monkeypatch.setattr(mod.os, 'fstat', writable_metadata)
     with pytest.raises(ValueError, match='writable'):
         mod.load_draft(str(f))
 
