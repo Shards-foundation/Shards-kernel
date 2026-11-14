@@ -79,7 +79,7 @@ def valid_identity(value: object) -> bool:
             and "*" not in value and all(ord(x) < 128 for x in value))
 
 
-def validate_draft(d: dict, now: int, *, issuer: str, key_id: str, audience: str) -> None:
+def validate_draft_identity(d: dict, *, issuer: str, key_id: str, audience: str) -> None:
     if type(d) is not dict or set(d) != DRAFT_FIELDS:
         raise ValueError("Draft has missing or unknown fields")
     if d["signature"] != "" or d["version"] != 2 or d["algorithm"] != "Ed25519":
@@ -88,17 +88,27 @@ def validate_draft(d: dict, now: int, *, issuer: str, key_id: str, audience: str
         raise ValueError("Issuer, key-id or audience mismatch")
     if not all(valid_identity(d[n]) for n in ("issuer", "key_id", "subject", "jurisdiction", "audience")):
         raise ValueError("Ambiguous permit identity")
+
+
+def validate_draft_action(d: dict) -> None:
     if d["action"] != "add" or d["params"] != {"a": 7, "b": 8}:
         raise ValueError("Pilot approver authorises only exact add(7,8)")
     if type(d["params"]["a"]) is not int or type(d["params"]["b"]) is not int:
         raise ValueError("Boolean or non-integer add parameter")
-    if type(d["constraints"]) is not dict or d["constraints"] != {} or type(d["max_executions"]) is not int or d["max_executions"] != 1:
+    if (type(d["constraints"]) is not dict or d["constraints"] != {}
+            or type(d["max_executions"]) is not int or d["max_executions"] != 1):
         raise ValueError("Constraints or execution count not allowed")
+
+
+def validate_draft_time(d: dict, now: int) -> None:
     if not all(type(d[n]) is int and d[n] >= 0 for n in ("valid_from_ms", "valid_until_ms")):
         raise ValueError("Invalid permit timestamps")
     start, end = d["valid_from_ms"], d["valid_until_ms"]
     if not (0 < end - start <= 900_000 and start <= now < end - 5_000):
         raise ValueError("Permit not currently valid or too close to expiry")
+
+
+def validate_draft_binding(d: dict) -> None:
     if not (type(d["nonce"]) is str and HEX_32.fullmatch(d["nonce"])):
         raise ValueError("Invalid nonce")
     if not valid_identity(d["proposal_hash"]) or not (
@@ -112,6 +122,13 @@ def validate_draft(d: dict, now: int, *, issuer: str, key_id: str, audience: str
                                            if k not in ("permit_id", "signature")})).hexdigest()
     if computed != d["permit_id"]:
         raise ValueError("PERMIT_ID_BINDING_MISMATCH")
+
+
+def validate_draft(d: dict, now: int, *, issuer: str, key_id: str, audience: str) -> None:
+    validate_draft_identity(d, issuer=issuer, key_id=key_id, audience=audience)
+    validate_draft_action(d)
+    validate_draft_time(d, now)
+    validate_draft_binding(d)
 
 
 def ensure_secure_private() -> None:
