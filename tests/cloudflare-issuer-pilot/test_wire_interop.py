@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets
-import subprocess
+import shutil
+import subprocess  # nosec B404 -- required for fixed Python-to-Node interop harness
 import time
 from pathlib import Path
 
@@ -65,11 +67,30 @@ def main() -> None:
         "approval": approval,
     }
 
-    bridge = Path(__file__).with_name("interop_bridge.mjs")
-    run = subprocess.run(
-        ["node", str(bridge)],
+    # This harness only launches the checked-in bridge with a trusted Node
+    # binary. No user-controlled command, shell, script path or flags are used.
+    script_dir = Path(__file__).resolve(strict=True).parent
+    bridge = (script_dir / "interop_bridge.mjs").resolve(strict=True)
+    if bridge.parent != script_dir or not bridge.is_file():
+        raise RuntimeError("Interop bridge must be a local repository file")
+
+    node_location = shutil.which("node")
+    if node_location is None:
+        raise RuntimeError("Node.js is required for the interop check")
+    node = Path(node_location).resolve(strict=True)
+    if not node.is_absolute() or not node.is_file() or not os.access(node, os.X_OK):
+        raise RuntimeError("Node.js executable path is invalid")
+
+    # Deliberately exclude CI secrets and NODE_OPTIONS from the child process.
+    child_env = {
+        key: os.environ[key]
+        for key in ("PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT")
+        if key in os.environ
+    }
+    run = subprocess.run(  # nosec B603 -- fixed absolute executable/script; shell=False
+        [str(node), str(bridge)],
         input=json.dumps(payload), text=True, capture_output=True,
-        timeout=15, check=False,
+        timeout=15, check=False, shell=False, cwd=str(script_dir), env=child_env,
     )
     if run.returncode != 0:
         # Do NOT emit stderr or stdin: contain ephemeral key material.
