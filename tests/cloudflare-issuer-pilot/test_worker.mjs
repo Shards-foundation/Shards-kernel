@@ -43,9 +43,14 @@ async function expectRefusal(f,code,status=403) {
   assert.equal(body.code,code);
   assert.equal(Object.hasOwn(body,'permit'),false);
 }
+function statusRequest(token) {
+ return new Request('https://issuer.test/v1/status',{
+  headers:{authorization:'Bearer '+token}
+ });
+}
 test('disabled: no keys, no ledger, no signing',async()=>{const req=new Request('https://issuer.test/v1/issue',{method:'POST'}); const r=await worker.fetch(req,{});assert.equal(r.status,503);assert.equal((await r.json()).code,'ISSUER_NOT_PROVISIONED')});
 test('GET /health is liveness only, not a signing-readiness assertion',async()=>{let r=await worker.fetch(new Request('https://issuer.test/health'),{});assert.equal(r.status,200);const body=await r.json();assert.equal(body.status,'UP');assert.equal(Object.hasOwn(body,'signing_enabled'),false)});
-test('GET /v1/status reports locked without secrets and provisioned with complete bindings',async()=>{let f=await fixture();let locked=await (await worker.fetch(new Request('https://issuer.test/v1/status'),{})).json();assert.equal(locked.status,'LOCKED');assert.equal(locked.signing_enabled,false);let active=await (await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();assert.equal(active.status,'PROVISIONED');assert.equal(active.signing_enabled,true);});
+test('GET /v1/status reports locked without secrets and provisioned with complete bindings',async()=>{let f=await fixture();let locked=await (await worker.fetch(new Request('https://issuer.test/v1/status'),{})).json();assert.equal(locked.status,'LOCKED');assert.equal(locked.signing_enabled,false);let active=await (await worker.fetch(statusRequest(f.env.ISSUANCE_ACCESS_TOKEN),f.env)).json();assert.equal(active.status,'PROVISIONED');assert.equal(active.signing_enabled,true);});
 test('GET /v1/issue method refused',async()=>{let r=await worker.fetch(new Request('https://issuer.test/v1/issue'),{});assert.equal(r.status,405)});
 test('unknown routes denied',async()=>{let r=await worker.fetch(new Request('https://issuer.test/admin'),{});assert.equal(r.status,404)});
 test('unauthenticated requests refused',async()=>{let f=await fixture();let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval},'wrong'),f.env);assert.equal(r.status,401)});
@@ -73,14 +78,14 @@ test('reject evidence hashes outside empty or hex-64 formats',async()=>{
 });
 test('malformed issuer keys never report ready or issue permits',async()=>{
  const f=await fixture();f.env.ISSUER_PRIVATE_KEY_PKCS8_B64='not-a-key';
- const status=await(await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();
+ const status=await(await worker.fetch(statusRequest(f.env.ISSUANCE_ACCESS_TOKEN),f.env)).json();
  assert.equal(status.status,'LOCKED');assert.equal(status.signing_enabled,false);
  await expectRefusal(f,'CONFIG_INVALID',503);
 });
 test('wrong issuer public key cannot report signing ready',async()=>{
  const f=await fixture();const other=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
  f.env.ISSUER_PUBLIC_KEY_HEX=hex(await crypto.subtle.exportKey('raw',other.publicKey));
- const status=await(await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();
+ const status=await(await worker.fetch(statusRequest(f.env.ISSUANCE_ACCESS_TOKEN),f.env)).json();
  assert.equal(status.signing_enabled,false);await expectRefusal(f,'CONFIG_INVALID',503);
 });
 test('missing ledger denies',async()=>{const f=await fixture();delete f.env.ISSUANCE_DB;let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,503)});
@@ -111,4 +116,39 @@ test('liveness omits readiness even when signer is provisioned',async()=>{
  const body=await result.json();
  assert.equal(result.status,200);assert.equal(body.status,'UP');
  assert.equal(Object.hasOwn(body,'signing_enabled'),false);
+});
+
+test('unauthenticated status cannot invoke expensive signer check; valid bearer uses bounded cache',async()=>{
+ const f=await fixture();
+ const actualSign=crypto.subtle.sign;
+ let signOperations=0;
+ crypto.subtle.sign=async function (...args) {
+   signOperations+=1;
+   return actualSign.apply(this,args);
+ };
+ try {
+   for (let i=0;i<4;i++) {
+     const response=await worker.fetch(new Request('https://issuer.test/v1/status'),f.env);
+     assert.equal(response.status,401);
+     assert.equal((await response.json()).code,'AUTH_REQUIRED');
+   }
+   for (let i=0;i<3;i++) {
+     const response=await worker.fetch(statusRequest('invalid-bearer-value-do-not-accept'),f.env);
+     assert.equal(response.status,401);
+   }
+   assert.equal(signOperations,0,'Public and invalid-token probes must not sign');
+   const [first,second,third]=await Promise.all(Array.from({length:3},()=>worker.fetch(statusRequest(f.env.ISSUANCE_ACCESS_TOKEN),f.env)));
+   for(const response of [first,second,third]) {
+     assert.equal(response.status,200);
+     const body=await response.json();
+     assert.equal(body.status,'PROVISIONED');
+     assert.equal(body.signing_enabled,true);
+   }
+   assert.equal(signOperations,1,'Concurrent authorized probes must share signer work');
+   const later=await worker.fetch(statusRequest(f.env.ISSUANCE_ACCESS_TOKEN),f.env);
+   assert.equal(later.status,200);
+   assert.equal(signOperations,1,'Repeated authorized probes must reuse the bounded readiness cache');
+ } finally {
+   crypto.subtle.sign=actualSign;
+ }
 });
