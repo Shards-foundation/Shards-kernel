@@ -21,6 +21,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Node 22 built-in cryptography tests
         run: node --test tests/cloudflare-issuer-pilot/test_worker.mjs
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install exact published Kernel verification contract
+        run: python -m pip install 'shards-kernel[crypto]==0.1.4'
+      - name: Python Kernel to JavaScript issuer interoperability
+        run: python tests/cloudflare-issuer-pilot/test_wire_interop.py
       - name: Verify deployed issuer remains locked over public HTTPS
         run: |
           python - <<'PY'
