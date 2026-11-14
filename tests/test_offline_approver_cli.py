@@ -412,3 +412,11 @@ def test_failed_file_fsync_cleans_temporary_and_allows_retry(tmp_path, monkeypat
     monkeypatch.setattr(mod.os, 'fsync', original_fsync)
     mod.write_once(dest, {'ok': True})
     assert json.loads(dest.read_text()) == {'ok': True}
+
+def test_hidden_review_output_is_rejected_before_approval(monkeypatch):
+    terminal = SimpleNamespace(isatty=lambda: True)
+    hidden = SimpleNamespace(isatty=lambda: False)
+    monkeypatch.setattr(mod, 'sys', SimpleNamespace(stdin=terminal, stdout=hidden,
+                                                     stderr=terminal))
+    with pytest.raises(ValueError, match='Interactive terminal required'):
+        mod.require_interactive_tty()
