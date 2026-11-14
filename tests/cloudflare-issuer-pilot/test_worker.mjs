@@ -17,7 +17,7 @@ const join=(a,b)=>{let out=new Uint8Array(a.length+b.length);out.set(a);out.set(
 async function fixture(){
  let issuer=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
  let approver=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);
- const env={APPROVER_PUBLIC_KEY_HEX:hex(await crypto.subtle.exportKey('raw',approver.publicKey)),ISSUER_PUBLIC_KEY_HEX:hex(await crypto.subtle.exportKey('raw',issuer.publicKey)),ISSUER_PRIVATE_KEY_PKCS8_B64:Buffer.from(await crypto.subtle.exportKey('pkcs8',issuer.privateKey)).toString('base64'),ISSUANCE_ACCESS_TOKEN:'0123456789012345678901234567890123456789',ISSUER_NAME:'offline-issuer',ISSUER_KEY_ID:'issuer-key-1',ISSUER_AUDIENCE:'test-kernel'};
+ const env={APPROVER_PUBLIC_KEY_HEX:hex(await crypto.subtle.exportKey('raw',approver.publicKey)),ISSUER_PUBLIC_KEY_HEX:hex(await crypto.subtle.exportKey('raw',issuer.publicKey)),ISSUER_PRIVATE_KEY_PKCS8_B64:Buffer.from(await crypto.subtle.exportKey('pkcs8',issuer.privateKey)).toString('base64'),ISSUANCE_ACCESS_TOKEN:hex(crypto.getRandomValues(new Uint8Array(32))),ISSUER_NAME:'offline-issuer',ISSUER_KEY_ID:'issuer-key-1',ISSUER_AUDIENCE:'test-kernel'};
  const seen=new Set();
  env.ISSUANCE_DB={prepare(sql){assert.ok(sql.includes('INSERT INTO issued_permits'));return {bind(...args){return {async run(){if(seen.has(args[0]))throw Error('SQLITE_CONSTRAINT_PRIMARYKEY');seen.add(args[0]);return {success:true,meta:{changes:1}}}}}}}};
  const now=Date.now();
