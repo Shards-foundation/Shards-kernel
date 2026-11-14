@@ -29,12 +29,23 @@ jobs:
 
           origin = 'https://shards-permit-issuer-pilot.ayais12210.workers.dev'
           def checked(path, method='GET'):
-              req = request.Request(origin + path, method=method)
+              req = request.Request(origin + path, method=method,
+                                    headers={'User-Agent': 'shards-issuer-pilot-smoke/1.0'})
               try:
-                  with request.urlopen(req, timeout=20) as response:
-                      return response.status, json.load(response)
+                  response = request.urlopen(req, timeout=20)
               except error.HTTPError as exc:
-                  return exc.code, json.load(exc)
+                  response = exc
+              with response:
+                  code = response.status
+                  mime = response.headers.get('content-type', '')
+                  raw = response.read(1024)
+              try:
+                  data = json.loads(raw)
+              except (ValueError, UnicodeError):
+                  print('NON_JSON_HTTP_RESPONSE', path, 'status=', code,
+                        'content_type=', mime, 'sample=', repr(raw[:180]))
+                  raise AssertionError('Public endpoint did not return issuer JSON')
+              return code, data
 
           code, health = checked('/health')
           assert code == 200, ('health_http', code)
