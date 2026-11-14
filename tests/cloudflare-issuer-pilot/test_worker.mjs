@@ -85,3 +85,30 @@ test('wrong issuer public key cannot report signing ready',async()=>{
 });
 test('missing ledger denies',async()=>{const f=await fixture();delete f.env.ISSUANCE_DB;let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval}),f.env);assert.equal(r.status,503)});
 test('database error is 503 unavailable and signed permit never returned',async()=>{const f=await fixture();f.env.ISSUANCE_DB.prepare=()=>({bind:()=>({run:async()=>{throw Error('SQLITE_IOERR')}})});await expectRefusal(f,'LEDGER_UNAVAILABLE',503)});
+
+test('oversized authenticated request body is rejected with 413 before JSON parsing',async()=>{
+ const f=await fixture();
+ const oversized=JSON.stringify({draft:{...f.draft,subject:'x'.repeat(20000)},approval:f.approval});
+ const request=new Request('https://issuer.test/v1/issue',{method:'POST',
+  headers:{'content-type':'application/json','authorization':'Bearer '+f.env.ISSUANCE_ACCESS_TOKEN},body:oversized});
+ const result=await worker.fetch(request,f.env);
+ assert.equal(result.status,413);
+ assert.equal((await result.json()).code,'BODY_TOO_LARGE');
+});
+test('permit expiry during ledger I/O refuses result even if insertion succeeds',async()=>{
+ const f=await fixture();
+ const normalNow=Date.now;
+ f.env.ISSUANCE_DB.prepare=()=>({bind:()=>({run:async()=>{
+  Date.now=()=>f.draft.valid_until_ms+1;
+  return {success:true,meta:{changes:1}};
+ }})});
+ try {await expectRefusal(f,'EXPIRED_DURING_ISSUANCE');}
+ finally {Date.now=normalNow;}
+});
+test('liveness omits readiness even when signer is provisioned',async()=>{
+ const f=await fixture();
+ const result=await worker.fetch(new Request('https://issuer.test/health'),f.env);
+ const body=await result.json();
+ assert.equal(result.status,200);assert.equal(body.status,'UP');
+ assert.equal(Object.hasOwn(body,'signing_enabled'),false);
+});
