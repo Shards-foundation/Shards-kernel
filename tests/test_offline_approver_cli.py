@@ -413,6 +413,7 @@ def test_failed_file_fsync_cleans_temporary_and_allows_retry(tmp_path, monkeypat
     mod.write_once(dest, {'ok': True})
     assert json.loads(dest.read_text()) == {'ok': True}
 
+
 def test_hidden_review_output_is_rejected_before_approval(monkeypatch):
     terminal = SimpleNamespace(isatty=lambda: True)
     hidden = SimpleNamespace(isatty=lambda: False)
