@@ -19,7 +19,7 @@ const hex = (bytes) => [...new Uint8Array(bytes)].map((n) => n.toString(16).padS
 const unhex = (s) => new Uint8Array(s.match(/.{2}/g).map((chunk) => parseInt(chunk, 16)));
 const sameKeys = (obj, keys) => obj && typeof obj === 'object' && !Array.isArray(obj) && Object.keys(obj).length === keys.length && keys.every((key) => Object.hasOwn(obj,key));
 const int = (value) => Number.isSafeInteger(value) && value >= 0;
-const isHex = (value, length) => typeof value === 'string' && new RegExp('^[a-f0-9]{' + length + '}$').test(value);
+const isHex = (value, length) => typeof value === 'string' && value.length === length && /^[a-f0-9]+$/.test(value);
 const safe = (value) => typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value && !value.includes('*');
 const digest = async (buffer) => hex(await crypto.subtle.digest('SHA-256',buffer));
 const concat = (a,b) => { const out = new Uint8Array(a.length+b.length); out.set(a); out.set(b,a.length); return out; };
