@@ -13,13 +13,13 @@ any real Cloudflare signing request. `self-test` uses only ephemeral keys.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import getpass
 import hashlib
 import json
 import os
 import re
 import stat
-import tempfile
 import warnings
 import sys
 import time
@@ -104,6 +104,8 @@ def validate_draft_action(d: dict) -> None:
 
 
 def validate_draft_time(d: dict, now: int) -> None:
+    if type(now) is not int or not 0 <= now <= 2**53 - 1:
+        raise ValueError("Approval timestamp must be a valid integer")
     if not all(type(d[n]) is int and d[n] >= 0 for n in ("valid_from_ms", "valid_until_ms")):
         raise ValueError("Invalid permit timestamps")
     start, end = d["valid_from_ms"], d["valid_until_ms"]
@@ -175,6 +177,8 @@ def get_operator_key() -> Ed25519PrivateKey:
 def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str, *,
                   issuer: str, key_id: str, audience: str) -> dict:
     # This helper is public: never rely on approve() to enforce the action policy.
+    if type(now) is not int or not 0 <= now <= 2**53 - 1:
+        raise ValueError("Approval timestamp must be a valid integer")
     validate_draft(d, now, issuer=issuer, key_id=key_id, audience=audience)
     if not valid_identity(reviewer):
         raise ValueError("Invalid human reviewer identity")
@@ -195,38 +199,71 @@ def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str, *,
     return approval
 
 
+def _link_unnamed_file(fd: int, directory_fd: int, filename: str) -> None:
+    """Linux linkat(AT_EMPTY_PATH): install the *open inode*, never a pathname.
+
+    Requires O_TMPFILE support. No path-based fallback is permitted because
+    a malicious same-user process could replace a named temporary file.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    linkat = libc.linkat
+    linkat.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                       ctypes.c_char_p, ctypes.c_int)
+    linkat.restype = ctypes.c_int
+    if linkat(fd, b"", directory_fd, os.fsencode(filename), 0x1000) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), filename)
+
+
+def _assert_approval_not_expired(data: dict) -> None:
+    if data.get("schema") != "shards.operator-approval.v1":
+        return
+    expiry = data.get("expires_at_ms")
+    if type(expiry) is not int or not 0 <= expiry <= 2**53 - 1:
+        raise ValueError("Invalid approval expiry")
+    if int(time.time() * 1000) >= expiry - 5_000:
+        raise ValueError("Approval expired before publication")
+
+
 def write_once(path: Path, data: dict) -> None:
-    # Serialize before claiming any final path. No final pathname is visible
-    # until an on-disk complete, fsync'ed temporary file has been written.
+    """Durably install a complete approval without creating a replaceable temp path.
+
+    Linux-only O_TMPFILE + linkat(AT_EMPTY_PATH), with fail-closed behaviour
+    when the filesystem does not support unnamed inodes. Never overwrite.
+    """
     payload = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    fd, temp_name = tempfile.mkstemp(prefix=".approval-", suffix=".tmp", dir=path.parent)
-    temp_path = Path(temp_name)
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    temp_fd = None
     final_created = False
     try:
-        with os.fdopen(fd, "wb") as stream:
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if temp_path.stat().st_mode & 0o777 != 0o600:
-            raise ValueError("Approval output must be private")
-        # Atomic no-replace installation. os.replace() would overwrite.
-        os.link(temp_path, path)
+        temp_fd = os.open(path.parent, os.O_TMPFILE | os.O_WRONLY | os.O_CLOEXEC, 0o600)
+        os.fchmod(temp_fd, 0o600)
+        view = memoryview(payload)
+        while view:
+            count = os.write(temp_fd, view)
+            if count <= 0:
+                raise OSError("Temporary approval write failed")
+            view = view[count:]
+        os.fsync(temp_fd)
+        metadata = os.fstat(temp_fd)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o777 != 0o600
+                or metadata.st_uid != os.getuid() or metadata.st_nlink != 0):
+            raise ValueError("Temporary approval inode is not secure")
+        _assert_approval_not_expired(data)
+        # The unnamed inode is pinned by temp_fd until publication. The kernel
+        # enforces no-overwrite semantics with the linkat syscall (EEXIST).
+        _link_unnamed_file(temp_fd, directory_fd, path.name)
         final_created = True
-        temp_path.unlink()
-        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        os.fsync(directory_fd)
     except BaseException:
-        # A failure cannot strand a truncated approval at the public name.
-        # Re-raising leaves the caller free to retry an unconsumed permit.
         if final_created:
-            path.unlink(missing_ok=True)
+            os.unlink(path.name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
         raise
     finally:
-        temp_path.unlink(missing_ok=True)
+        if temp_fd is not None:
+            os.close(temp_fd)
+        os.close(directory_fd)
     print("Approval document written:", path)
     print("Only this JSON approval document may be transferred; NEVER the private key.")
 
