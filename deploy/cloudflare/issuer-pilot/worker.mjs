@@ -241,8 +241,17 @@ async function reservePermit(permit,approval,env) {
     deny('LEDGER_UNAVAILABLE',503);
   }
 }
+function diagnostic(stage,code) {
+  // Constant category-only logging: NEVER serialize throwable, credentials,
+  // signing keys, permit drafts, HTTP headers or stack traces.
+  console.error(JSON.stringify({event:'issuer_fail_closed',revision:REVISION,stage,code}));
+}
 function issueError(err) {
-  if (err instanceof PolicyRefusal) return json(err.status,{status:'DENY',code:err.code});
+  if (err instanceof PolicyRefusal) {
+    if (err.status>=500) diagnostic('issue',err.code);
+    return json(err.status,{status:'DENY',code:err.code});
+  }
+  diagnostic('issue','ISSUER_UNAVAILABLE');
   return json(503,{status:'DENY',code:'ISSUER_UNAVAILABLE'});
 }
 async function issue(request,env) {
@@ -284,6 +293,7 @@ export default {
       if (path==='/v1/issue') return json(405,{status:'DENY',code:'METHOD_NOT_ALLOWED'});
       return json(404,{status:'DENY',code:'NOT_FOUND'});
     } catch {
+      diagnostic('router','FAIL_CLOSED');
       return json(503,{status:'DENY',code:'FAIL_CLOSED'});
     }
   }
