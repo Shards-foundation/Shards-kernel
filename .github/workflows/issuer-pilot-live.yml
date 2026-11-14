@@ -37,7 +37,8 @@ jobs:
           code, health = checked('/health')
           assert code == 200, ('health_http', code)
           assert health['service'] == 'shards-permit-issuer-pilot'
-          assert health['signing_enabled'] is False, 'Unexpectedly active signer'
+          assert health['status'] == 'UP', ('health_status', health)
+          assert 'signing_enabled' not in health, 'Liveness must not assert signing readiness'
 
           code, status = checked('/v1/status')
           assert code == 200 and status['status'] == 'LOCKED', ('status', code, status)
