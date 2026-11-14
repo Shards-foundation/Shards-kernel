@@ -29,7 +29,8 @@ async function fixture(){
  return {env,draft,approval,req,issuer,approver};
 }
 test('disabled: no keys, no ledger, no signing',async()=>{const req=new Request('https://issuer.test/v1/issue',{method:'POST'}); const r=await worker.fetch(req,{});assert.equal(r.status,503);assert.equal((await r.json()).code,'ISSUER_NOT_PROVISIONED')});
-test('GET /health exposes only disabled status',async()=>{let r=await worker.fetch(new Request('https://issuer.test/health'),{});assert.equal(r.status,200);assert.equal((await r.json()).signing_enabled,false)});
+test('GET /health is liveness only, not a signing-readiness assertion',async()=>{let r=await worker.fetch(new Request('https://issuer.test/health'),{});assert.equal(r.status,200);const body=await r.json();assert.equal(body.status,'UP');assert.equal(Object.hasOwn(body,'signing_enabled'),false)});
+test('GET /v1/status reports locked without secrets and provisioned with complete bindings',async()=>{let f=await fixture();let locked=await (await worker.fetch(new Request('https://issuer.test/v1/status'),{})).json();assert.equal(locked.status,'LOCKED');assert.equal(locked.signing_enabled,false);let active=await (await worker.fetch(new Request('https://issuer.test/v1/status'),f.env)).json();assert.equal(active.status,'PROVISIONED');assert.equal(active.signing_enabled,true);});
 test('GET /v1/issue method refused',async()=>{let r=await worker.fetch(new Request('https://issuer.test/v1/issue'),{});assert.equal(r.status,405)});
 test('unknown routes denied',async()=>{let r=await worker.fetch(new Request('https://issuer.test/admin'),{});assert.equal(r.status,404)});
 test('unauthenticated requests refused',async()=>{let f=await fixture();let r=await worker.fetch(f.req({draft:f.draft,approval:f.approval},'wrong'),f.env);assert.equal(r.status,401)});
