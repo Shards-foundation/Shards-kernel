@@ -18,6 +18,9 @@ import hashlib
 import json
 import os
 import re
+import stat
+import tempfile
+import warnings
 import sys
 import time
 from pathlib import Path
@@ -142,9 +145,17 @@ def ensure_secure_private() -> None:
         raise ValueError("Public key missing or symlinked")
 
 
+def require_interactive_tty() -> None:
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        raise ValueError("Interactive terminal required for human approval")
+
+
 def get_operator_key() -> Ed25519PrivateKey:
     ensure_secure_private()
-    password = getpass.getpass("Human-approval key passphrase (hidden): ")
+    require_interactive_tty()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        password = getpass.getpass("Human-approval key passphrase (hidden): ")
     try:
         key = serialization.load_pem_private_key(PRIVATE.read_bytes(), password=password.encode())
     finally:
@@ -161,7 +172,10 @@ def get_operator_key() -> Ed25519PrivateKey:
     return key
 
 
-def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str) -> dict:
+def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str, *,
+                  issuer: str, key_id: str, audience: str) -> dict:
+    # This helper is public: never rely on approve() to enforce the action policy.
+    validate_draft(d, now, issuer=issuer, key_id=key_id, audience=audience)
     if not valid_identity(reviewer):
         raise ValueError("Invalid human reviewer identity")
     end = min(now + 60_000, d["valid_until_ms"])
@@ -182,15 +196,58 @@ def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str) -> d
 
 
 def write_once(path: Path, data: dict) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(data, stream, indent=2, sort_keys=True)
-        stream.write("\n")
+    # Serialize before claiming any final path. No final pathname is visible
+    # until an on-disk complete, fsync'ed temporary file has been written.
+    payload = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    fd, temp_name = tempfile.mkstemp(prefix=".approval-", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    final_created = False
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if temp_path.stat().st_mode & 0o777 != 0o600:
+            raise ValueError("Approval output must be private")
+        # Atomic no-replace installation. os.replace() would overwrite.
+        os.link(temp_path, path)
+        final_created = True
+        temp_path.unlink()
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        # A failure cannot strand a truncated approval at the public name.
+        # Re-raising leaves the caller free to retry an unconsumed permit.
+        if final_created:
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)
     print("Approval document written:", path)
     print("Only this JSON approval document may be transferred; NEVER the private key.")
+
+
+def load_draft(path_text: str) -> dict:
+    # Validate the actual opened inode rather than stat(path) then read(path).
+    # O_NONBLOCK prevents being held on a FIFO before fstat can reject it.
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    with os.fdopen(os.open(path_text, flags), "rb") as source:
+        metadata = os.fstat(source.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+            raise ValueError("Draft must be an owner-controlled regular file")
+        if metadata.st_mode & 0o022:
+            raise ValueError("Draft must not be group or world writable")
+        raw = source.read(8193)
+    if len(raw) > 8192:
+        raise ValueError("Draft JSON exceeds 8192 bytes")
+    result = json.loads(raw.decode("utf-8"), object_pairs_hook=no_duplicates)
+    if type(result) is not dict:
+        raise ValueError("Draft must be a JSON object")
+    return result
 
 
 def test() -> None:
@@ -208,7 +265,8 @@ def test() -> None:
     demo["permit_id"] = hashlib.sha256(canonical({k: v for k, v in demo.items()
                                                  if k not in ("permit_id", "signature")})).hexdigest()
     validate_draft(demo, now, issuer="pilot-issuer", key_id="pilot-key", audience="pilot-kernel")
-    approval = sign_approval(demo, key, now, "trusted-human")
+    approval = sign_approval(demo, key, now, "trusted-human",
+                             issuer="pilot-issuer", key_id="pilot-key", audience="pilot-kernel")
     bare = {k: v for k, v in approval.items() if k != "signature_hex"}
     message = APPROVAL_DOMAIN + canonical(bare)
     key.public_key().verify(bytes.fromhex(approval["signature_hex"]), message)
@@ -225,24 +283,24 @@ def test() -> None:
 
 def approve(args) -> None:
     now = int(time.time() * 1000)
-    path = Path(args.draft).resolve(strict=True)
-    if not path.is_file() or path.stat().st_size > 8192:
-        raise ValueError("Invalid or oversized draft JSON")
-    d = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=no_duplicates)
+    require_interactive_tty()
+    d = load_draft(args.draft)
     validate_draft(d, now, issuer=args.issuer, key_id=args.key_id, audience=args.audience)
     digest = hashlib.sha256(canonical({k: v for k, v in d.items() if k != "signature"})).hexdigest()
     print("\nHUMAN APPROVAL — review the actual signed fields:")
     print(json.dumps(d, sort_keys=True, indent=2, ensure_ascii=True))
     print("  canonical draft SHA256:", digest)
     print("  current UTC seconds:", now // 1000)
-    if input("Type EXACTLY 'APPROVE add(7,8)' after reviewing: ").strip() != "APPROVE add(7,8)":
+    challenge = f"APPROVE {d['permit_id']}"
+    if input(f"Type EXACTLY '{challenge}' after reviewing: ") != challenge:
         raise ValueError("Human approval not given")
     # Loading the encrypted key can take significant human time. Recheck
     # expiry *after* passphrase entry to avoid emitting stale approvals.
     key = get_operator_key()
     now = int(time.time() * 1000)
     validate_draft(d, now, issuer=args.issuer, key_id=args.key_id, audience=args.audience)
-    approval = sign_approval(d, key, now, reviewer=args.reviewer)
+    approval = sign_approval(d, key, now, reviewer=args.reviewer,
+                             issuer=args.issuer, key_id=args.key_id, audience=args.audience)
     output = DIR / f"approval-{d['permit_id'][:16]}.json"
     write_once(output, approval)
 
@@ -256,7 +314,7 @@ def main():
     p.add_argument("--issuer", required=True)
     p.add_argument("--key-id", required=True)
     p.add_argument("--audience", required=True)
-    p.add_argument("--reviewer", default="trusted-human")
+    p.add_argument("--reviewer", required=True)
     args = parser.parse_args()
     if args.mode == "self-test":
         test()
@@ -267,7 +325,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, KeyError, TypeError):
+    except (ValueError, OSError, KeyError, TypeError, getpass.GetPassWarning):
         # Avoid printing exception details which might include user-provided JSON.
         print("DENY: Local approval failed (invalid draft, credentials, or environment)", file=sys.stderr)
         sys.exit(2)
