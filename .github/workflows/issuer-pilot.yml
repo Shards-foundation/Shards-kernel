@@ -19,6 +19,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Verify Node 22 runtime
+        run: node -e "if (process.versions.node.split('.')[0] !== '22') process.exit(1)"
       - name: Node 22 built-in cryptography tests
         run: node --test tests/cloudflare-issuer-pilot/test_worker.mjs
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
