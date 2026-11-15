@@ -188,6 +188,7 @@ def ensure_secure_private() -> None:
         try:
             _read_approver_file(fd, PUBLIC_HEX.name, 128, private=False)
         except FileNotFoundError:
+            # The hexadecimal public identity is optional; the PEM is mandatory.
             pass
         _check_pinned_directory(fd, DIR)
     finally:
