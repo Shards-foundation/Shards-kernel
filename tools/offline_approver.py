@@ -136,15 +136,55 @@ def validate_draft(d: dict, now: int, *, issuer: str, key_id: str, audience: str
     validate_draft_binding(d)
 
 
+def _secure_directory_fd(directory: Path) -> int:
+    """Open and pin an owner-only directory, rejecting links and path swaps."""
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        _check_pinned_directory(fd, directory)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _check_pinned_directory(fd: int, directory: Path) -> None:
+    """Require the named path still identifies the pinned, owner-controlled inode."""
+    pinned = os.fstat(fd)
+    current = os.stat(directory, follow_symlinks=False)
+    if (not stat.S_ISDIR(pinned.st_mode) or pinned.st_uid != os.getuid()
+            or pinned.st_mode & 0o077 or not stat.S_ISDIR(current.st_mode)
+            or (pinned.st_dev, pinned.st_ino) != (current.st_dev, current.st_ino)):
+        raise ValueError("Approver directory changed or is not owner-only")
+
+
+def _read_private_file(directory_fd: int, name: str, limit: int) -> bytes:
+    """Read only a regular owner-only file through the pinned directory inode."""
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(name, flags, dir_fd=directory_fd)
+    with os.fdopen(fd, "rb") as source:
+        meta = os.fstat(source.fileno())
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.getuid()
+                or meta.st_mode & 0o077 or meta.st_size > limit):
+            raise ValueError("Approver key file is not owner-only and regular")
+        data = source.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("Approver key file exceeds size limit")
+        return data
+
+
 def ensure_secure_private() -> None:
-    if DIR.is_symlink() or not DIR.is_dir() or DIR.stat().st_uid != os.getuid() or DIR.stat().st_mode & 0o077:
-        raise ValueError("Approver directory must be owner-only (mode 700)")
-    if PRIVATE.is_symlink() or not PRIVATE.is_file() or PRIVATE.stat().st_mode & 0o077:
-        raise ValueError("Approver private key must be a non-symlink owner-only file (mode 600)")
-    if PRIVATE.stat().st_uid != os.getuid():
-        raise ValueError("Approver private key owner mismatch")
-    if PUBLIC.is_symlink() or not PUBLIC.is_file() or PUBLIC_HEX.is_symlink():
-        raise ValueError("Public key missing or symlinked")
+    """Compatibility validation; real sign flow keeps its directory FD pinned."""
+    fd = _secure_directory_fd(DIR)
+    try:
+        _read_private_file(fd, PRIVATE.name, 65_536)
+        _read_private_file(fd, PUBLIC.name, 4_096)
+        try:
+            _read_private_file(fd, PUBLIC_HEX.name, 128)
+        except FileNotFoundError:
+            pass
+        _check_pinned_directory(fd, DIR)
+    finally:
+        os.close(fd)
 
 
 def require_interactive_tty() -> None:
@@ -152,27 +192,39 @@ def require_interactive_tty() -> None:
         raise ValueError("Interactive terminal required for human approval")
 
 
-def get_operator_key() -> Ed25519PrivateKey:
-    ensure_secure_private()
-    require_interactive_tty()
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", getpass.GetPassWarning)
-        password = getpass.getpass("Human-approval key passphrase (hidden): ")
+def get_operator_key(directory_fd: int | None = None) -> Ed25519PrivateKey:
+    owns_fd = directory_fd is None
+    if directory_fd is None:
+        directory_fd = _secure_directory_fd(DIR)
     try:
-        key = serialization.load_pem_private_key(PRIVATE.read_bytes(), password=password.encode())
+        _check_pinned_directory(directory_fd, DIR)
+        require_interactive_tty()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            password = getpass.getpass("Human-approval key passphrase (hidden): ")
+        try:
+            pem = _read_private_file(directory_fd, PRIVATE.name, 65_536)
+            key = serialization.load_pem_private_key(pem, password=password.encode())
+        finally:
+            del password
+        if not isinstance(key, Ed25519PrivateKey):
+            raise ValueError("Private key must be Ed25519")
+        public = serialization.load_pem_public_key(_read_private_file(directory_fd, PUBLIC.name, 4_096))
+        expected = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        actual = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        if expected != actual:
+            raise ValueError("Private and public keys disagree")
+        try:
+            identity = _read_private_file(directory_fd, PUBLIC_HEX.name, 128)
+        except FileNotFoundError:
+            identity = None
+        if identity is not None and identity.decode("ascii").strip() != actual.hex():
+            raise ValueError("Hex public identity mismatch")
+        _check_pinned_directory(directory_fd, DIR)
+        return key
     finally:
-        del password
-    if not isinstance(key, Ed25519PrivateKey):
-        raise ValueError("Private key must be Ed25519")
-    public = serialization.load_pem_public_key(PUBLIC.read_bytes())
-    expected = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    actual = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    if expected != actual:
-        raise ValueError("Private and public keys disagree")
-    if PUBLIC_HEX.exists() and PUBLIC_HEX.read_text().strip() != actual.hex():
-        raise ValueError("Hex public identity mismatch")
-    return key
-
+        if owns_fd:
+            os.close(directory_fd)
 
 def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str, *,
                   issuer: str, key_id: str, audience: str) -> dict:
@@ -200,20 +252,25 @@ def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str, *,
 
 
 def _link_unnamed_file(fd: int, directory_fd: int, filename: str) -> None:
-    """Linux linkat(AT_EMPTY_PATH): install the *open inode*, never a pathname.
+    """Install an unnamed inode without CAP_DAC_READ_SEARCH.
 
-    Requires O_TMPFILE support. No path-based fallback is permitted because
-    a malicious same-user process could replace a named temporary file.
+    The procfs descriptor path refers to this process's open FD, not a
+    replaceable file name. Linux linkat(AT_SYMLINK_FOLLOW) follows that
+    procfs link to the O_TMPFILE inode, exclusively, without overwriting.
+    Fail closed if procfs, O_TMPFILE, or the syscall is unavailable.
     """
     libc = ctypes.CDLL(None, use_errno=True)
     linkat = libc.linkat
     linkat.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
                        ctypes.c_char_p, ctypes.c_int)
     linkat.restype = ctypes.c_int
-    if linkat(fd, b"", directory_fd, os.fsencode(filename), 0x1000) != 0:
+    source = f"/proc/self/fd/{fd}".encode("ascii")
+    at_fdcwd = getattr(os, "AT_FDCWD", -100)
+    at_symlink_follow = getattr(os, "AT_SYMLINK_FOLLOW", 0x400)
+    if linkat(at_fdcwd, source, directory_fd, os.fsencode(filename),
+              at_symlink_follow) != 0:
         err = ctypes.get_errno()
         raise OSError(err, os.strerror(err), filename)
-
 
 def _assert_approval_not_expired(data: dict) -> None:
     if data.get("schema") != "shards.operator-approval.v1":
@@ -225,18 +282,23 @@ def _assert_approval_not_expired(data: dict) -> None:
         raise ValueError("Approval expired before publication")
 
 
-def write_once(path: Path, data: dict) -> None:
-    """Durably install a complete approval without creating a replaceable temp path.
+def write_once(path: Path, data: dict, *, directory_fd: int | None = None) -> None:
+    """Safely install a complete approval into a pinned, checked directory.
 
-    Linux-only O_TMPFILE + linkat(AT_EMPTY_PATH), with fail-closed behaviour
-    when the filesystem does not support unnamed inodes. Never overwrite.
+    Linux O_TMPFILE + descriptor-backed linkat(AT_SYMLINK_FOLLOW). Both the
+    anonymous inode and the owner-only output directory remain FD-pinned;
+    no pathname-based temporary file or unsafe fallback is permitted.
     """
     payload = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    owns_fd = directory_fd is None
+    if directory_fd is None:
+        directory_fd = _secure_directory_fd(path.parent)
     temp_fd = None
     final_created = False
     try:
-        temp_fd = os.open(path.parent, os.O_TMPFILE | os.O_WRONLY | os.O_CLOEXEC, 0o600)
+        _check_pinned_directory(directory_fd, path.parent)
+        temp_fd = os.open(".", os.O_TMPFILE | os.O_WRONLY | os.O_CLOEXEC,
+                          0o600, dir_fd=directory_fd)
         os.fchmod(temp_fd, 0o600)
         view = memoryview(payload)
         while view:
@@ -249,9 +311,11 @@ def write_once(path: Path, data: dict) -> None:
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o777 != 0o600
                 or metadata.st_uid != os.getuid() or metadata.st_nlink != 0):
             raise ValueError("Temporary approval inode is not secure")
+        # Reconfirm the directory inode and approval validity immediately
+        # before publication. Even a later path swap cannot redirect the
+        # FD-pinned operation into the replacement directory.
+        _check_pinned_directory(directory_fd, path.parent)
         _assert_approval_not_expired(data)
-        # The unnamed inode is pinned by temp_fd until publication. The kernel
-        # enforces no-overwrite semantics with the linkat syscall (EEXIST).
         _link_unnamed_file(temp_fd, directory_fd, path.name)
         final_created = True
         os.fsync(directory_fd)
@@ -263,10 +327,10 @@ def write_once(path: Path, data: dict) -> None:
     finally:
         if temp_fd is not None:
             os.close(temp_fd)
-        os.close(directory_fd)
+        if owns_fd:
+            os.close(directory_fd)
     print("Approval document written:", path)
     print("Only this JSON approval document may be transferred; NEVER the private key.")
-
 
 def load_draft(path_text: str) -> dict:
     # Validate the actual opened inode rather than stat(path) then read(path).
@@ -331,16 +395,19 @@ def approve(args) -> None:
     challenge = f"APPROVE {d['permit_id']}"
     if input(f"Type EXACTLY '{challenge}' after reviewing: ") != challenge:
         raise ValueError("Human approval not given")
-    # Loading the encrypted key can take significant human time. Recheck
-    # expiry *after* passphrase entry to avoid emitting stale approvals.
-    key = get_operator_key()
-    now = int(time.time() * 1000)
-    validate_draft(d, now, issuer=args.issuer, key_id=args.key_id, audience=args.audience)
-    approval = sign_approval(d, key, now, reviewer=args.reviewer,
-                             issuer=args.issuer, key_id=args.key_id, audience=args.audience)
-    output = DIR / f"approval-{d['permit_id'][:16]}.json"
-    write_once(output, approval)
-
+    # Pin the owner-only directory before key unlock; carry the SAME inode
+    # across key reading, revalidation, signing and approval publication.
+    directory_fd = _secure_directory_fd(DIR)
+    try:
+        key = get_operator_key(directory_fd=directory_fd)
+        now = int(time.time() * 1000)
+        validate_draft(d, now, issuer=args.issuer, key_id=args.key_id, audience=args.audience)
+        approval = sign_approval(d, key, now, reviewer=args.reviewer,
+                                 issuer=args.issuer, key_id=args.key_id, audience=args.audience)
+        output = DIR / f"approval-{d['permit_id'][:16]}.json"
+        write_once(output, approval, directory_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
 
 def main():
     parser = argparse.ArgumentParser(description="Offline Shards human approver — exact add(7,8) only")
