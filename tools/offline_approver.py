@@ -226,6 +226,7 @@ def get_operator_key(directory_fd: int | None = None) -> Ed25519PrivateKey:
         if owns_fd:
             os.close(directory_fd)
 
+
 def sign_approval(d: dict, key: Ed25519PrivateKey, now: int, reviewer: str, *,
                   issuer: str, key_id: str, audience: str) -> dict:
     # This helper is public: never rely on approve() to enforce the action policy.
@@ -271,6 +272,7 @@ def _link_unnamed_file(fd: int, directory_fd: int, filename: str) -> None:
               at_symlink_follow) != 0:
         err = ctypes.get_errno()
         raise OSError(err, os.strerror(err), filename)
+
 
 def _assert_approval_not_expired(data: dict) -> None:
     if data.get("schema") != "shards.operator-approval.v1":
@@ -331,6 +333,7 @@ def write_once(path: Path, data: dict, *, directory_fd: int | None = None) -> No
             os.close(directory_fd)
     print("Approval document written:", path)
     print("Only this JSON approval document may be transferred; NEVER the private key.")
+
 
 def load_draft(path_text: str) -> dict:
     # Validate the actual opened inode rather than stat(path) then read(path).
@@ -408,6 +411,7 @@ def approve(args) -> None:
         write_once(output, approval, directory_fd=directory_fd)
     finally:
         os.close(directory_fd)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Offline Shards human approver — exact add(7,8) only")
