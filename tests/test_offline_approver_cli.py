@@ -155,7 +155,7 @@ def test_passphrase_delay_causes_rejection_no_signed_output(tmp_path,monkeypatch
     monkeypatch.setattr(mod,'require_interactive_tty',lambda:None)
     monkeypatch.setattr('builtins.input',lambda prompt:prompt.split("'")[1])
     key=Ed25519PrivateKey.generate()
-    def delayed_key():
+    def delayed_key(*, directory_fd):
         monkeypatch.setattr(mod.time,'time',lambda:(now+130_000)/1000)
         return key
     monkeypatch.setattr(mod,'get_operator_key',delayed_key)
@@ -289,7 +289,7 @@ def test_exact_challenge_precedes_key_unlock(tmp_path, monkeypatch, capsys):
         events.append('confirm')
         return expected
 
-    def unlock():
+    def unlock(*, directory_fd):
         events.append('unlock')
         return Ed25519PrivateKey.generate()
 
@@ -403,6 +403,8 @@ def test_mismatched_public_key_and_hex_identity_rejected(tmp_path, monkeypatch):
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
     hexf.write_text(wrong.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex())
+    os.chmod(public, 0o600)
+    os.chmod(hexf, 0o600)
     monkeypatch.setattr(mod, 'DIR', work)
     monkeypatch.setattr(mod, 'PRIVATE', private)
     monkeypatch.setattr(mod, 'PUBLIC', public)
@@ -500,3 +502,57 @@ def test_preexisting_approval_path_blocks_unnamed_install(tmp_path):
     with pytest.raises(FileExistsError):
         mod.write_once(target, {'safe': True})
     assert target.read_text() == 'existing target'
+
+
+def test_swap_of_checked_output_directory_is_denied(tmp_path, monkeypatch):
+    original = tmp_path / 'approver'
+    original.mkdir(mode=0o700)
+    moved = tmp_path / 'moved-approver'
+    directory_fd = mod._secure_directory_fd(original)
+    try:
+        original.rename(moved)
+        original.mkdir(mode=0o700)
+        with pytest.raises(ValueError, match='directory changed'):
+            mod.write_once(original / 'approval.json', {'safe': True}, directory_fd=directory_fd)
+        assert not (original / 'approval.json').exists()
+        assert not (moved / 'approval.json').exists()
+    finally:
+        os.close(directory_fd)
+
+
+def test_swap_after_staging_denies_before_publication(tmp_path, monkeypatch):
+    directory = tmp_path / 'approver'
+    directory.mkdir(mode=0o700)
+    moved = tmp_path / 'moved-approver'
+    original = mod.os.fsync
+    swapped = {'done': False}
+
+    def swap_after_staging(fd):
+        result = original(fd)
+        if not swapped['done']:
+            swapped['done'] = True
+            directory.rename(moved)
+            directory.mkdir(mode=0o700)
+        return result
+
+    monkeypatch.setattr(mod.os, 'fsync', swap_after_staging)
+    with pytest.raises(ValueError, match='directory changed'):
+        mod.write_once(directory / 'approval.json', {'safe': True})
+    assert not (directory / 'approval.json').exists()
+    assert not (moved / 'approval.json').exists()
+
+
+def test_insecure_or_symlink_approval_directory_denied(tmp_path):
+    directory = tmp_path / 'approver'
+    directory.mkdir(mode=0o700)
+    link = tmp_path / 'pointer'
+    link.symlink_to(directory, target_is_directory=True)
+    with pytest.raises(OSError):
+        mod.write_once(link / 'approval.json', {'safe': True})
+    os.chmod(directory, 0o777)
+    try:
+        with pytest.raises(ValueError, match='owner-only'):
+            mod.write_once(directory / 'approval.json', {'safe': True})
+    finally:
+        os.chmod(directory, 0o700)
+    assert not (directory / 'approval.json').exists()
