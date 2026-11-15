@@ -1,0 +1,62 @@
+name: Cloudflare issuer pilot — live locked smoke (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-locked-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify deployed issuer remains locked over public HTTPS
+        run: |
+          python - <<'PY'
+          import json
+          from urllib import request, error
+
+          origin = 'https://shards-permit-issuer-pilot.ayais12210.workers.dev'
+
+          class NoRedirect(request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise AssertionError(('UNEXPECTED_REDIRECT', code))
+
+          opener = request.build_opener(NoRedirect)
+
+          def checked(path, method='GET'):
+              req = request.Request(origin + path, method=method,
+                                    headers={'User-Agent': 'shards-issuer-pilot-smoke/1.0'})
+              try:
+                  response = opener.open(req, timeout=20)
+              except error.HTTPError as exc:
+                  if 300 <= exc.code < 400:
+                      raise AssertionError(('UNEXPECTED_REDIRECT', exc.code)) from exc
+                  response = exc
+              with response:
+                  code = response.status
+                  final_url = response.geturl()
+                  assert final_url == origin + path, ('UNEXPECTED_FINAL_URL', final_url)
+                  mime = response.headers.get('content-type', '')
+                  raw = response.read(1024)
+              try:
+                  data = json.loads(raw)
+              except (ValueError, UnicodeError):
+                  print('NON_JSON_HTTP_RESPONSE', path, 'status=', code,
+                        'content_type=', mime, 'sample=', repr(raw[:180]))
+                  raise AssertionError('Public endpoint did not return issuer JSON')
+              return code, data
+
+          code, health = checked('/health')
+          assert code == 200, ('health_http', code)
+          assert health['service'] == 'shards-permit-issuer-pilot'
+          assert health['status'] == 'UP', ('health_status', health)
+          assert 'signing_enabled' not in health, 'Liveness must not assert signing readiness'
+
+          code, status = checked('/v1/status')
+          assert code == 200 and status['status'] == 'LOCKED', ('status', code, status)
+          assert status['signing_enabled'] is False, 'Signing credentials are active'
+
+          code, denied = checked('/v1/issue', method='POST')
+          assert code == 503, ('issue_status', code)
+          assert denied['code'] == 'ISSUER_NOT_PROVISIONED', denied
+          print('PASS: public HTTP health, locked status and issuance denial')
+          PY
