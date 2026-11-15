@@ -157,15 +157,22 @@ def _check_pinned_directory(fd: int, directory: Path) -> None:
         raise ValueError("Approver directory changed or is not owner-only")
 
 
-def _read_private_file(directory_fd: int, name: str, limit: int) -> bytes:
-    """Read only a regular owner-only file through the pinned directory inode."""
+def _read_approver_file(directory_fd: int, name: str, limit: int, *,
+                        private: bool) -> bytes:
+    """Read from the pinned directory; use distinct private/public modes.
+
+    Both file types must be regular, non-symlink, owned by this user and
+    size-bounded. Private PEM requires owner-only access; public identities
+    may be world-readable (0644), but may not be group/world writable.
+    """
     flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(name, flags, dir_fd=directory_fd)
     with os.fdopen(fd, "rb") as source:
         meta = os.fstat(source.fileno())
+        forbidden = 0o077 if private else 0o022
         if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.getuid()
-                or meta.st_mode & 0o077 or meta.st_size > limit):
-            raise ValueError("Approver key file is not owner-only and regular")
+                or meta.st_mode & forbidden or meta.st_size > limit):
+            raise ValueError("Approver key file ownership or permissions invalid")
         data = source.read(limit + 1)
         if len(data) > limit:
             raise ValueError("Approver key file exceeds size limit")
@@ -176,10 +183,10 @@ def ensure_secure_private() -> None:
     """Compatibility validation; real sign flow keeps its directory FD pinned."""
     fd = _secure_directory_fd(DIR)
     try:
-        _read_private_file(fd, PRIVATE.name, 65_536)
-        _read_private_file(fd, PUBLIC.name, 4_096)
+        _read_approver_file(fd, PRIVATE.name, 65_536, private=True)
+        _read_approver_file(fd, PUBLIC.name, 4_096, private=False)
         try:
-            _read_private_file(fd, PUBLIC_HEX.name, 128)
+            _read_approver_file(fd, PUBLIC_HEX.name, 128, private=False)
         except FileNotFoundError:
             pass
         _check_pinned_directory(fd, DIR)
@@ -203,19 +210,19 @@ def get_operator_key(directory_fd: int | None = None) -> Ed25519PrivateKey:
             warnings.simplefilter("error", getpass.GetPassWarning)
             password = getpass.getpass("Human-approval key passphrase (hidden): ")
         try:
-            pem = _read_private_file(directory_fd, PRIVATE.name, 65_536)
+            pem = _read_approver_file(directory_fd, PRIVATE.name, 65_536, private=True)
             key = serialization.load_pem_private_key(pem, password=password.encode())
         finally:
             del password
         if not isinstance(key, Ed25519PrivateKey):
             raise ValueError("Private key must be Ed25519")
-        public = serialization.load_pem_public_key(_read_private_file(directory_fd, PUBLIC.name, 4_096))
+        public = serialization.load_pem_public_key(_read_approver_file(directory_fd, PUBLIC.name, 4_096, private=False))
         expected = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         actual = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         if expected != actual:
             raise ValueError("Private and public keys disagree")
         try:
-            identity = _read_private_file(directory_fd, PUBLIC_HEX.name, 128)
+            identity = _read_approver_file(directory_fd, PUBLIC_HEX.name, 128, private=False)
         except FileNotFoundError:
             identity = None
         if identity is not None and identity.decode("ascii").strip() != actual.hex():
