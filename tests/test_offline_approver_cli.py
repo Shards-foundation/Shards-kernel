@@ -542,17 +542,29 @@ def test_swap_after_staging_denies_before_publication(tmp_path, monkeypatch):
     assert not (moved / 'approval.json').exists()
 
 
-def test_insecure_or_symlink_approval_directory_denied(tmp_path):
+def test_insecure_or_symlink_approval_directory_denied(tmp_path, monkeypatch):
     directory = tmp_path / 'approver'
     directory.mkdir(mode=0o700)
     link = tmp_path / 'pointer'
     link.symlink_to(directory, target_is_directory=True)
     with pytest.raises(OSError):
         mod.write_once(link / 'approval.json', {'safe': True})
-    os.chmod(directory, 0o777)
-    try:
+
+    # Model an insecure directory without actually making a live directory
+    # world-writable; retain the full stat_result shape for pytest internals.
+    target = directory.stat()
+    real_fstat = os.fstat
+
+    def insecure_directory_metadata(fd):
+        metadata = real_fstat(fd)
+        if (metadata.st_dev, metadata.st_ino) != (target.st_dev, target.st_ino):
+            return metadata
+        fields = list(metadata)
+        fields[0] |= 0o077
+        return os.stat_result(fields)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mod.os, 'fstat', insecure_directory_metadata)
         with pytest.raises(ValueError, match='owner-only'):
             mod.write_once(directory / 'approval.json', {'safe': True})
-    finally:
-        os.chmod(directory, 0o700)
     assert not (directory / 'approval.json').exists()
