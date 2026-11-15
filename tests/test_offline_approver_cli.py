@@ -118,8 +118,9 @@ def test_real_approve_path_with_encrypted_ephemeral_key(tmp_path,monkeypatch):
     raw=key.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw)
     public.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
     hexf.write_text(raw.hex())
+    # Public identity files commonly use 0644; the private PEM stays 0600.
     for x in (public,hexf):
-        os.chmod(x,0o600)
+        os.chmod(x,0o644)
     monkeypatch.setattr(mod,'DIR',work)
     monkeypatch.setattr(mod,'PRIVATE',private)
     monkeypatch.setattr(mod,'PUBLIC',public)
@@ -403,8 +404,8 @@ def test_mismatched_public_key_and_hex_identity_rejected(tmp_path, monkeypatch):
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
     hexf.write_text(wrong.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex())
-    os.chmod(public, 0o600)
-    os.chmod(hexf, 0o600)
+    os.chmod(public, 0o644)
+    os.chmod(hexf, 0o644)
     monkeypatch.setattr(mod, 'DIR', work)
     monkeypatch.setattr(mod, 'PRIVATE', private)
     monkeypatch.setattr(mod, 'PUBLIC', public)
@@ -568,3 +569,75 @@ def test_insecure_or_symlink_approval_directory_denied(tmp_path, monkeypatch):
         with pytest.raises(ValueError, match='owner-only'):
             mod.write_once(directory / 'approval.json', {'safe': True})
     assert not (directory / 'approval.json').exists()
+
+
+@pytest.mark.parametrize("forbidden_bit", [0o040, 0o004])
+def test_private_key_reader_rejects_non_owner_read_access(tmp_path, monkeypatch, forbidden_bit):
+    directory = tmp_path / "private-policy"
+    directory.mkdir(mode=0o700)
+    private = directory / "approver-private.pem"
+    private.write_bytes(b"synthetic-private-key")
+    os.chmod(private, 0o600)
+    directory_fd = mod._secure_directory_fd(directory)
+    expected = private.stat()
+    original_fstat = os.fstat
+
+    def simulated_insecure_file(fd):
+        metadata = original_fstat(fd)
+        if (metadata.st_dev, metadata.st_ino) != (expected.st_dev, expected.st_ino):
+            return metadata
+        fields = list(metadata)
+        fields[0] |= forbidden_bit
+        return os.stat_result(fields)
+
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(mod.os, "fstat", simulated_insecure_file)
+            with pytest.raises(ValueError, match="permissions invalid"):
+                mod._read_approver_file(directory_fd, private.name, 4096, private=True)
+    finally:
+        os.close(directory_fd)
+
+
+@pytest.mark.parametrize("forbidden_bit", [0o020, 0o002])
+def test_public_identity_reader_rejects_writable_nonowner_mode(tmp_path, monkeypatch, forbidden_bit):
+    directory = tmp_path / "public-policy"
+    directory.mkdir(mode=0o700)
+    public = directory / "approver-public.pem"
+    public.write_bytes(b"synthetic-public-identity")
+    os.chmod(public, 0o644)
+    directory_fd = mod._secure_directory_fd(directory)
+    expected = public.stat()
+    original_fstat = os.fstat
+
+    def simulated_insecure_file(fd):
+        metadata = original_fstat(fd)
+        if (metadata.st_dev, metadata.st_ino) != (expected.st_dev, expected.st_ino):
+            return metadata
+        fields = list(metadata)
+        fields[0] |= forbidden_bit
+        return os.stat_result(fields)
+
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(mod.os, "fstat", simulated_insecure_file)
+            with pytest.raises(ValueError, match="permissions invalid"):
+                mod._read_approver_file(directory_fd, public.name, 4096, private=False)
+    finally:
+        os.close(directory_fd)
+
+
+def test_public_identity_reader_rejects_symlinks(tmp_path):
+    directory = tmp_path / "public-symlink"
+    directory.mkdir(mode=0o700)
+    actual = directory / "real-public.pem"
+    actual.write_bytes(b"public-identity")
+    os.chmod(actual, 0o644)
+    link = directory / "approver-public.pem"
+    link.symlink_to(actual)
+    directory_fd = mod._secure_directory_fd(directory)
+    try:
+        with pytest.raises(OSError):
+            mod._read_approver_file(directory_fd, link.name, 4096, private=False)
+    finally:
+        os.close(directory_fd)
