@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/images/shards-kernel-banner.svg" alt="Shards-Kernel: deterministic tool authorisation for AI agents" width="880">
-</p>
+![Shards-Kernel branded banner: deterministic control plane for autonomous AI systems](https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/main/docs/images/shards-kernel-banner.svg)
 
 <h1 align="center">Shards-Kernel</h1>
 
@@ -18,12 +16,10 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml"><img src="https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/Shards-foundation/Shards-kernel"><img src="https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg" alt="Coverage"></a>
-  <a href="https://pypi.org/project/shards-kernel/"><img src="https://img.shields.io/pypi/v/shards-kernel.svg" alt="PyPI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT licence"></a>
-</p>
+[![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/Shards-kernel)
+[![PyPI](https://img.shields.io/pypi/v/shards-kernel.svg)](https://pypi.org/project/shards-kernel/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Shards-foundation/Shards-kernel/blob/main/LICENSE)
 
 **What the offline demo shows:** missing permit **DENY** → signed permit **ALLOW once** → replay, changed arguments, expiry and revocation **DENY** → verified audit restoration. [See the seven-gate tour](docs/PRODUCT_TOUR.md#what-the-command-checks).
 
