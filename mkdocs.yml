@@ -10,6 +10,7 @@ theme:
 
 nav:
   - Home: README.md
+  - Product tour: PRODUCT_TOUR.md
   - Architecture: ARCHITECTURE.md
   - Threat Model: THREAT_MODEL.md
   - Demos: DEMOS.md
