@@ -1,15 +1,35 @@
-# Shards-Kernel — Deterministic Control Planes for AI Systems
+<p align="center">
+  <img src="docs/images/shards-kernel-banner.svg" alt="Shards-Kernel: deterministic tool authorisation for AI agents" width="880">
+</p>
 
-![Shards-Kernel branded banner: deterministic control plane for autonomous AI systems](https://raw.githubusercontent.com/Shards-foundation/Shards-kernel/main/docs/images/shards-kernel-banner.svg)
+<h1 align="center">Shards-Kernel</h1>
 
-[![CI](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/Shards-foundation/Shards-kernel)
-[![PyPI](https://img.shields.io/pypi/v/shards-kernel.svg)](https://pypi.org/project/shards-kernel/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Shards-foundation/Shards-kernel/blob/main/LICENSE)
+<p align="center"><strong>Authorise the action. Verify the permit. Record the decision.</strong></p>
 
-A **kernel** is a deterministic state machine that governs AI agent execution via **jurisdiction**, **fail-closed arbitration**, and an **append-only hash-chained audit ledger**.
+<p align="center">
+  Open-source Python SDK for policy-gated AI agent tool calls, signed single-use permits, replay protection and auditable execution.
+</p>
 
-**Hard constraint:** no tool execution without an explicit `ALLOW`; no `ALLOW` without a committed audit decision.
+<p align="center">
+  <a href="#try-it-in-your-terminal"><strong>Try it locally</strong></a> ·
+  <a href="docs/PRODUCT_TOUR.md"><strong>Product tour</strong></a> ·
+  <a href="docs/AGENT_SELECTION.md">Choose your integration</a> ·
+  <a href="docs/AGENT_QUICKSTART.md">Connect an agent</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml"><img src="https://github.com/Shards-foundation/Shards-kernel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/Shards-foundation/Shards-kernel"><img src="https://codecov.io/gh/Shards-foundation/Shards-kernel/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://pypi.org/project/shards-kernel/"><img src="https://img.shields.io/pypi/v/shards-kernel.svg" alt="PyPI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT licence"></a>
+</p>
+
+**What the offline demo shows:** missing permit **DENY** → signed permit **ALLOW once** → replay, changed arguments, expiry and revocation **DENY** → verified audit restoration. [See the seven-gate tour](docs/PRODUCT_TOUR.md#what-the-command-checks).
+
+**Scope:** This SDK governs only calls routed through its enforcement path. It does not automatically sandbox arbitrary code, secure tools that bypass the kernel, or guarantee exactly-once external side effects.
+
+---
 
 ## Find the right AI-agent execution control
 
