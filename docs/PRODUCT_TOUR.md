@@ -4,7 +4,7 @@
 
 Shards-Kernel is an open-source Python SDK that governs AI-agent tool requests routed through its policy and permit boundary. Start with the offline demonstration below. It requires no cloud account, model API key, external agent or hosted service.
 
-[Back to README](../README.md) · [Choose an integration](AGENT_SELECTION.md) · [Agent setup](AGENT_QUICKSTART.md) · [Security model](THREAT_MODEL.md) · [Contribute](../CONTRIBUTING.md)
+[Back to README](https://github.com/Shards-foundation/Shards-kernel) · [Choose an integration](AGENT_SELECTION.md) · [Agent setup](AGENT_QUICKSTART.md) · [Security model](THREAT_MODEL.md) · [Contribute](https://github.com/Shards-foundation/Shards-kernel/blob/main/CONTRIBUTING.md)
 
 ## The problem it addresses
 
@@ -62,12 +62,12 @@ Do not paste private operator credentials, signed production permits or user dat
 | Your goal | Next step |
 | --- | --- |
 | Evaluate whether the SDK fits your use case | [Agent selection and verification](AGENT_SELECTION.md) |
-| Learn the Python API and inspect runnable examples | [Demo guide](DEMOS.md) and [SDK examples](../examples) |
-| Use the optional terminal dashboard | [README: mission-control UI](../README.md#optional-mission-control-terminal-ui) |
+| Learn the Python API and inspect runnable examples | [Demo guide](DEMOS.md) and [SDK examples](https://github.com/Shards-foundation/Shards-kernel/tree/main/examples) |
+| Use the optional terminal dashboard | [README: mission-control UI](https://github.com/Shards-foundation/Shards-kernel#optional-mission-control-terminal-ui) |
 | Connect an enrolled agent through a local signed operator | [Agent quickstart](AGENT_QUICKSTART.md) |
 | Understand issuer, operator and client separation | [Two-agent identity boundary](operations/TWO_AGENT_IDENTITY.md) |
 | Evaluate failure modes and trust assumptions | [Threat model](THREAT_MODEL.md) |
-| Report a bug or propose a change | [Contributing guide](../CONTRIBUTING.md) |
+| Report a bug or propose a change | [Contributing guide](https://github.com/Shards-foundation/Shards-kernel/blob/main/CONTRIBUTING.md) |
 
 ## What this does not prove
 
