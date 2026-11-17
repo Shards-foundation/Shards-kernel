@@ -12,8 +12,9 @@ An agent proposing an action is not the same as an operator authorising it. Shar
 
 ```mermaid
 flowchart TD
-    A["Agent or client requests an action"] --> B{"Policy and permit checks"}
-    I["Separately trusted operator / issuer"] -->|Issues narrowly scoped authority in real integrations| B
+    I["Independent permit issuer"] -->|"Signs narrow, one-use authority"| A["Agent or client requests an action"]
+    A --> B{"Policy and permit checks"}
+    O["Separately trusted operator policy"] -->|"Defines allowed actors and tools"| B
     B -->|"Denied"| D["No tool handler execution"]
     B -->|"Allowed and decision recorded"| C["Registered tool handler"]
     C --> E["Result and audit evidence"]
