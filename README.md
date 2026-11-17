@@ -23,6 +23,8 @@
 
 **What the offline demo shows:** missing permit **DENY** → signed permit **ALLOW once** → replay, changed arguments, expiry and revocation **DENY** → verified audit restoration. [See the seven-gate tour](docs/PRODUCT_TOUR.md#what-the-command-checks).
 
+**Hard constraint:** No registered tool handler executes without an explicit `ALLOW`, and no `ALLOW` is issued without a committed audit decision.
+
 **Scope:** This SDK governs only calls routed through its enforcement path. It does not automatically sandbox arbitrary code, secure tools that bypass the kernel, or guarantee exactly-once external side effects.
 
 ---
