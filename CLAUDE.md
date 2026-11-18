@@ -40,7 +40,7 @@ calls routed through it; it is not an OS sandbox.
 | `shards_kernel/integrations/` | adapters, MCP relay, mTLS ingress |
 | `shards_kernel/cli/` | `doctor`, `demo`, `verify`, operator and issuer commands |
 | `shards_kernel/distributed/`, `memory/` | checkpoints, PostgreSQL accounting, stores |
-| `spec/` | normative specification (start at `spec/README.md`, then `SPEC.md`) |
+| `spec/` | normative specification (start at `spec/README.md`, then `spec/SPEC.md`) |
 | `docs/` | architecture, threat model, operations runbooks |
 | `tests/`, `scripts/ci/` | pytest suite and CI gate scripts |
 | `.github/skills/` | agent skills (below) |
@@ -82,8 +82,14 @@ The exact guarantees are defined in `spec/SPEC.md` (for example
 rules. Before editing anything on these paths, re-read the relevant spec
 section. Never weaken:
 
-- **Fail-closed authorisation:** no tool executes without signed authority
-  and a committed audit decision; ambiguity or error means DENY.
+- **Fail-closed authorisation:** on the strict and default governed path a tool
+  call requires a verified signed permit and a committed audit decision;
+  ambiguity or error means DENY. `KernelConfig.allow_insecure_unpermitted_execution`
+  (`shards_kernel/common/types.py`, `shards_kernel/variants/base.py`,
+  `docs/sdk/API.md`) is a development-only opt-out that skips the permit
+  requirement on non-strict kernels only; `StrictKernel` forces it off
+  (`shards_kernel/variants/strict_kernel/kernel.py`). Use it only in disposable
+  development, never where an authorisation decision matters.
 - **Permits:** signed, narrowly scoped, exact match; no wildcard permissions.
 - **Replay protection:** replayed, altered, expired or revoked permits are denied.
 - **Audit integrity:** the decision is committed before ALLOW; evidence stays verifiable.
