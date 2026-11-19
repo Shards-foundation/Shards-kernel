@@ -8,8 +8,16 @@ theme:
   features:
     - content.action.edit
 
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
 nav:
   - Home: README.md
+  - Product tour: PRODUCT_TOUR.md
   - Architecture: ARCHITECTURE.md
   - Threat Model: THREAT_MODEL.md
   - Demos: DEMOS.md
