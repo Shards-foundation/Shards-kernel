@@ -32,14 +32,14 @@ calls routed through it; it is not an OS sandbox.
 
 | Path | Contents |
 |------|----------|
-| `shards_kernel/core/`, `api.py` | runtime and public API |
-| `shards_kernel/permits.py`, `issuer.py` | permit verification and issuing |
+| `shards_kernel/core/`, `shards_kernel/api.py` | runtime and public API |
+| `shards_kernel/permits.py`, `shards_kernel/issuer.py` | permit verification and issuing |
 | `shards_kernel/audit/` | ledger and replay protection |
 | `shards_kernel/jurisdiction/` | policy and rules |
 | `shards_kernel/execution/` | dispatcher and tool registry |
 | `shards_kernel/integrations/` | adapters, MCP relay, mTLS ingress |
 | `shards_kernel/cli/` | `doctor`, `demo`, `verify`, operator and issuer commands |
-| `shards_kernel/distributed/`, `memory/` | checkpoints, PostgreSQL accounting, stores |
+| `shards_kernel/distributed/`, `shards_kernel/memory/` | checkpoints, PostgreSQL accounting, stores |
 | `spec/` | normative specification (start at `spec/README.md`, then `spec/SPEC.md`) |
 | `docs/` | architecture, threat model, operations runbooks |
 | `tests/`, `scripts/ci/` | pytest suite and CI gate scripts |
@@ -91,7 +91,8 @@ section. Never weaken:
   (`shards_kernel/variants/strict_kernel/kernel.py`). Use it only in disposable
   development, never where an authorisation decision matters.
 - **Permits:** signed, narrowly scoped, exact match; no wildcard permissions.
-- **Replay protection:** replayed, altered, expired or revoked permits are denied.
+- **Replay protection:** replayed, altered or expired permits are denied. Permits signed
+  by a revoked issuer key are denied (`ISSUER_KEY_REVOKED`).
 - **Audit integrity:** the decision is committed before ALLOW; evidence stays verifiable.
 - **Separate identities:** agent, human approver, offline issuer, operator-policy
   signer and operator runtime. An agent never approves or issues its own authority.
@@ -99,8 +100,9 @@ section. Never weaken:
   outside a disposable development-only demonstration) and **no cross-project credentials**, services, databases,
   signing keys, tokens or DSNs from any other Shards project.
 
-Never read, print, generate or commit private keys, tokens or secrets. Report
-vulnerabilities privately per `SECURITY.md`, not in public issues.
+Never read, print, generate or commit real credentials. The offline demo may
+create ephemeral test keys in memory. Keep those keys out of logs, files and
+commits. Report vulnerabilities privately per `SECURITY.md`.
 
 ## Engineering workflow
 
