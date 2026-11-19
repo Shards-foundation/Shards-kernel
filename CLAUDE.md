@@ -91,8 +91,9 @@ section. Never weaken:
   (`shards_kernel/variants/strict_kernel/kernel.py`). Use it only in disposable
   development, never where an authorisation decision matters.
 - **Permits:** signed, narrowly scoped, exact match; no wildcard permissions.
-- **Replay protection:** replayed, altered or expired permits are denied. Permits signed
-  by a revoked issuer key are denied (`ISSUER_KEY_REVOKED`).
+- **Replay protection on the strict/default governed path:** replayed, altered or
+  expired permits are denied. Permits signed by a revoked issuer key are denied
+  (`ISSUER_KEY_REVOKED`).
 - **Audit integrity:** the decision is committed before ALLOW; evidence stays verifiable.
 - **Separate identities:** agent, human approver, offline issuer, operator-policy
   signer and operator runtime. An agent never approves or issues its own authority.
