@@ -65,7 +65,7 @@ dev = [
     "pytest-cov>=4",
     "defusedxml>=0.7.1,<1",  # Safe JUnit parsing for acceptance report tests.
     "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
-    "hypothesis>=6",
+    "hypothesis>=6.168.5",
     "ruff==0.17.3",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
     # FastAPI 0.129+ requires Python >=3.10. Pip honors Requires-Python, so
