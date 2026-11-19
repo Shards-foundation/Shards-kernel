@@ -5,6 +5,7 @@ on:
     paths:
       - "docs/**"
       - "README.md"
+      - "mkdocs.yml"
       - "TERMS_OF_SERVICE.md"
       - "PRIVACY_POLICY.md"
       - "LICENSE"
@@ -17,6 +18,7 @@ on:
     paths:
       - "docs/**"
       - "README.md"
+      - "mkdocs.yml"
       - "TERMS_OF_SERVICE.md"
       - "PRIVACY_POLICY.md"
       - "LICENSE"

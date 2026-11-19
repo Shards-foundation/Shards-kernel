@@ -16,6 +16,7 @@ def test_dashboard_plain_noninteractive(monkeypatch, capsys):
     assert "SHARDS // KERNEL" in output
     assert "NOT VERIFIED" in output
     assert "no service inspected" in output
+    assert "shards-kernel doctor --profile service" in output
     assert "\x1b[" not in output
 
 

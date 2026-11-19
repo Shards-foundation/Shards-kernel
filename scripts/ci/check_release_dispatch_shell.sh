@@ -2,7 +2,8 @@
 # Exercise the real workflow dispatch block without a network call or token.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-workflow=".github/workflows/publish-v0.1.3.yml"
+release_tag="${RELEASE_TEST_TAG:-v0.1.3}"
+workflow=".github/workflows/publish-${release_tag}.yml"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
 
@@ -45,16 +46,17 @@ export GITHUB_RUN_ID="987654321"
 export GH_ARGS_PATH="$temp_dir/gh-arguments"
 bash -e -o pipefail "$temp_dir/dispatch.sh"
 
-python - "$GH_ARGS_PATH" <<'PY'
+python - "$GH_ARGS_PATH" "$release_tag" <<'PY'
 from pathlib import Path
 import sys
 
 actual = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+release_tag = sys.argv[2]
 expected = [
     "workflow", "run", "publish.yml",
     "--repo", "Shards-foundation/Shards-kernel",
-    "--ref", "v0.1.3",
-    "--field", "release_tag=v0.1.3",
+    "--ref", release_tag,
+    "--field", f"release_tag={release_tag}",
     "--field", "verified_run_id=987654321",
 ]
 if actual != expected:

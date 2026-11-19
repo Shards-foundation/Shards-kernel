@@ -29,7 +29,7 @@ def _plain_dashboard(*, rich_missing: bool = False) -> None:
     print("PROFILE         Strict policy available; no service inspected")
     print("FAIL-CLOSED     Strict profile requires denial on failed checks")
     print("AUDIT           Strict profile requires audit decisions")
-    print("LIVE STATUS     NOT VERIFIED (run: shards-kernel doctor)")
+    print("LIVE STATUS     NOT VERIFIED (run: shards-kernel doctor --profile service)")
     print()
     print("[1] Kernel information     [2] Run preflight diagnostics")
     print("[3] Safe offline demo      [4] Command reference")

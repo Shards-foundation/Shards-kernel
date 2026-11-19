@@ -61,11 +61,11 @@ def main() -> int:
 
     # A safe preflight, NOT a production readiness certificate.
     doctor_parser = subparsers.add_parser(
-        "doctor", help="Inspect runtime prerequisites and release blockers"
+        "doctor", help="Check installed SDK prerequisites (or optional service deployment)"
     )
     doctor_parser.add_argument(
-        "--profile", choices=["service", "library"], default="service",
-        help="service checks gate operational rollout; library checks only local install",
+        "--profile", choices=["service", "library"], default="library",
+        help="library (default) checks local SDK; service checks configured operator deployment",
     )
     doctor_parser.add_argument("--json", action="store_true", help="Machine-readable report")
 

@@ -50,6 +50,19 @@ def test_invalid_key_never_counted_as_ready():
     assert result["ready"] is False
 
 
+
+def test_default_doctor_cli_checks_installed_sdk_not_unconfigured_service(capsys, monkeypatch):
+    """No missing hosted-service credentials should invalidate a local SDK install."""
+    monkeypatch.delenv("SHARDS_KERNEL_API_KEY", raising=False)
+    monkeypatch.setattr(sys, "argv", ["shards-kernel", "doctor", "--json"])
+    assert main() == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["profile"] == "library"
+    assert report["assessment"] == "LIBRARY_CHECKS_PASS"
+    assert report["ready"] is True
+    assert all(item["id"] in {"python", "clock_primitive"} for item in report["checks"])
+    assert "scope" in report
+
 def test_doctor_cli_reports_json_and_status_code(capsys, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["shards-kernel", "doctor", "--profile", "library", "--json"])
     assert main() == 0
