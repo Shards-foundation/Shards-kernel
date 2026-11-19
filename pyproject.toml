@@ -55,7 +55,11 @@ tui = ["textual>=8.2,<9"]
 # Official MCP SDK v2 is optional and requires Python >=3.11.
 # The deterministic library remains standard-library-only on Python 3.9+.
 mcp = ["mcp>=2.2,<3; python_version >= '3.11'"]
-crypto = ["cryptography>=43,<51"]
+# The updated cryptography release excludes Python 3.9.0 and 3.9.1.
+crypto = [
+    "cryptography>=43,<51; python_full_version < '3.9.2'",
+    "cryptography>=50.0.2,<51; python_full_version >= '3.9.2'",
+]
 # Opt-in shared PostgreSQL accounting; no database connection by default.
 postgres = ["psycopg[binary]>=3.2,<4"]
 # Test and lint tools only. The installed runtime package has no dependencies.
@@ -64,7 +68,9 @@ dev = [
     "pytest>=7",
     "pytest-cov>=4",
     "defusedxml>=0.7.1,<1",  # Safe JUnit parsing for acceptance report tests.
-    "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
+    # Exercise the optional crypto path on the same versions as the crypto extra.
+    "cryptography>=43,<51; python_full_version < '3.9.2'",
+    "cryptography>=50.0.2,<51; python_full_version >= '3.9.2'",
     "hypothesis>=6",
     "ruff==0.17.3",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
