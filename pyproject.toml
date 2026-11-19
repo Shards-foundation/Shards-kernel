@@ -71,7 +71,8 @@ dev = [
     # FastAPI 0.129+ requires Python >=3.10. Pip honors Requires-Python, so
     # CPython 3.9 still resolves to the newest compatible release (0.128.x).
     "flask>=2,<4",
-    "fastapi>=0.100,<0.163",
+    "fastapi>=0.100,<0.163; python_version < '3.10'",
+    "fastapi>=0.162.5,<0.163; python_version >= '3.10'",
     "httpx>=0.24,<1",
 ]
 
