@@ -8,6 +8,10 @@
   Open-source Python SDK for policy-gated AI agent tool calls, signed single-use permits, replay protection and auditable execution.
 </p>
 
+
+[![Watch the video](https://img.youtube.com/vi/lU9HhusLSe8/maxresdefault.jpg)](https://www.youtube.com/watch?v=lU9HhusLSe8)
+
+
 <p align="center">
   <a href="#try-it-in-your-terminal"><strong>Try it locally</strong></a> ·
   <a href="docs/PRODUCT_TOUR.md"><strong>Product tour</strong></a> ·
