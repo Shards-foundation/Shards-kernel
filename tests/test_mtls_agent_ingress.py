@@ -537,7 +537,32 @@ def test_runtime_expiry_invalid_body_privileged_path_and_downstream_outage(tmp_p
         assert raw_request(
             b'{"actor":"agent-alpha","actor":"agent-beta"}'
         ) == 400
-        assert raw_request(b"x" * (64 * 1024 + 1)) == 400
+        def oversized_declared_length_request(length):
+            """Declare an oversized body but never send it.
+
+            The server rejects on the Content-Length header alone and closes
+            without draining the body. Writing the 64 KiB+1 body raced that
+            close and intermittently raised BrokenPipeError/ECONNRESET on the
+            client. Sending only the headers makes the outcome deterministic
+            and also proves the server refuses before reading any body bytes.
+            """
+            context = ssl.create_default_context(cafile=str(ca))
+            context.load_cert_chain(str(alpha[0]), str(alpha[1]))
+            conn = http.client.HTTPSConnection(
+                "127.0.0.1", port, context=context, timeout=3
+            )
+            try:
+                conn.putrequest("POST", "/submit")
+                conn.putheader("Content-Type", "application/json")
+                conn.putheader("Authorization", "Bearer " + token)
+                conn.putheader("Content-Length", str(length))
+                conn.endheaders()
+                result = conn.getresponse()
+                return result.status
+            finally:
+                conn.close()
+
+        assert oversized_declared_length_request(64 * 1024 + 1) == 400
         assert raw_request(
             b"{}", extra_headers={"Transfer-Encoding": "chunked"}
         ) == 400

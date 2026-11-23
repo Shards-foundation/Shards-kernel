@@ -67,6 +67,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- An explicit `strict_key_length` on `BaseKernel.set_keyring` and `AsyncKernel.set_keyring` is stored on the kernel and reused for later permit verification. `None` still follows `SHARDS_KERNEL_STRICT_HMAC_KEYS` at submit time. A refused keyring leaves the previous keys and the stored setting unchanged.
+- Legacy v1 HMAC permits fail closed on an empty key. `sign_permit`, `PermitBuilder.build` and `BaseKernel.set_keyring` / `AsyncKernel.set_keyring` raise `ValueError`, and `verify_signature` returns DENY with reason `HMAC_KEY_EMPTY` (previously an empty key produced permits that verified as ALLOW). Keys of 1-31 bytes still work but emit `DeprecationWarning` and will be rejected in the next major version. Opt in to rejecting them now with `strict_key_length=True` or `SHARDS_KERNEL_STRICT_HMAC_KEYS=1` (DENY reason `HMAC_KEY_TOO_SHORT`). 32+ byte keys are unchanged.
 - `python -m kernels.cli.verify` reads `ledger_entries` and checks internal consistency by delegating to `verify_evidence_bundle`. Replay recomputes each entry hash from the entry content and compares `prev_hash` links and `root_hash`. A missing, empty, or unknown entries key, an empty bundle, malformed JSON, an unknown schema, or the legacy `entries` key is a failure with a non-zero exit. An empty entry list is rejected in the CLI before replay, because `replay_and_verify` reports an empty list as consistent. `root_hash` is stored in the bundle, so a match shows only that the bundle is internally consistent (integrity only).
 - Tool execution is fail-closed. A tool call requires a permit whose parameters are the parameters that run, even when no HMAC key is configured. Set `KernelConfig.allow_insecure_unpermitted_execution` to opt out on a non-strict kernel. `StrictKernel` ignores that flag.
 - Unknown permit constraints, and the documented but previously unimplemented constraints `max_memory_mb` and `allowed_domains`, are rejected. `require_evidence` now requires a non-empty evidence string.
@@ -82,6 +84,27 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Async callers: build a `KernelRequest` and pass it to `AsyncKernel.submit(request, permit_token=...)` with a permit bound to the exact parameters. Construct the async wrappers with `kernel_id` only, then call `set_policy` and `set_keyring`. `AsyncDispatcher.dispatch` does not run tools; submit tool calls through the kernel.
 - Evidence bundles for `python -m kernels.cli.verify`: the command reads `ledger_entries`. The LangChain, Hugging Face, generic, LangGraph, CrewAI, AutoGPT, and Moltbook adapters still export `entries`. Rename `entries` to `ledger_entries` in the bundle, or build the bundle with `evidence_to_mapping`. There is no CLI flag or alias for `entries`.
 - Scripts that parse `verify --json` output: until the separately tracked fix lands, stdout holds the text report followed by the JSON object, so do not pass it directly to a JSON parser.
+
+## [0.1.4] - Release candidate (publication pending)
+
+### Added
+
+- Optional responsive Shards Mission Control CLI (`shards-kernel dashboard`) using Rich/Textual extras. Standard Python APIs, plain help and machine-readable JSON output remain available without the UI.
+
+### Changed
+
+- **CLI default-profile change:** `shards-kernel doctor` now checks the local Python **library**, rather than implying an unconfigured service is the status of the whole SDK. Service operators must use `shards-kernel doctor --profile service` explicitly; existing automation that relied on the former default should update the invocation.
+- Improved README and operator documentation explaining local SDK capabilities, the offline demonstration's scope and separate service preflight.
+
+### Security
+
+- Reject empty HMAC key material before generating or verifying tokens; expand ingress regression coverage and advisory quality checks.
+- Regression tests cover default SDK diagnostics, explicit service checks and Mission Control guidance without relaxing permit or policy enforcement.
+
+### Release boundary
+
+- This is a Python SDK/optional terminal UI maintenance release. Distributed issuer hosting, remote MCP, OS-level process sandboxing and external provider side effects are separate opt-in integration/deployment work, **not** features claimed for this wheel.
+- The candidate build is **not a PyPI publication**. No tag, GitHub Release or deployment is created by its verification workflow.
 
 ## [0.1.3] - 2026-11-06
 

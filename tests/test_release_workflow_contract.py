@@ -208,16 +208,16 @@ def test_wheel_readme_metadata_utf8_validation(tmp_path, corrupt_description):
         assert result.returncode == 0, result.stderr
 
 
-def test_current_package_version_is_0_1_3_without_mutating_historical_0_1_2_release():
-    assert __version__ == "0.1.3"
-    assert distribution("shards-kernel").version == "0.1.3"
+def test_current_installed_version_matches_source_without_mutating_historical_releases():
+    assert tuple(map(int, __version__.split("."))) >= (0, 1, 3)
+    assert distribution("shards-kernel").version == __version__
     result = subprocess.run(
         [sys.executable, "-m", "shards_kernel", "--version"],
         capture_output=True,
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == "shards-kernel 0.1.3"
+    assert result.stdout.strip() == f"shards-kernel {__version__}"
 
 
 def test_release_verification_gates_and_order_are_explicit():

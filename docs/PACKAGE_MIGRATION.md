@@ -21,7 +21,7 @@ Shards-Kernel's implementation and API names such as `KernelRequest` remain unch
 The initial version is published on PyPI. For a released installation:
 
 ```bash
-python -m pip install "shards-kernel==0.1.3"
+python -m pip install shards-kernel
 python -c "from shards_kernel import StrictKernel; print(StrictKernel)"
 python -m shards_kernel --version
 shards-kernel --help

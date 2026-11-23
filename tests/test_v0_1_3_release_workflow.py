@@ -10,7 +10,8 @@ LEGACY = ROOT / ".github" / "workflows" / "publish-v0.1.2.yml"
 
 
 def test_release_0_1_3_version_and_one_shot_protection():
-    assert __version__ == "0.1.3"
+    # Historical v0.1.3 release invariants must survive later package bumps.
+    assert tuple(map(int, __version__.split("."))) >= (0, 1, 3)
     current = WORKFLOW.read_text(encoding="utf-8")
     historical = LEGACY.read_text(encoding="utf-8")
     assert "name: Publish Shards-Kernel v0.1.3" in current
@@ -146,10 +147,18 @@ def test_release_0_1_3_version_and_one_shot_protection():
     assert "gh release create v0.1.2" in historical
 
 
-def test_public_install_guides_target_release_0_1_3():
-    for path in ("README.md", "docs/guides/QUICKSTART.md", "docs/guides/SETUP.md", "docs/PACKAGE_MIGRATION.md"):
+def test_public_install_guides_use_installable_version_neutral_commands():
+    # The released PyPI version can lag the next candidate; instructions must
+    # remain executable without requiring an unpublished candidate on PyPI.
+    guides = {
+        "README.md": 'python -m pip install "shards-kernel[crypto]"',
+        "docs/guides/QUICKSTART.md": "python -m pip install shards-kernel",
+        "docs/guides/SETUP.md": "python -m pip install shards-kernel",
+        "docs/PACKAGE_MIGRATION.md": "python -m pip install shards-kernel",
+    }
+    for path, command in guides.items():
         content = (ROOT / path).read_text(encoding="utf-8")
-        assert 'shards-kernel==0.1.3' in content or 'shards-kernel[crypto]==0.1.3' in content, path
+        assert command in content, path
 
 
 def test_busy_audit_rejects_generic_denials_and_empty_evidence():
