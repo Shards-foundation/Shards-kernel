@@ -194,7 +194,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          coverage_args=(--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate)
+          coverage_args=(--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate --cov=scripts.ops.reconcile_provider_effects)
           pytest "${coverage_args[@]}" \
             --cov-branch \
             --cov-report=term-missing \

@@ -36,7 +36,7 @@ import stat
 import sys
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from urllib.parse import quote
 
 from shards_kernel.audit.replay import replay_and_verify
@@ -181,15 +181,12 @@ def _load_audit(path: Path, kernel_id: Optional[str]) -> tuple[str, list[dict[st
         if not isinstance(payload, dict):
             raise ReconcileError("AUDIT_ROW_MALFORMED")
         entries.append(payload)
-    if not entries:
-        raise ReconcileError("AUDIT_LEDGER_EMPTY")
 
     expected_root = str(entries[-1].get("entry_hash") or "")
     verified, _errors = replay_and_verify(entries, expected_root_hash=expected_root)
     if not verified:
         raise ReconcileError("AUDIT_CHAIN_INVALID")
-    assert kernel_id is not None
-    return kernel_id, entries, True
+    return cast(str, kernel_id), entries, True
 
 
 def _matches(
@@ -265,18 +262,11 @@ def _audit_only_incidents(
     for entry in entries:
         if entry.get("audit_phase") != "intent" or entry.get("tool_name") != TOOL_NAME:
             continue
-        permit_id = entry.get("permit_digest")
-        params_hash = entry.get("params_hash")
-        request_id = entry.get("request_id")
-        if not isinstance(permit_id, str) or not isinstance(params_hash, str):
-            continue
-        if not isinstance(request_id, str):
-            continue
         try:
             operation_id = derive_operation_id(
-                request_id=request_id,
-                permit_id=permit_id,
-                params_sha256=params_hash,
+                request_id=entry.get("request_id"),
+                permit_id=entry.get("permit_digest"),
+                params_sha256=entry.get("params_hash"),
             )
         except ProviderValidationError:
             continue
@@ -285,8 +275,8 @@ def _audit_only_incidents(
         incidents.append(
             {
                 "operation_id": operation_id,
-                "request_id": request_id,
-                "permit_id": permit_id,
+                "request_id": entry.get("request_id"),
+                "permit_id": entry.get("permit_digest"),
                 "audit_phase": "intent",
                 "classification": INCIDENT_JOURNAL_RECORD_MISSING,
             }

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import runpy
 import sqlite3
+import sys
 from contextlib import closing
 from pathlib import Path
 
@@ -357,3 +359,249 @@ def test_reconcile_rejects_symlink_source(tmp_path):
 
     with pytest.raises(rec.ReconcileError, match="SOURCE_MUST_BE_REGULAR_FILE"):
         rec.reconcile(link, journal_path)
+
+
+def test_reconcile_covers_incident_classifications(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    journal = ProviderEffectJournal(str(journal_path))
+    expected: dict[str, str] = {}
+
+    # SUCCEEDED with no intent, and with an outcome that denies the effect.
+    expected["s-no-intent"] = _journal_record(
+        journal, "req-s-no-intent", "s" * 64, _params(61), SUCCEEDED
+    )
+    mismatch_params = _params(62)
+    audit.intent("req-s-mismatch", "t" * 64, mismatch_params)
+    audit.outcome("req-s-mismatch", "t" * 64, mismatch_params, allow=False)
+    expected["s-mismatch"] = _journal_record(
+        journal, "req-s-mismatch", "t" * 64, mismatch_params, SUCCEEDED
+    )
+
+    # NOT_APPLIED with no intent, no outcome, and an outcome that allows.
+    expected["n-no-intent"] = _journal_record(
+        journal, "req-n-no-intent", "u" * 64, _params(63), NOT_APPLIED
+    )
+    no_outcome_params = _params(64)
+    audit.intent("req-n-no-outcome", "v" * 64, no_outcome_params)
+    expected["n-no-outcome"] = _journal_record(
+        journal, "req-n-no-outcome", "v" * 64, no_outcome_params, NOT_APPLIED
+    )
+    n_mismatch_params = _params(65)
+    audit.intent("req-n-mismatch", "w" * 64, n_mismatch_params)
+    audit.outcome("req-n-mismatch", "w" * 64, n_mismatch_params, allow=True)
+    expected["n-mismatch"] = _journal_record(
+        journal, "req-n-mismatch", "w" * 64, n_mismatch_params, NOT_APPLIED
+    )
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    by_operation = {record["operation_id"]: record for record in report["records"]}
+    classifications = {
+        suffix: by_operation[operation]["classification"] for suffix, operation in expected.items()
+    }
+    assert classifications == {
+        "s-no-intent": rec.INCIDENT_INTENT_MISSING,
+        "s-mismatch": rec.INCIDENT_OUTCOME_MISMATCH,
+        "n-no-intent": rec.INCIDENT_INTENT_MISSING,
+        "n-no-outcome": rec.INCIDENT_NOT_APPLIED_NO_OUTCOME,
+        "n-mismatch": rec.INCIDENT_OUTCOME_MISMATCH,
+    }
+    assert report["status"] == "INCIDENT"
+
+
+def test_reconcile_reports_attention_without_incidents(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    journal = ProviderEffectJournal(str(journal_path))
+
+    unknown_params = _params(66)
+    audit.intent("req-unknown", "x" * 64, unknown_params)
+    _journal_record(journal, "req-unknown", "x" * 64, unknown_params, UNKNOWN)
+    open_params = _params(67)
+    audit.intent("req-open", "y" * 64, open_params)
+    _journal_record(journal, "req-open", "y" * 64, open_params, INTENT)
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "ATTENTION"
+    assert report["counts"] == {
+        rec.QUARANTINED_UNKNOWN: 1,
+        rec.OPEN_OPERATION: 1,
+    }
+
+
+def test_reconcile_flags_journal_record_with_invalid_binding(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    _Audit(audit_path).intent("req-valid", "a" * 64, _params(68))
+    ProviderEffectJournal(str(journal_path))
+    params = _params(69)
+    connection = sqlite3.connect(str(journal_path))
+    try:
+        connection.execute(
+            "INSERT INTO provider_effect_journal (operation_id, provider, resource, "
+            "action, params_sha256, request_id, permit_id, state, attempts, "
+            "created_ms, updated_ms, provider_ref, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "0" * 64,
+                "github",
+                RESOURCE,
+                "add_label",
+                compute_hash_dict(params),
+                "x" * 501,
+                "b" * 64,
+                SUCCEEDED,
+                1,
+                1,
+                1,
+                "",
+                "",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "INCIDENT"
+    record = next(item for item in report["records"] if item["operation_id"] == "0" * 64)
+    assert record["classification"] == rec.BINDING_MISMATCH
+
+
+def test_reconcile_skips_audit_entries_with_invalid_binding_fields(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(70)
+    audit.intent("req-complete", "c" * 64, params)
+    audit.outcome("req-complete", "c" * 64, params, allow=True)
+    journal = ProviderEffectJournal(str(journal_path))
+    _journal_record(journal, "req-complete", "c" * 64, params, SUCCEEDED)
+
+    audit.ledger.append(
+        request_id="req-bad-permit",
+        actor="agent-alice",
+        intent="invalid permit digest",
+        decision=Decision.ALLOW,
+        state_from=KernelState.IDLE,
+        state_to=KernelState.EXECUTING,
+        ts_ms=audit._tick(),
+        tool_name=TOOL_NAME,
+        params=_params(71),
+        audit_phase="intent",
+        permit_digest="d" * 501,
+    )
+    audit.ledger.append(
+        request_id=None,
+        actor="agent-alice",
+        intent="non-string request id",
+        decision=Decision.ALLOW,
+        state_from=KernelState.IDLE,
+        state_to=KernelState.EXECUTING,
+        ts_ms=audit._tick(),
+    )
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "CLEAN"
+    assert report["audit_only_incidents"] == []
+    assert report["counts"] == {rec.COMPLETE_SUCCEEDED: 1}
+
+
+def test_reconcile_rejects_relative_path_and_missing_tables(tmp_path):
+    audit_path, journal_path, _operations = _build_mixed(tmp_path)
+
+    with pytest.raises(rec.ReconcileError, match="ABSOLUTE_SOURCE_PATH_REQUIRED"):
+        rec.reconcile(Path("relative-audit.sqlite3"), journal_path)
+
+    empty_audit = tmp_path / "empty-audit.sqlite3"
+    sqlite3.connect(str(empty_audit)).close()
+    with pytest.raises(rec.ReconcileError, match="AUDIT_TABLE_MISSING"):
+        rec.reconcile(empty_audit, journal_path)
+
+    empty_journal = tmp_path / "empty-journal.sqlite3"
+    sqlite3.connect(str(empty_journal)).close()
+    with pytest.raises(rec.ReconcileError, match="JOURNAL_TABLE_MISSING"):
+        rec.reconcile(audit_path, empty_journal)
+
+
+def test_reconcile_rejects_empty_ledger_and_unknown_kernel(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    SQLiteAuditStorage(str(audit_path))
+    ProviderEffectJournal(str(journal_path))
+
+    with pytest.raises(rec.ReconcileError, match="AUDIT_LEDGER_EMPTY"):
+        rec.reconcile(audit_path, journal_path)
+
+    _Audit(audit_path).intent("req-known", "e" * 64, _params(72))
+    with pytest.raises(rec.ReconcileError, match="KERNEL_ID_NOT_FOUND"):
+        rec.reconcile(audit_path, journal_path, kernel_id="unknown-kernel")
+
+
+@pytest.mark.parametrize("payload", ["not-json", "[]"])
+def test_reconcile_rejects_malformed_audit_payloads(tmp_path, payload):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    _Audit(audit_path).intent("req-valid", "f" * 64, _params(73))
+    ProviderEffectJournal(str(journal_path))
+    connection = sqlite3.connect(str(audit_path))
+    try:
+        connection.execute(
+            "INSERT INTO audit_entries (kernel_id, ledger_seq, entry_hash, "
+            "prev_hash, ts_ms, request_id, actor, intent, decision, "
+            "state_from, state_to, payload_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                KERNEL_ID,
+                99,
+                "hash",
+                "prev",
+                1,
+                "request",
+                "actor",
+                "intent",
+                "ALLOW",
+                "IDLE",
+                "EXECUTING",
+                payload,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(rec.ReconcileError, match="AUDIT_ROW_MALFORMED"):
+        rec.reconcile(audit_path, journal_path)
+
+
+def test_module_entrypoint_exits_with_incident_code(tmp_path, monkeypatch, capsys):
+    audit_path, journal_path, _operations = _build_mixed(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "reconcile_provider_effects.py",
+            "--audit-db",
+            str(audit_path),
+            "--journal-db",
+            str(journal_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "ops"
+            / "reconcile_provider_effects.py"
+        )
+        runpy.run_path(str(script), run_name="__main__")
+
+    assert excinfo.value.code == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "INCIDENT"

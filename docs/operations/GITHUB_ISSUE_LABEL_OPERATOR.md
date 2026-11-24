@@ -518,13 +518,18 @@ authoritative read-back. The token is never printed.
 
 ## Static-analysis triage at this revision
 
-Codacy Static Code Analysis (check `138170958420`, `action_required`, 12
-annotations) and CodeFactor (check `138170624543`, `failure`, 1 annotation)
-remain non-required checks. Their detailed rule pages are sign-in gated. The
-list below is taken from the public GitHub check-run annotations and current
-source. It is a source-backed triage, **not** a scanner-verified dismissal and
-not a claim that the checks pass. No scanner rule or configuration was changed
-and no production code was altered to silence a finding.
+At checkpoint `f080c7f`, Codacy Static Code Analysis reported 13 annotations:
+the 12 previously triaged below plus a new B101 `assert` warning on
+`scripts/ops/reconcile_provider_effects.py:191`. That new finding was
+remediated in the follow-up commit by replacing the assert with
+`typing.cast`; the remaining 12 are unchanged. Codacy check-run IDs are
+ephemeral and will differ at the next HEAD. CodeFactor continues to report
+the single old B104 negative-assert finding.
+
+The detailed rule pages are sign-in gated. The list below is taken from the
+public GitHub check-run annotations and current source. It is a source-backed
+triage, **not** a scanner-verified dismissal and not a claim that the checks
+pass. No scanner rule or configuration was changed to silence a finding.
 
 | # | Path:line | Scanner message | Classification | Source-backed rationale |
 | --- | --- | --- | --- | --- |
@@ -541,6 +546,7 @@ and no production code was altered to silence a finding.
 | 11 | `tests/test_operator_github_profile.py:254` | Possible hardcoded password: `'SHARDS_KERNEL_API_KEY'` | False positive (negative path) | Input proving a reserved operator secret name is rejected as a provider token env. |
 | 12 | `tests/test_operator_github_profile.py:255` | Possible hardcoded password: `'SHARDS_KERNEL_github_TOKEN'` | False positive (negative path) | Input proving a mixed-case invalid token env name is rejected. |
 | 13 | `tests/test_github_operator_deploy_contract.py:59` | CodeFactor B104: possible binding to all interfaces | False positive | The only `0.0.0.0` literal is the negative assertion at line 60; line 59 is `assert required in unit`. |
+| 14 | `scripts/ops/reconcile_provider_effects.py:191` (at `f080c7f`) | Codacy B101: use of `assert` | Remediated (not suppressed) | Replaced with `typing.cast(str, kernel_id)`. The assert was only type narrowing and would be stripped under `python -O`; the new module now measures 100% statement and branch coverage. |
 
 Open question for an independent reviewer: confirm whether Codacy's hidden
 rule metadata agrees with this mapping. Until then, these findings are
@@ -555,22 +561,23 @@ here):
 ```text
 tests/test_github_issue_label_provider.py        51 passed
 tests/test_operator_github_profile.py            35 passed
-tests/test_provider_effect_reconciliation.py      8 passed
+tests/test_provider_effect_reconciliation.py     17 passed
 tests/test_public_tool_registration.py           11 passed
 tests/test_github_operator_deploy_contract.py     3 passed
 tests/test_github_issue_label_live.py             1 skipped (gated secrets)
 ```
 
-The full suite (with the optional MCP SDK installed, as CI does) reports 1302
+The full suite (with the optional MCP SDK installed, as CI does) reports 1311
 passed and 40 skipped, with ten `test_offline_approver_cli.py` tests failing in
 this container because the filesystem rejects `O_TMPFILE` (`Errno 95`); those
 ten pass when `TMPDIR` is tmpfs (`55 passed`), so the failure is
 environment-dependent, not a profile regression. Branch coverage measured
-93.01% with
-`--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate --cov-branch --cov-fail-under=90`
+93.19% with
+`--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate --cov=scripts.ops.reconcile_provider_effects --cov-branch --cov-fail-under=90`
 on that same run. The mandatory four-scenario E2E gate passed (`4 passed`).
 The provider module itself measures 99% and the journal 97% in the focused
-run.
+run; the new reconciler measures 100% statement and branch coverage in
+`tests/test_provider_effect_reconciliation.py`.
 
 The new incident regression is covered by
 `test_outcome_audit_failure_after_provider_effect_is_incident` (single POST,
