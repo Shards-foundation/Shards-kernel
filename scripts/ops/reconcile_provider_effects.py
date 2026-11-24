@@ -155,6 +155,9 @@ def _load_audit(path: Path, kernel_id: Optional[str]) -> tuple[str, list[dict[st
             "SELECT DISTINCT kernel_id FROM audit_entries ORDER BY kernel_id ASC"
         ).fetchall()
         available = [str(row[0]) for row in kernel_rows]
+        # Reachable empty-ledger guard: `available` comes from the same table
+        # that supplies `rows`, so a non-empty `available` always yields at
+        # least one payload. A second post-load check would be dead code.
         if not available:
             raise ReconcileError("AUDIT_LEDGER_EMPTY")
         if kernel_id is None:

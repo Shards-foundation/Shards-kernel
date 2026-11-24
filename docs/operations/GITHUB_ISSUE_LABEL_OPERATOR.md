@@ -546,7 +546,7 @@ pass. No scanner rule or configuration was changed to silence a finding.
 | 11 | `tests/test_operator_github_profile.py:254` | Possible hardcoded password: `'SHARDS_KERNEL_API_KEY'` | False positive (negative path) | Input proving a reserved operator secret name is rejected as a provider token env. |
 | 12 | `tests/test_operator_github_profile.py:255` | Possible hardcoded password: `'SHARDS_KERNEL_github_TOKEN'` | False positive (negative path) | Input proving a mixed-case invalid token env name is rejected. |
 | 13 | `tests/test_github_operator_deploy_contract.py:59` | CodeFactor B104: possible binding to all interfaces | False positive | The only `0.0.0.0` literal is the negative assertion at line 60; line 59 is `assert required in unit`. |
-| 14 | `scripts/ops/reconcile_provider_effects.py:191` (at `f080c7f`) | Codacy B101: use of `assert` | Remediated (not suppressed) | Replaced with `typing.cast(str, kernel_id)`. The assert was only type narrowing and would be stripped under `python -O`; the new module now measures 100% statement and branch coverage. |
+| 14 | `scripts/ops/reconcile_provider_effects.py:191` (at `f080c7f`) | Codacy B101: use of `assert` | Remediated (not suppressed) | Replaced with `typing.cast(str, kernel_id)`. The removed post-load `AUDIT_LEDGER_EMPTY` check was unreachable because `available` is derived from the same `audit_entries` table; the reachable empty-table guard remains and is covered by `test_reconcile_rejects_empty_ledger_and_unknown_kernel`. The module measures 100% statement and branch coverage. |
 
 Open question for an independent reviewer: confirm whether Codacy's hidden
 rule metadata agrees with this mapping. Until then, these findings are
