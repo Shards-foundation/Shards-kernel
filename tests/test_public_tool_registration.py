@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from shards_kernel.common.errors import ToolError
+from shards_kernel.common.errors import StateError, ToolError
 from shards_kernel.common.types import (
     Decision,
     KernelConfig,
@@ -143,6 +143,61 @@ def test_invalid_registration_inputs_are_refused(name, handler):
     )
     with pytest.raises(ValueError):
         kernel.register_tool(name, handler)
+
+
+def test_registration_requires_a_booted_kernel():
+    with pytest.raises(StateError, match="Kernel not booted"):
+        StrictKernel().register_tool("probe", lambda: None)
+
+
+def test_registration_rejects_invalid_schema_and_signatures():
+    kernel = _kernel(
+        policy=JurisdictionPolicy(
+            allowed_actors=frozenset({"agent"}), allowed_tools=frozenset({"probe"})
+        )
+    )
+    with pytest.raises(ValueError, match="param_schema must be a dictionary"):
+        kernel.register_tool("probe", lambda value: value, param_schema=[("value", int)])
+    with pytest.raises(ValueError, match="param_schema values must be types"):
+        kernel.register_tool("probe", lambda value: value, param_schema={"value": "int"})
+    with pytest.raises(ValueError, match="must match the handler parameters"):
+        kernel.register_tool("probe", lambda value: value, param_schema={"other": int})
+
+    def variadic(*values):
+        return values
+
+    with pytest.raises(ValueError, match="variadic"):
+        kernel.register_tool("probe", variadic, param_schema={})
+
+    def annotated(value: int) -> dict:
+        return {"value": value}
+
+    with pytest.raises(ValueError, match="does not match handler annotation"):
+        kernel.register_tool("probe", annotated, param_schema={"value": str})
+
+    def unresolved(value: "MissingType"):  # noqa: F821
+        return value
+
+    kernel.register_tool("probe", unresolved, param_schema={"value": object})
+
+
+class _Uninspectable:
+    def __call__(self):
+        return None
+
+    @property
+    def __signature__(self):
+        raise TypeError("not inspectable")
+
+
+def test_registration_rejects_uninspectable_handler():
+    kernel = _kernel(
+        policy=JurisdictionPolicy(
+            allowed_actors=frozenset({"agent"}), allowed_tools=frozenset({"probe"})
+        )
+    )
+    with pytest.raises(ValueError, match="not inspectable"):
+        kernel.register_tool("probe", _Uninspectable(), param_schema={})
 
 
 def test_builtin_echo_and_add_remain_available_and_unchanged():

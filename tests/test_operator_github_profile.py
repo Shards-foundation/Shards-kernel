@@ -247,10 +247,14 @@ def test_v3_config_is_explicit_and_contains_no_credentials(tmp_path, stack):
         lambda raw: raw["provider"].update({"kind": "shell"}),
         lambda raw: raw["provider"].update({"owner": "../escape"}),
         lambda raw: raw["provider"].update({"allowed_labels": []}),
+        lambda raw: raw["provider"].update({"allowed_labels": [""]}),
+        lambda raw: raw["provider"].update({"allowed_labels": ["x" * 101]}),
         lambda raw: raw["provider"].update({"max_issue_number": True}),
         lambda raw: raw["provider"].update({"journal_db": "relative.sqlite3"}),
         lambda raw: raw["provider"].update({"token_env": "SHARDS_KERNEL_API_KEY"}),
+        lambda raw: raw["provider"].update({"token_env": "SHARDS_KERNEL_github_TOKEN"}),
         lambda raw: raw["gateway"].update({"token_env": GITHUB_ENV}),
+        lambda raw: raw.update({"audit_db": ""}),
         lambda raw: raw.update({"unexpected": True}),
     ],
 )
@@ -581,4 +585,21 @@ def test_missing_provider_or_gateway_credentials_prevent_startup(tmp_path, stack
     monkeypatch.setenv(GITHUB_ENV, stack.github_token)
     monkeypatch.delenv(GATEWAY_ENV, raising=False)
     with pytest.raises(ValueError):
+        stack.build()
+
+
+def test_provider_profile_cannot_start_without_gateway(tmp_path, stack):
+    config = replace(stack.config, gateway=None)
+    with pytest.raises(ValueError, match="Provider profile requires a gateway identity"):
+        build_operator_server(
+            config,
+            api_key=stack.admin,
+            agent_pepper=stack.pepper,
+            github_transport=LoopbackTransport(stack.provider.base_url),
+        )
+
+
+def test_gateway_and_provider_credentials_cannot_be_shared(tmp_path, stack, monkeypatch):
+    monkeypatch.setenv(GITHUB_ENV, stack.gateway)
+    with pytest.raises(ValueError, match="Gateway and provider credentials must be separate"):
         stack.build()

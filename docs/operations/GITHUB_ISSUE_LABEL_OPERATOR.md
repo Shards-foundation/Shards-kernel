@@ -352,24 +352,23 @@ Local evidence (Python 3.13.15, Linux x86_64 container; CI matrix not executed
 here):
 
 ```text
-tests/test_github_issue_label_provider.py       34 passed
-tests/test_operator_github_profile.py           22 passed
-tests/test_public_tool_registration.py           8 passed
+tests/test_github_issue_label_provider.py       51 passed
+tests/test_operator_github_profile.py           33 passed
+tests/test_public_tool_registration.py          11 passed
 tests/test_github_operator_deploy_contract.py    3 passed
 tests/test_github_issue_label_live.py            1 skipped (gated secrets)
 ```
 
-The broader suite reports 1220 passed and 40 skipped with the offline-approver
-module excluded and the optional MCP SDK installed. Branch coverage measured
-91.65% with
+The full suite reports 1292 passed and 40 skipped, with ten
+`test_offline_approver_cli.py` tests failing in this container because the
+filesystem rejects `O_TMPFILE` (`Errno 95`); that is an environment limitation
+unrelated to this profile. Branch coverage measured 93.01% with
 `--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate --cov-branch --cov-fail-under=90`
 on that same run. The mandatory four-scenario E2E gate passed (`4 passed`).
-Ten `test_offline_approver_cli.py` tests fail in this container because the
-filesystem rejects `O_TMPFILE` (`Errno 95`); that is an environment limitation
-unrelated to this profile. An earlier full-suite run saw the mTLS two-process
-staging test fail once under concurrency; it passed when run alone and passed
-in the final full-suite run, so treat it as an environment flake, not
-acceptance evidence.
+The provider module itself measures 99% and the journal 97% in the focused
+run. An earlier full-suite run saw the mTLS two-process staging test fail once
+under concurrency; it passed when run alone and passed in the final full-suite
+run, so treat it as an environment flake, not acceptance evidence.
 
 This is local test evidence only. It does not prove a Cloudflare path, an
 ARM64 systemd start, GitHub production permissions or a remote deployment.

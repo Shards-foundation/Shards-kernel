@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,8 +16,12 @@ from shards_kernel.providers.github_issue_label import (
     GitHubIssueLabelConfig,
     GitHubIssueLabelProvider,
     ProviderEffectUnknown,
+    ProviderNotApplied,
     ProviderOutcome,
     ProviderValidationError,
+    TransportFailure,
+    UrllibHttpTransport,
+    _NoRedirect,
     derive_operation_id,
 )
 from shards_kernel.providers.journal import (
@@ -26,6 +32,7 @@ from shards_kernel.providers.journal import (
     UNKNOWN,
     ProviderEffectJournal,
     ProviderJournalError,
+    _safe_detail,
 )
 from tests.github_issue_label_test_server import GitHubTestProvider, LoopbackTransport
 
@@ -48,6 +55,7 @@ def make_provider(
     token: str | None = None,
     timeout: float = 10.0,
     token_supplier=None,
+    transport=None,
 ):
     journal = ProviderEffectJournal(str(tmp_path / "journal.sqlite3"))
     config = GitHubIssueLabelConfig(
@@ -61,7 +69,7 @@ def make_provider(
         config=config,
         journal=journal,
         token_supplier=token_supplier or (lambda: token or server.token),
-        transport=LoopbackTransport(server.base_url),
+        transport=transport or LoopbackTransport(server.base_url),
     )
     return provider, journal
 
@@ -608,3 +616,420 @@ def test_provider_journal_validates_paths_clock_and_outcome_transitions(tmp_path
         journal.record_outcome(op, SUCCEEDED, provider_ref="bad\x01")
     assert journal.count_by_state()[SUCCEEDED] == 1
     assert journal.open_operations() == ()
+
+
+def test_urllib_transport_success_http_error_and_transport_failure(server):
+    server.add_issue(7, {"triage"})
+    transport = UrllibHttpTransport()
+    response = transport.request(
+        "GET", server.base_url + "/repos/octo/demo/issues/7/labels", {}, None, 5
+    )
+    assert response.status == 200
+    assert b"triage" in response.body
+
+    rejected = transport.request(
+        "POST",
+        server.base_url + "/repos/octo/demo/issues/99/labels",
+        {"Content-Type": "application/json"},
+        b'{"labels":["triage"]}',
+        5,
+    )
+    assert rejected.status == 404
+
+    with pytest.raises(TransportFailure, match="TRANSPORT_FAILURE"):
+        transport.request("GET", "http://127.0.0.1:1/", {}, None, 1)
+    assert _NoRedirect().redirect_request(None, None, 302, "Found", {}, "https://example") is None
+
+
+def test_provider_config_and_constructor_type_guards(tmp_path):
+    journal = ProviderEffectJournal(str(tmp_path / "journal.sqlite3"))
+    try:
+        config = GitHubIssueLabelConfig(
+            owner="octo", repo="demo", allowed_labels=frozenset({"triage"})
+        )
+        with pytest.raises(ProviderValidationError, match="INVALID_PROVIDER_CONFIG"):
+            GitHubIssueLabelProvider(
+                config=object(), journal=journal, token_supplier=lambda: "ghp_" + "a" * 40
+            )
+        with pytest.raises(ProviderValidationError, match="INVALID_PROVIDER_JOURNAL"):
+            GitHubIssueLabelProvider(
+                config=config, journal=object(), token_supplier=lambda: "ghp_" + "a" * 40
+            )
+        with pytest.raises(ProviderValidationError, match="INVALID_TOKEN_SUPPLIER"):
+            GitHubIssueLabelProvider(config=config, journal=journal, token_supplier=None)
+        with pytest.raises(ProviderValidationError, match="GITHUB_TOKEN_ENV_INVALID"):
+            EnvTokenSupplier("lowercase-name")
+        with pytest.raises(ProviderValidationError, match="LABEL_ALLOWLIST_TOO_LARGE"):
+            GitHubIssueLabelConfig(
+                owner="octo",
+                repo="demo",
+                allowed_labels=frozenset(f"label-{index}" for index in range(33)),
+            )
+        with pytest.raises(ProviderValidationError, match="INVALID_MAX_ISSUE_NUMBER"):
+            GitHubIssueLabelConfig(
+                owner="octo", repo="demo", allowed_labels=frozenset({"triage"}),
+                max_issue_number=0,
+            )
+        with pytest.raises(ProviderValidationError, match="GITHUB_TOKEN_ENV_INVALID"):
+            GitHubIssueLabelConfig(
+                owner="octo", repo="demo", allowed_labels=frozenset({"triage"}),
+                token_env="lowercase",
+            )
+        with pytest.raises(ProviderValidationError, match="INVALID_REQUEST_ID"):
+            derive_operation_id(
+                request_id=123, permit_id="p" * 64, params_sha256="a" * 64
+            )
+        with pytest.raises(ProviderValidationError, match="INVALID_PARAMS_SHA256"):
+            derive_operation_id(
+                request_id="req", permit_id="p" * 64, params_sha256="x" * 501
+            )
+        assert _safe_detail(123) == ""
+    finally:
+        journal.close()
+
+
+def test_add_label_validates_operation_request_and_permit_ids(tmp_path, server):
+    server.add_issue(7)
+    provider, _ = make_provider(tmp_path, server)
+    base = dict(issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+                request_id="req-1", permit_id="p" * 64)
+    with pytest.raises(ProviderValidationError, match="INVALID_OPERATION_ID"):
+        provider.add_label(**{**base, "operation_id": "x" * 501})
+    with pytest.raises(ProviderValidationError, match="INVALID_REQUEST_ID"):
+        provider.add_label(**{**base, "request_id": 1})
+    with pytest.raises(ProviderValidationError, match="PERMIT_ID_REQUIRED"):
+        provider.add_label(**{**base, "permit_id": ""})
+    assert server.post_count == 0
+
+
+def test_handler_rejects_wrong_tool_missing_permit_and_not_applied(tmp_path, server):
+    server.add_issue(7)
+    provider, _ = make_provider(tmp_path, server)
+    params = compute_hash_dict({"issue_number": 7, "label": "triage"})
+    with execution_scope(
+        ExecutionScope(
+            request_id="req-1", actor="agent", tool_name="other",
+            permit_id="p" * 64, params_sha256=params,
+        )
+    ):
+        with pytest.raises(ProviderValidationError, match="EXECUTION_SCOPE_MISMATCH"):
+            provider.handle_issue_add_label(7, "triage")
+    with execution_scope(
+        ExecutionScope(
+            request_id="req-1", actor="agent", tool_name=TOOL_NAME,
+            permit_id="", params_sha256=params,
+        )
+    ):
+        with pytest.raises(ProviderValidationError, match="EXECUTION_SCOPE_PERMIT_REQUIRED"):
+            provider.handle_issue_add_label(7, "triage")
+
+    server.post_status = 422
+    with execution_scope(
+        ExecutionScope(
+            request_id="req-2", actor="agent", tool_name=TOOL_NAME,
+            permit_id="p" * 64, params_sha256=params,
+        )
+    ):
+        with pytest.raises(ProviderNotApplied, match="PROVIDER_NOT_APPLIED"):
+            provider.handle_issue_add_label(7, "triage")
+
+
+def test_terminal_binding_mismatch_and_invalid_journal_state(tmp_path, server, monkeypatch):
+    server.add_issue(7)
+    provider, journal = make_provider(tmp_path, server)
+    op = operation_id(7, "triage")
+    params = compute_hash_dict({"issue_number": 7, "label": "triage"})
+    journal.reserve(
+        operation_id=op, provider="github", resource="octo/demo", action="add_label",
+        params_sha256=params, request_id="req-1", permit_id="p" * 64,
+    )
+    journal.record_outcome(op, SUCCEEDED)
+    record = journal.get(op)
+    assert record is not None
+    fake = SimpleNamespace(
+        state=SUCCEEDED,
+        provider=record.provider,
+        resource="evil/other",
+        action=record.action,
+        params_sha256=record.params_sha256,
+        operation_id=op,
+        provider_ref=record.provider_ref,
+        detail=record.detail,
+    )
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: fake)
+    with pytest.raises(ProviderEffectUnknown, match="PROVIDER_JOURNAL_BINDING_MISMATCH"):
+        provider.add_label(
+            issue_number=7, label="triage", operation_id=op, request_id="req-1",
+            permit_id="p" * 64,
+        )
+
+    monkeypatch.setattr(journal, "reserve", lambda **kwargs: SimpleNamespace(state="BROKEN"))
+    with pytest.raises(ProviderEffectUnknown, match="PROVIDER_JOURNAL_STATE_INVALID"):
+        provider.add_label(
+            issue_number=7, label="triage", operation_id=op, request_id="req-1",
+            permit_id="p" * 64,
+        )
+
+
+def test_mark_dispatched_failure_is_unknown_without_post(tmp_path, server, monkeypatch):
+    server.add_issue(7)
+    provider, journal = make_provider(tmp_path, server)
+
+    def fail(operation_id):
+        raise ProviderJournalError("JOURNAL_UNAVAILABLE")
+
+    monkeypatch.setattr(journal, "mark_dispatched", fail)
+    with pytest.raises(ProviderEffectUnknown, match="PROVIDER_JOURNAL_UNAVAILABLE"):
+        provider.add_label(
+            issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+            request_id="req-1", permit_id="p" * 64,
+        )
+    assert server.post_count == 0
+
+
+def _dispatched_journal(
+    tmp_path, issue: int = 7, label: str = "triage"
+) -> tuple[str, ProviderEffectJournal]:
+    journal = ProviderEffectJournal(str(tmp_path / "journal.sqlite3"))
+    op = operation_id(issue, label)
+    journal.reserve(
+        operation_id=op,
+        provider="github",
+        resource="octo/demo",
+        action="add_label",
+        params_sha256=compute_hash_dict({"issue_number": issue, "label": label}),
+        request_id="req-1",
+        permit_id="p" * 64,
+    )
+    journal.mark_dispatched(op)
+    return op, journal
+
+
+def test_reconcile_readback_unavailable_or_missing_stays_unknown(tmp_path, server):
+    server.add_issue(7)
+    server.get_status = 500
+    op, _ = _dispatched_journal(tmp_path)
+    provider, journal = make_provider(tmp_path, server)
+    effect = provider.add_label(
+        issue_number=7, label="triage", operation_id=op, request_id="req-1",
+        permit_id="p" * 64,
+    )
+    assert effect.state is ProviderOutcome.UNKNOWN
+    assert effect.reconciled is True
+    assert journal.get(op).state == DISPATCHED
+    assert server.post_count == 0
+
+    server.get_status = None
+    server.labels.pop(7)
+    effect2 = provider.add_label(
+        issue_number=7, label="triage", operation_id=op, request_id="req-1",
+        permit_id="p" * 64,
+    )
+    assert effect2.state is ProviderOutcome.UNKNOWN
+    assert journal.get(op).state == DISPATCHED
+    assert server.post_count == 0
+
+
+class _AfterPost:
+    def __init__(self, inner, action):
+        self.inner = inner
+        self.action = action
+
+    def request(self, method, url, headers, body, timeout):
+        response = self.inner.request(method, url, headers, body, timeout)
+        if method == "POST":
+            self.action()
+        return response
+
+
+class _PostFailure:
+    def __init__(self, inner):
+        self.inner = inner
+
+    def request(self, method, url, headers, body, timeout):
+        if method == "POST":
+            raise RuntimeError("post failed")
+        return self.inner.request(method, url, headers, body, timeout)
+
+
+def test_issue_missing_after_dispatch_is_quarantined(tmp_path, server):
+    server.add_issue(7)
+    transport = _AfterPost(LoopbackTransport(server.base_url), lambda: server.labels.pop(7))
+    provider, _ = make_provider(tmp_path, server, transport=transport)
+    effect = provider.add_label(
+        issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+        request_id="req-1", permit_id="p" * 64,
+    )
+    assert effect.state is ProviderOutcome.UNKNOWN
+    assert server.post_count == 1
+
+    server.add_issue(8)
+    server.post_status = 422
+    second = tmp_path / "second"
+    second.mkdir()
+    transport2 = _AfterPost(LoopbackTransport(server.base_url), lambda: server.labels.pop(8))
+    provider2, _ = make_provider(second, server, transport=transport2)
+    effect2 = provider2.add_label(
+        issue_number=8,
+        label="triage",
+        operation_id=operation_id(8, "triage", request_id="req-2"),
+        request_id="req-2",
+        permit_id="p" * 64,
+    )
+    assert effect2.state is ProviderOutcome.NOT_APPLIED
+
+
+def test_readback_unavailable_after_dispatch_is_unknown(tmp_path, server):
+    server.add_issue(7)
+    transport = _AfterPost(
+        LoopbackTransport(server.base_url), lambda: setattr(server, "get_status", 500)
+    )
+    provider, _ = make_provider(tmp_path, server, transport=transport)
+    effect = provider.add_label(
+        issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+        request_id="req-1", permit_id="p" * 64,
+    )
+    assert effect.state is ProviderOutcome.UNKNOWN
+    assert server.post_count == 1
+
+    server.get_status = None
+    server.add_issue(8)
+    server.post_status = 422
+    second = tmp_path / "reject-readback"
+    second.mkdir()
+    transport2 = _AfterPost(
+        LoopbackTransport(server.base_url), lambda: setattr(server, "get_status", 500)
+    )
+    provider2, _ = make_provider(second, server, transport=transport2)
+    effect2 = provider2.add_label(
+        issue_number=8,
+        label="triage",
+        operation_id=operation_id(8, "triage", request_id="req-2"),
+        request_id="req-2",
+        permit_id="p" * 64,
+    )
+    assert effect2.state is ProviderOutcome.UNKNOWN
+
+
+class _GetFailure:
+    def request(self, method, url, headers, body, timeout):
+        raise RuntimeError("get failed")
+
+
+def test_readback_transport_failure_is_not_applied(tmp_path, server):
+    server.add_issue(7)
+    provider, _ = make_provider(tmp_path, server, transport=_GetFailure())
+    effect = provider.add_label(
+        issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+        request_id="req-1", permit_id="p" * 64,
+    )
+    assert effect.state is ProviderOutcome.NOT_APPLIED
+    assert server.post_count == 0
+
+
+def test_provider_exposes_immutable_scope_and_tool_name(tmp_path, server):
+    provider, _ = make_provider(tmp_path, server)
+    assert provider.config.resource == "octo/demo"
+    assert provider.tool_name == TOOL_NAME
+
+
+def test_post_transport_failure_is_unknown_after_preflight(tmp_path, server):
+    server.add_issue(7)
+    provider, _ = make_provider(
+        tmp_path, server, transport=_PostFailure(LoopbackTransport(server.base_url))
+    )
+    effect = provider.add_label(
+        issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+        request_id="req-1", permit_id="p" * 64,
+    )
+    assert effect.state is ProviderOutcome.UNKNOWN
+    assert server.post_count == 0
+
+
+def test_readback_pagination_exhaustion_is_not_success(tmp_path, server):
+    server.add_issue(7, {f"label-{index}" for index in range(500)})
+    provider, _ = make_provider(tmp_path, server)
+    effect = provider.add_label(
+        issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+        request_id="req-1", permit_id="p" * 64,
+    )
+    assert effect.state is ProviderOutcome.NOT_APPLIED
+    assert server.post_count == 0
+
+
+def test_parse_label_names_rejects_malformed_payloads(tmp_path, server):
+    provider, _ = make_provider(tmp_path, server)
+    parse = provider._parse_label_names
+    assert parse(None) is None
+    assert parse(b"not-json") is None
+    assert parse(b"{}") is None
+    assert parse(b'[{"x": 1}]') is None
+    assert parse(b"x" * (1024 * 1024 + 1)) is None
+    assert parse(b'[{"name": "triage"}]') == ["triage"]
+
+
+def test_effect_from_record_maps_invalid_state_to_unknown(tmp_path, server):
+    provider, _ = make_provider(tmp_path, server)
+    fake = SimpleNamespace(
+        state="BROKEN", operation_id="op", provider_ref="ref", detail=""
+    )
+    effect = provider._effect_from_record(fake, 7, "triage")
+    assert effect.state is ProviderOutcome.UNKNOWN
+
+
+def test_record_outcome_failure_never_reports_success(tmp_path, server, monkeypatch):
+    server.add_issue(7)
+    provider, journal = make_provider(tmp_path, server)
+
+    def fail(*args, **kwargs):
+        raise ProviderJournalError("JOURNAL_UNAVAILABLE")
+
+    monkeypatch.setattr(journal, "record_outcome", fail)
+    with pytest.raises(ProviderEffectUnknown, match="PROVIDER_JOURNAL_UNAVAILABLE"):
+        provider.add_label(
+            issue_number=7, label="triage", operation_id=operation_id(7, "triage"),
+            request_id="req-1", permit_id="p" * 64,
+        )
+    assert server.post_count == 1
+
+
+def test_journal_constructor_and_io_failures_are_sanitized(tmp_path, monkeypatch):
+    corrupt = tmp_path / "corrupt.sqlite3"
+    corrupt.write_bytes(b"not a sqlite database")
+    with pytest.raises(ProviderJournalError, match="JOURNAL_UNAVAILABLE"):
+        ProviderEffectJournal(str(corrupt))
+
+    journal = ProviderEffectJournal(str(tmp_path / "journal.sqlite3"))
+    op = operation_id(7, "triage")
+    journal.reserve(
+        operation_id=op,
+        provider="github",
+        resource="octo/demo",
+        action="add_label",
+        params_sha256=compute_hash_dict({"issue_number": 7, "label": "triage"}),
+        request_id="req-1",
+        permit_id="p" * 64,
+    )
+
+    def broken_connect():
+        raise sqlite3.OperationalError("unavailable")
+
+    monkeypatch.setattr(journal, "_connect", broken_connect)
+    for call in (
+        lambda: journal.get(op),
+        lambda: journal.reserve(
+            operation_id="op-new",
+            provider="github",
+            resource="octo/demo",
+            action="add_label",
+            params_sha256="a" * 64,
+            request_id="req-2",
+            permit_id="p" * 64,
+        ),
+        lambda: journal.mark_dispatched(op),
+        lambda: journal.record_outcome(op, SUCCEEDED),
+        journal.open_operations,
+        journal.count_by_state,
+    ):
+        with pytest.raises(ProviderJournalError, match="JOURNAL_UNAVAILABLE"):
+            call()
