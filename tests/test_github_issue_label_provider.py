@@ -22,6 +22,7 @@ from shards_kernel.providers.github_issue_label import (
     TransportFailure,
     UrllibHttpTransport,
     _NoRedirect,
+    _provider_reference,
     derive_operation_id,
 )
 from shards_kernel.providers.journal import (
@@ -56,11 +57,13 @@ def make_provider(
     timeout: float = 10.0,
     token_supplier=None,
     transport=None,
+    owner: str = "octo",
+    repo: str = "demo",
 ):
     journal = ProviderEffectJournal(str(tmp_path / "journal.sqlite3"))
     config = GitHubIssueLabelConfig(
-        owner="octo",
-        repo="demo",
+        owner=owner,
+        repo=repo,
         allowed_labels=frozenset(labels),
         max_issue_number=max_issue,
         timeout_seconds=timeout,
@@ -119,6 +122,114 @@ def test_existing_label_is_idempotent_and_does_not_post(tmp_path, server):
     assert effect.state is ProviderOutcome.SUCCEEDED
     assert effect.already_present is True
     assert server.post_count == 0
+
+
+def test_unicode_label_is_journaled_with_bounded_reference(tmp_path, server):
+    server.add_issue(7)
+    label = "bug \U0001F41B"
+    provider, journal = make_provider(tmp_path, server, labels=(label,))
+    op = operation_id(7, label)
+
+    effect = provider.add_label(
+        issue_number=7,
+        label=label,
+        operation_id=op,
+        request_id="req-1",
+        permit_id="p" * 64,
+    )
+
+    assert effect.state is ProviderOutcome.SUCCEEDED
+    assert effect.provider_ref.startswith("github:sha256:")
+    assert effect.provider_ref.isascii()
+    assert len(effect.provider_ref) <= 200
+    assert server.post_count == 1
+    assert server.labels[7] == {label}
+    record = journal.get(op)
+    assert record.state == SUCCEEDED
+    assert record.provider_ref == effect.provider_ref
+
+    # A restart reads the terminal record and never sends a second POST.
+    restarted = GitHubIssueLabelProvider(
+        config=provider.config,
+        journal=ProviderEffectJournal(str(tmp_path / "journal.sqlite3")),
+        token_supplier=lambda: server.token,
+        transport=LoopbackTransport(server.base_url),
+    )
+    again = restarted.add_label(
+        issue_number=7,
+        label=label,
+        operation_id=op,
+        request_id="req-1",
+        permit_id="p" * 64,
+    )
+    assert again.state is ProviderOutcome.SUCCEEDED
+    assert again.reconciled is False
+    assert again.provider_ref == effect.provider_ref
+    assert server.post_count == 1
+
+
+def test_over_long_ascii_reference_is_digested_and_terminal(tmp_path, server):
+    server.add_issue(7)
+    owner = "o" * 39
+    repo = "r" * 100
+    label = "l" * 100
+    assert len(f"github:{owner}/{repo}#7:{label}") > 200
+    provider, journal = make_provider(
+        tmp_path, server, labels=(label,), owner=owner, repo=repo
+    )
+    op = operation_id(7, label)
+
+    effect = provider.add_label(
+        issue_number=7,
+        label=label,
+        operation_id=op,
+        request_id="req-1",
+        permit_id="p" * 64,
+    )
+
+    assert effect.state is ProviderOutcome.SUCCEEDED
+    assert effect.provider_ref.startswith("github:sha256:")
+    assert effect.provider_ref.isascii()
+    assert len(effect.provider_ref) <= 200
+    assert journal.get(op).state == SUCCEEDED
+    assert server.post_count == 1
+    assert server.labels[7] == {label}
+
+
+def test_config_rejects_resource_longer_than_journal_reference():
+    with pytest.raises(ProviderValidationError, match="RESOURCE_TOO_LONG"):
+        GitHubIssueLabelConfig(
+            owner="o" * 100,
+            repo="r" * 100,
+            allowed_labels=frozenset({"triage"}),
+        )
+
+
+def test_provider_reference_is_deterministic_and_unambiguous():
+    first = _provider_reference("octo", "demo", 7, "bug \U0001F41B")
+    assert first == _provider_reference("octo", "demo", 7, "bug \U0001F41B")
+    assert first != _provider_reference("octo", "demo", 7, "bug \U0001F41C")
+    assert first.startswith("github:sha256:")
+    assert _provider_reference("octo", "demo", 7, "triage") == (
+        "github:octo/demo#7:triage"
+    )
+
+
+def test_provider_reference_boundary_is_exact():
+    owner = "o" * 100
+    repo = "r" * 80
+    at_limit = _provider_reference(owner, repo, 7, "x" * 9)
+    over_limit = _provider_reference(owner, repo, 7, "x" * 10)
+    assert len(at_limit) == 200
+    assert at_limit.startswith("github:o")
+    assert over_limit.startswith("github:sha256:")
+    assert len(over_limit) <= 200
+
+
+def test_provider_reference_digests_control_characters():
+    assert _provider_reference("octo", "demo", 7, "bad\tlabel").startswith(
+        "github:sha256:"
+    )
 
 
 @pytest.mark.parametrize("status", [403, 409, 429, 500, 502, 503])

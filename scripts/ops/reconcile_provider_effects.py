@@ -68,6 +68,7 @@ INCIDENT_JOURNAL_RECORD_MISSING = "INCIDENT_JOURNAL_RECORD_MISSING"
 QUARANTINED_UNKNOWN = "QUARANTINED_UNKNOWN"
 OPEN_OPERATION = "OPEN_OPERATION"
 BINDING_MISMATCH = "BINDING_MISMATCH"
+PREDISPATCH_DENIED = "PREDISPATCH_DENIED"
 
 _INCIDENT = frozenset(
     {
@@ -79,7 +80,22 @@ _INCIDENT = frozenset(
         BINDING_MISMATCH,
     }
 )
-_ATTENTION = frozenset({QUARANTINED_UNKNOWN, OPEN_OPERATION})
+_ATTENTION = frozenset({QUARANTINED_UNKNOWN, OPEN_OPERATION, PREDISPATCH_DENIED})
+
+# Kernel-generated denials that occur before the execution scope is entered.
+# A tool-generated error can be produced after an external effect, so it must
+# stay an incident rather than being classified as a safe non-effect.
+_PRE_DISPATCH_DENIAL_ERRORS = frozenset(
+    {
+        "Tool execution failed: PERMIT_EXPIRED_BEFORE_DISPATCH",
+        "Tool execution failed: TIME_LIMIT_NOT_ENFORCEABLE: "
+        "synchronous execution cannot enforce max_time_ms",
+    }
+)
+_PRE_DISPATCH_DENIAL_PREFIXES = (
+    "Tool execution failed: Execution denied by hook: ",
+    "Tool execution failed: Call budget exceeded: ",
+)
 
 
 class ReconcileError(Exception):
@@ -257,11 +273,30 @@ def _classify(
     return OPEN_OPERATION, intent, outcome
 
 
-def _audit_only_incidents(
+def _is_pre_dispatch_denial(entry: dict[str, Any]) -> bool:
+    """Return whether an audit outcome proves provider dispatch never began."""
+    error = entry.get("error")
+    if not isinstance(error, str):
+        return False
+    if error == "REPLAY_DETECTED":
+        reasons = entry.get("permit_denial_reasons")
+        return isinstance(reasons, (list, tuple)) and "REPLAY_DETECTED" in reasons
+    if error in _PRE_DISPATCH_DENIAL_ERRORS:
+        return True
+    return any(error.startswith(prefix) for prefix in _PRE_DISPATCH_DENIAL_PREFIXES)
+
+
+def _audit_only_classifications(
     entries: list[dict[str, Any]], journal_ids: set[str]
-) -> list[dict[str, Any]]:
-    """Audit provider intents with no journal row imply a lost/mismatched journal."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split audit intents without a journal row into incidents and safe denials.
+
+    An intent that is followed by a matching kernel-generated pre-dispatch
+    denial cannot have produced a provider effect. Every other audit-only
+    intent stays an incident because a lost or mismatched journal is possible.
+    """
     incidents: list[dict[str, Any]] = []
+    pre_dispatch: list[dict[str, Any]] = []
     for entry in entries:
         if entry.get("audit_phase") != "intent" or entry.get("tool_name") != TOOL_NAME:
             continue
@@ -275,16 +310,32 @@ def _audit_only_incidents(
             continue
         if operation_id in journal_ids:
             continue
-        incidents.append(
-            {
-                "operation_id": operation_id,
-                "request_id": entry.get("request_id"),
-                "permit_id": entry.get("permit_digest"),
-                "audit_phase": "intent",
-                "classification": INCIDENT_JOURNAL_RECORD_MISSING,
-            }
-        )
-    return incidents
+        outcomes = [
+            candidate
+            for candidate in entries
+            if candidate.get("audit_phase") == "outcome"
+            and candidate.get("tool_name") == TOOL_NAME
+            and candidate.get("request_id") == entry.get("request_id")
+            and candidate.get("permit_digest") == entry.get("permit_digest")
+            and candidate.get("params_hash") == entry.get("params_hash")
+        ]
+        record: dict[str, Any] = {
+            "operation_id": operation_id,
+            "request_id": entry.get("request_id"),
+            "permit_id": entry.get("permit_digest"),
+            "audit_phase": "intent",
+        }
+        if outcomes and all(
+            candidate.get("decision") == "DENY" and _is_pre_dispatch_denial(candidate)
+            for candidate in outcomes
+        ):
+            record["classification"] = PREDISPATCH_DENIED
+            record["outcome_error"] = outcomes[0].get("error")
+            pre_dispatch.append(record)
+        else:
+            record["classification"] = INCIDENT_JOURNAL_RECORD_MISSING
+            incidents.append(record)
+    return incidents, pre_dispatch
 
 
 def reconcile(
@@ -331,11 +382,13 @@ def reconcile(
             }
         )
 
-    audit_only = _audit_only_incidents(
+    audit_only, audit_only_pre_dispatch = _audit_only_classifications(
         audit_entries, {record["operation_id"] for record in journal_records}
     )
     for incident in audit_only:
         counts[INCIDENT_JOURNAL_RECORD_MISSING] = counts.get(INCIDENT_JOURNAL_RECORD_MISSING, 0) + 1
+    for denied in audit_only_pre_dispatch:
+        counts[PREDISPATCH_DENIED] = counts.get(PREDISPATCH_DENIED, 0) + 1
 
     if audit_only or any(key in _INCIDENT for key in counts):
         status = "INCIDENT"
@@ -356,6 +409,7 @@ def reconcile(
         "counts": dict(sorted(counts.items())),
         "records": records,
         "audit_only_incidents": audit_only,
+        "audit_only_pre_dispatch": audit_only_pre_dispatch,
         "scope": (
             "single-host read-only correlation; no provider call, no repair, "
             "no retry and no fabricated audit entry"

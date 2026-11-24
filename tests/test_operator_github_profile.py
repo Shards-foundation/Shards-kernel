@@ -683,6 +683,45 @@ def test_outcome_audit_failure_after_provider_effect_is_incident(tmp_path, stack
     assert report["audit_halt_entries"] == 1
 
 
+def test_predispatch_replay_race_is_attention_not_incident(stack, monkeypatch):
+    """A denial between intent and dispatch cannot have produced an effect."""
+    stack.provider.add_issue(7)
+    params = {"issue_number": 7, "label": "triage"}
+    permit = _permit(stack.issuer, "agent-alice", params)
+
+    # Model the threaded race: permit verification saw a fresh nonce, but a
+    # concurrent request records it before this request's post-intent commit.
+    registry = stack.server.kernel._nonce_registry
+    monkeypatch.setattr(registry, "check_and_record", lambda **_kwargs: False)
+
+    status, replay = _submit(
+        stack,
+        _payload("agent-alice", params, "req-race", permit),
+        bearer=stack.alice_token,
+    )
+    assert status == 200
+    assert replay["decision"] == "DENY"
+    assert "REPLAY_DETECTED" in replay["error"]
+    assert stack.provider.post_count == 0
+    assert stack.server.provider_journal.open_operations() == ()
+
+    payloads = _audit_payloads(stack.config.audit_db)
+    assert [
+        entry["audit_phase"]
+        for entry in payloads
+        if entry["request_id"] == "req-race"
+    ] == ["intent", "outcome"]
+
+    report = rec.reconcile(
+        stack.config.audit_db, stack.config.provider.journal_db
+    )
+    assert report["status"] == "ATTENTION"
+    assert report["audit_only_incidents"] == []
+    [denied] = report["audit_only_pre_dispatch"]
+    assert denied["classification"] == rec.PREDISPATCH_DENIED
+    assert denied["outcome_error"] == "REPLAY_DETECTED"
+
+
 def test_incident_restart_boots_idle_but_never_repairs_old_outcome(tmp_path, stack):
     status, params, permit = _induce_outcome_audit_incident(stack, "incident-1")
     assert status == 500
