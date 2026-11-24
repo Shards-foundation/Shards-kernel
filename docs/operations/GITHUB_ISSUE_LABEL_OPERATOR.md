@@ -353,12 +353,13 @@ tests/test_github_operator_deploy_contract.py    3 passed
 tests/test_github_issue_label_live.py            1 skipped (gated secrets)
 ```
 
-The broader suite reports 1188 passed and 43 skipped with the offline-approver
+The broader suite reports 1190 passed and 43 skipped with the offline-approver
 module excluded. Ten `test_offline_approver_cli.py` tests fail in this
 container because the filesystem rejects `O_TMPFILE` (`Errno 95`); that is an
-environment limitation unrelated to this profile. One mTLS two-process staging
-test failed once only when the whole suite ran concurrently and passed when
-run alone; treat it as an environment flake, not acceptance evidence.
+environment limitation unrelated to this profile. An earlier full-suite run
+saw the mTLS two-process staging test fail once under concurrency; it passed
+when run alone and passed in the final full-suite run, so treat it as an
+environment flake, not acceptance evidence.
 
 This is local test evidence only. It does not prove a Cloudflare path, an
 ARM64 systemd start, GitHub production permissions or a remote deployment.
