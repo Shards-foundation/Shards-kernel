@@ -300,11 +300,14 @@ def _audit_only_classifications(
     for entry in entries:
         if entry.get("audit_phase") != "intent" or entry.get("tool_name") != TOOL_NAME:
             continue
+        params_hash = entry.get("params_hash")
+        if not isinstance(params_hash, str) or not params_hash:
+            continue
         try:
             operation_id = derive_operation_id(
                 request_id=entry.get("request_id"),
                 permit_id=entry.get("permit_digest"),
-                params_sha256=entry.get("params_hash"),
+                params_sha256=params_hash,
             )
         except ProviderValidationError:
             continue
@@ -317,7 +320,7 @@ def _audit_only_classifications(
             and candidate.get("tool_name") == TOOL_NAME
             and candidate.get("request_id") == entry.get("request_id")
             and candidate.get("permit_digest") == entry.get("permit_digest")
-            and candidate.get("params_hash") == entry.get("params_hash")
+            and candidate.get("params_hash") == params_hash
         ]
         record: dict[str, Any] = {
             "operation_id": operation_id,

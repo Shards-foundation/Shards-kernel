@@ -335,7 +335,7 @@ def test_reconcile_classifies_pre_dispatch_denial_as_attention(tmp_path):
     [
         "Tool execution failed: PERMIT_EXPIRED_BEFORE_DISPATCH",
         "Tool execution failed: TIME_LIMIT_NOT_ENFORCEABLE: "
-        "synchronous execution cannot enforce max_time_ms",
+        + "synchronous execution cannot enforce max_time_ms",
         "Tool execution failed: Execution denied by hook: risk policy",
         "Tool execution failed: Call budget exceeded: call_index=2 > max_calls=1",
     ],
@@ -429,6 +429,23 @@ def test_reconcile_requires_replay_reason_for_pre_dispatch_proof(tmp_path):
 
     assert report["status"] == "INCIDENT"
     assert report["counts"] == {rec.INCIDENT_JOURNAL_RECORD_MISSING: 1}
+
+
+def test_audit_only_intent_without_params_hash_is_ignored():
+    entries = [
+        {
+            "audit_phase": "intent",
+            "tool_name": rec.TOOL_NAME,
+            "request_id": "req-no-params",
+            "permit_digest": "p" * 64,
+            "params_hash": None,
+        }
+    ]
+
+    incidents, pre_dispatch = rec._audit_only_classifications(entries, set())
+
+    assert incidents == []
+    assert pre_dispatch == []
 
 
 def test_reconcile_attention_exit_code_is_snapshot_wide(tmp_path, capsys):
