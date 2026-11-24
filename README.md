@@ -427,6 +427,8 @@ cannot run financial tools or bind remote interfaces. Unsigned policies require
 an explicit development-only `--allow-unsigned-local` flag. See the
 [operator service guide](docs/operations/LOOPBACK_OPERATOR_SERVICE.md)
 for config fields, trust boundaries and unverified production requirements.
+The opt-in v3 profile for one bounded GitHub issue-label action is documented
+in [bounded GitHub issue-label operator](docs/operations/GITHUB_ISSUE_LABEL_OPERATOR.md).
 
 ## SDK and optional service diagnostics
 

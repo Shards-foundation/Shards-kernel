@@ -37,6 +37,8 @@ class ToolRegistry:
         handler: Callable[..., Any],
         description: str = "",
         param_schema: Optional[dict[str, type]] = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """Register a tool.
 
@@ -45,12 +47,16 @@ class ToolRegistry:
             handler: Function to invoke for this tool.
             description: Human-readable description.
             param_schema: Dictionary mapping parameter names to types.
+            replace: Replace an existing registration of the same name.
 
         Raises:
-            ToolError: If tool name is already registered.
+            ToolError: If tool name is already registered (or absent when
+                ``replace`` is requested).
         """
-        if name in self._tools:
+        if name in self._tools and not replace:
             raise ToolError(f"Tool '{name}' is already registered")
+        if name not in self._tools and replace:
+            raise ToolError(f"Tool '{name}' is not registered and cannot be replaced")
 
         self._tools[name] = Tool(
             name=name,
@@ -126,9 +132,9 @@ class ToolRegistry:
         try:
             return tool.handler(**params)
         except TypeError as e:
-            raise ToolError(f"Invalid parameters for tool '{name}': {e}")
+            raise ToolError(f"Invalid parameters for tool '{name}': {e}") from e
         except Exception as e:
-            raise ToolError(f"Tool '{name}' execution failed: {e}")
+            raise ToolError(f"Tool '{name}' execution failed: {e}") from e
 
 
 def create_default_registry() -> ToolRegistry:

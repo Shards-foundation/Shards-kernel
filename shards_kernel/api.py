@@ -42,6 +42,7 @@ from shards_kernel.variants.dual_channel_kernel import DualChannelKernel
 # Tooling surface (stable)
 # -----------------------------------------------------------------------------
 from shards_kernel.execution.tools import ToolRegistry
+from shards_kernel.execution.scope import ExecutionScope, current_execution_scope
 from shards_kernel.core.runtime import (
     Artifact,
     ArtifactRef,
@@ -89,6 +90,30 @@ from shards_kernel.permits import (
 )
 
 # -----------------------------------------------------------------------------
+# Trusted provider adapters (v0.1.4+)
+# -----------------------------------------------------------------------------
+from shards_kernel.providers.github_issue_label import (
+    EnvTokenSupplier,
+    GitHubIssueLabelConfig,
+    GitHubIssueLabelProvider,
+    HttpTransport,
+    HttpResponse,
+    ProviderEffect,
+    ProviderEffectUnknown,
+    ProviderError,
+    ProviderNotApplied,
+    ProviderOutcome,
+    ProviderValidationError,
+    TransportFailure,
+    UrllibHttpTransport,
+)
+from shards_kernel.providers.journal import (
+    ProviderEffectJournal,
+    ProviderEffectRecord,
+    ProviderJournalError,
+)
+
+# -----------------------------------------------------------------------------
 # Public API surface
 # -----------------------------------------------------------------------------
 __all__ = [
@@ -111,6 +136,8 @@ __all__ = [
     "DualChannelKernel",
     # Tooling
     "ToolRegistry",
+    "ExecutionScope",
+    "current_execution_scope",
     "ExecutionContext",
     "ExecutionIdentity",
     "GraphBudget",
@@ -141,4 +168,21 @@ __all__ = [
     "sign_permit",
     "verify_permit",
     "verify_signature",
+    # Trusted provider adapters (v0.1.4+)
+    "EnvTokenSupplier",
+    "GitHubIssueLabelConfig",
+    "GitHubIssueLabelProvider",
+    "HttpTransport",
+    "HttpResponse",
+    "ProviderEffect",
+    "ProviderEffectJournal",
+    "ProviderEffectRecord",
+    "ProviderEffectUnknown",
+    "ProviderError",
+    "ProviderJournalError",
+    "ProviderNotApplied",
+    "ProviderOutcome",
+    "ProviderValidationError",
+    "TransportFailure",
+    "UrllibHttpTransport",
 ]

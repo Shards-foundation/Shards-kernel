@@ -195,18 +195,27 @@ and no multi-replica deployment is supported.
 
 ## Deliberate scope restrictions
 
-The operator config format allows only exactly the built-in, deterministic,
-non-financial tools `echo` and `add`. No arbitrary imports, shell
-commands, wallets, external destinations, cron jobs, background workers,
-dynamic registry entries or policy-wide wildcard grants.
+Operator schema versions 1 and 2 allow only the built-in, deterministic,
+non-financial tools `echo` and `add`. Schema version 3 is an explicit opt-in
+profile that adds exactly one bounded provider tool,
+`github.issue.add_label`, for one operator-pinned repository and label
+allowlist. No arbitrary imports, shell commands, wallets, arbitrary external
+destinations, cron jobs, background workers, dynamic registry entries or
+policy-wide wildcard grants are allowed in any version.
+
+The v3 provider, gateway identity contract, durable effect journal and
+deployment hardening are documented in
+[bounded GitHub issue-label operator](GITHUB_ISSUE_LABEL_OPERATOR.md).
 
 **Unresolved blockers:**
 1. Operator policy is now signed by an out-of-process Ed25519 signer, but
    the configured root of trust, host filesystem, and deployment provenance
    are not cryptographically attested; unsigned local bypass remains possible.
 2. A single bearer token authenticates one local principal but cannot
-   distinguish independent services/agents or operator halt authority;
-   there is no TLS ingress, OAuth/OIDC, mTLS or remote identity.
+   distinguish independent services/agents or operator halt authority.
+   Schema v3 adds per-agent credentials and a shared gateway identity token,
+   but there is still no TLS ingress, OAuth/OIDC, mTLS or cryptographic
+   remote identity; the gateway proxy is trusted.
 3. SQLite locking is only local-host advisory; no distributed, transactional
    nonce consumption across processes on different hosts.
 4. SQLite integrity checking can detect modified hashes but cannot detect a

@@ -1,0 +1,49 @@
+{
+  "version": 3,
+  "kernel_id": "github-issue-label-operator",
+  "tools": [
+    "github.issue.add_label",
+    "echo"
+  ],
+  "agents": [
+    {
+      "actor": "agent-requester",
+      "token_scrypt": "0000000000000000000000000000000000000000000000000000000000000000",
+      "allowed_tools": [
+        "github.issue.add_label"
+      ]
+    },
+    {
+      "actor": "agent-auditor",
+      "token_scrypt": "1111111111111111111111111111111111111111111111111111111111111111",
+      "allowed_tools": [
+        "echo"
+      ]
+    }
+  ],
+  "issuer_keys": [
+    {
+      "key_id": "operator-policy-key-1",
+      "issuer": "offline-operator-issuer",
+      "public_key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "revoked": false
+    }
+  ],
+  "audit_db": "/var/lib/shards-kernel/github-operator/audit.sqlite3",
+  "port": 8765,
+  "provider": {
+    "kind": "github_issue_label",
+    "owner": "your-org",
+    "repo": "your-repository",
+    "allowed_labels": [
+      "shards-agent"
+    ],
+    "max_issue_number": 100000,
+    "journal_db": "/var/lib/shards-kernel/github-operator/provider-journal.sqlite3",
+    "token_env": "SHARDS_KERNEL_GITHUB_TOKEN"
+  },
+  "gateway": {
+    "identity": "cloudflare-tunnel-prod",
+    "token_env": "SHARDS_KERNEL_GATEWAY_TOKEN"
+  }
+}

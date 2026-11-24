@@ -1,0 +1,56 @@
+[Unit]
+Description=Shards-Kernel bounded GitHub issue-label operator
+Documentation=file:/opt/shards-kernel/docs/operations/GITHUB_ISSUE_LABEL_OPERATOR.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/shards-kernel/github-operator.signed.json
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=shards-kernel
+Group=shards-kernel
+WorkingDirectory=/opt/shards-kernel
+EnvironmentFile=/etc/shards-kernel/github-operator.env
+ExecStart=/opt/shards-kernel/.venv/bin/python -m shards_kernel serve --config /etc/shards-kernel/github-operator.signed.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0077
+StateDirectory=shards-kernel/github-operator
+ConfigurationDirectory=shards-kernel
+ReadWritePaths=/var/lib/shards-kernel/github-operator
+ReadOnlyPaths=/etc/shards-kernel /opt/shards-kernel
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=4096
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=shards-kernel-github-operator
+
+[Install]
+WantedBy=multi-user.target

@@ -6,10 +6,11 @@ HTTP server for exposing kernel functionality.
 
 from __future__ import annotations
 
+import hmac
 import json
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Any, Dict, Optional, Type
 import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Dict, Optional, Type
 
 from shards_kernel._version import __version__
 from shards_kernel.common.types import VirtualClock
@@ -28,8 +29,21 @@ from shards_kernel.integrations.wire import (
     request_from_mapping,
     status_mapping,
 )
-from shards_kernel.variants.base import BaseKernel
 from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.variants.base import BaseKernel
+
+#: Headers that assert a caller identity. The kernel derives identity only
+#: from an authenticated credential, so their presence is always refused.
+_FORBIDDEN_IDENTITY_HEADERS = (
+    "X-Actor",
+    "X-Shards-Actor",
+    "X-User",
+    "X-Auth-Request-User",
+    "X-Authenticated-User",
+    "X-Forwarded-User",
+    "X-Remote-User",
+    "X-MS-Client-Principal",
+)
 
 
 class KernelRequestHandler(BaseHTTPRequestHandler):
@@ -43,6 +57,31 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     agent_auth_pepper: bytes = b""
     policy_expires_at_ms: Optional[int] = None
     max_body_bytes: int = 1024 * 1024
+    # Explicit gateway-to-operator identity for a loopback listener behind a
+    # separately authenticated TLS reverse proxy or tunnel.
+    gateway_identity: Optional[str] = None
+    gateway_token: Optional[str] = None
+
+    def _gateway_authorized(self) -> bool:
+        """Refuse spoofed identity headers and require the gateway credential."""
+        for header in _FORBIDDEN_IDENTITY_HEADERS:
+            if self.headers.get(header):
+                self._send_json(403, {"error": "Untrusted identity header"})
+                return False
+        if self.gateway_token is None:
+            return True
+        identity = self.headers.get("X-Shards-Gateway-Identity")
+        token = self.headers.get("X-Shards-Gateway-Token")
+        if not isinstance(identity, str) or not isinstance(token, str):
+            self._send_json(401, {"error": "Gateway identity required"})
+            return False
+        if not hmac.compare_digest(identity, self.gateway_identity or ""):
+            self._send_json(403, {"error": "Gateway identity mismatch"})
+            return False
+        if not hmac.compare_digest(token, self.gateway_token):
+            self._send_json(401, {"error": "Unauthorized"})
+            return False
+        return True
 
     def _policy_valid(self) -> bool:
         if self.policy_expires_at_ms is None:
@@ -57,6 +96,8 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _authorized(self) -> bool:
+        if not self._gateway_authorized():
+            return False
         if not self._policy_valid():
             return False
         if self.path == "/submit" and self.agent_identities:
@@ -201,7 +242,10 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
             principal = getattr(self, "_authenticated_agent", None)
             if self.agent_identities:
                 if principal is None or data.get("actor") != principal.actor:
-                    self._send_json(403, {"error": "Caller identity does not match service principal"})
+                    self._send_json(
+                        403,
+                        {"error": "Caller identity does not match service principal"},
+                    )
                     return
                 requested_tool = data.get("tool_call")
                 if (
@@ -245,6 +289,44 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:
         """Override to customize logging."""
         pass  # Suppress default logging
+
+
+def _validate_gateway_identity(
+    gateway_identity: Optional[str],
+    gateway_token: Optional[str],
+    *,
+    operator_secret: str,
+    agent_identities: tuple[AgentIdentity, ...],
+    agent_auth_pepper: bytes,
+) -> None:
+    """Require a distinct, bounded gateway credential when the profile is used."""
+    if (gateway_identity is None) != (gateway_token is None):
+        raise ValueError("Gateway identity and credential must be configured together")
+    if gateway_identity is None:
+        return
+    if (
+        not isinstance(gateway_identity, str)
+        or not gateway_identity
+        or len(gateway_identity) > 128
+        or "*" in gateway_identity
+        or not gateway_identity.isascii()
+        or any(ch.isspace() for ch in gateway_identity)
+    ):
+        raise ValueError("Gateway identity must be a bounded, concrete ASCII identifier")
+    if (
+        not isinstance(gateway_token, str)
+        or len(gateway_token) < 32
+        or gateway_token != gateway_token.strip()
+    ):
+        raise ValueError("Gateway credential must contain at least 32 characters")
+    if hmac.compare_digest(gateway_token, operator_secret):
+        raise ValueError("Gateway and operator credentials must not be shared")
+    if any(gateway_identity == identity.actor for identity in agent_identities):
+        raise ValueError("Gateway identity must be distinct from every agent actor")
+    if agent_identities and identify_agent(
+        "Bearer " + gateway_token, agent_identities, agent_auth_pepper
+    ) is not None:
+        raise ValueError("Gateway and agent credentials must not be shared")
 
 
 def _validate_registered_principals(
@@ -308,6 +390,8 @@ class KernelServer:
         agent_identities: tuple[AgentIdentity, ...] = (),
         agent_auth_pepper: str | None = None,
         policy_expires_at_ms: Optional[int] = None,
+        gateway_identity: Optional[str] = None,
+        gateway_token: Optional[str] = None,
     ):
         if isinstance(kernel.config.clock, VirtualClock) and not allow_test_clock:
             raise ValueError(
@@ -315,7 +399,10 @@ class KernelServer:
                 "use a real SystemClock or explicitly allow_test_clock=True for tests"
             )
         if host not in {"localhost", "127.0.0.1", "::1"} and not allow_remote_bind:
-            raise ValueError("Remote HTTP binding requires explicit allow_remote_bind=True and a secure TLS ingress")
+            raise ValueError(
+                "Remote HTTP binding requires explicit allow_remote_bind=True "
+                "and a secure TLS ingress"
+            )
         self.api_key = resolve_api_key(api_key)
         self.agent_auth_pepper = (
             resolve_agent_pepper(agent_auth_pepper) if agent_identities else b""
@@ -325,6 +412,13 @@ class KernelServer:
             agent_identities=agent_identities, operator_secret=self.api_key,
             agent_auth_pepper=self.agent_auth_pepper,
         )
+        _validate_gateway_identity(
+            gateway_identity,
+            gateway_token,
+            operator_secret=self.api_key,
+            agent_identities=agent_identities,
+            agent_auth_pepper=self.agent_auth_pepper,
+        )
         if policy_expires_at_ms is not None and (
             type(policy_expires_at_ms) is not int or policy_expires_at_ms < 0
         ):
@@ -332,9 +426,15 @@ class KernelServer:
         self.trusted_actor = trusted_actor
         self.agent_identities = tuple(agent_identities)
         self.policy_expires_at_ms = policy_expires_at_ms
+        self.gateway_identity = gateway_identity
+        self.gateway_token = gateway_token
         self.kernel = kernel
         self.host = host
         self.port = port
+        # Optional trusted provider wiring, populated by the operator builder.
+        # None for the default builtin-only service.
+        self.provider: Any = None
+        self.provider_journal: Any = None
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -351,6 +451,8 @@ class KernelServer:
         Handler.agent_identities = self.agent_identities
         Handler.agent_auth_pepper = self.agent_auth_pepper
         Handler.policy_expires_at_ms = self.policy_expires_at_ms
+        Handler.gateway_identity = self.gateway_identity
+        Handler.gateway_token = self.gateway_token
         return Handler
 
     def start(self, blocking: bool = True) -> None:
