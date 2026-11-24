@@ -1,6 +1,6 @@
 """Read-only GitHub Actions failure and stale-run monitor.
 
-Python 3.9+, standard library only. Supports public repositories without a
+Python 3.11+, standard library only. Supports public repositories without a
 token, or private repositories when GITHUB_TOKEN is injected securely.
 Only contacts the GitHub REST API; does not rerun, cancel, delete or approve.
 

@@ -20,7 +20,7 @@ try:
     # SDK owns JSON-RPC framing, lifecycle, listing and stdio transport.
     from mcp.server import MCPServer
     from mcp.types import CallToolResult, TextContent
-except ImportError:  # Optional dependency; base kernel remains Python 3.9+.
+except ImportError:  # Optional dependency; base kernel remains Python 3.11+.
     MCPServer = None
     CallToolResult = None
     TextContent = None

@@ -164,7 +164,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
 
     steps:
       - name: Checkout
@@ -181,8 +181,7 @@ jobs:
           pip install -e ".[dev,crypto]"
           pip install build
 
-      - name: Install optional MCP SDK v2 on Python 3.11+
-        if: matrix.python-version != '3.9' && matrix.python-version != '3.10'
+      - name: Install optional MCP SDK v2
         run: pip install -e ".[mcp]"
 
       - name: Verify resolved dependency consistency
@@ -195,12 +194,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          coverage_args=(--cov=shards_kernel --cov=implementations)
-          # The runner is intentionally unsupported on 3.9/3.10. Include its
-          # measured coverage only where negative-path subprocess tests run.
-          if python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
-            coverage_args+=(--cov=scripts.ci.run_e2e_gate)
-          fi
+          coverage_args=(--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate --cov=scripts.ops.reconcile_provider_effects)
           pytest "${coverage_args[@]}" \
             --cov-branch \
             --cov-report=term-missing \
@@ -320,11 +314,7 @@ jobs:
           "$wheel_venv/bin/python" -m pip install --upgrade pip
           wheel="$(find "$GITHUB_WORKSPACE/dist" -maxdepth 1 -type f -name 'shards_kernel-*.whl' -print -quit)"
           test -n "$wheel"
-          wheel_extras="crypto"
-          if "$wheel_venv/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
-            wheel_extras="crypto,mcp"
-          fi
-          "$wheel_venv/bin/python" -m pip install "$wheel[$wheel_extras]"
+          "$wheel_venv/bin/python" -m pip install "$wheel[crypto,mcp]"
           "$wheel_venv/bin/python" -m pip check
           cd "$RUNNER_TEMP"
           "$wheel_venv/bin/python" -c "import shards_kernel; from shards_kernel.api import StrictKernel; from implementations.storage import SQLiteAuditStorage; print('Installed wheel imports: OK')"

@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Fail-closed AI agent tool authorization with signed permits, replay protection, and audit evidence"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
     {name = "Shards Foundation Contributors"}
 ]
@@ -18,8 +18,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -52,9 +50,8 @@ Changelog = "https://github.com/Shards-foundation/Shards-kernel/blob/main/CHANGE
 [project.optional-dependencies]
 # Optional terminal UI: keep the default runtime dependency-free.
 tui = ["textual>=8.2,<9"]
-# Official MCP SDK v2 is optional and requires Python >=3.11.
-# The deterministic library remains standard-library-only on Python 3.9+.
-mcp = ["mcp>=2.2,<3; python_version >= '3.11'"]
+# Official MCP SDK v2 is optional; the minimum Python is already >=3.11.
+mcp = ["mcp>=2.2,<3"]
 crypto = ["cryptography>=43,<51"]
 # Opt-in shared PostgreSQL accounting; no database connection by default.
 postgres = ["psycopg[binary]>=3.2,<4"]
@@ -68,8 +65,6 @@ dev = [
     "hypothesis>=6",
     "ruff==0.17.3",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
-    # FastAPI 0.129+ requires Python >=3.10. Pip honors Requires-Python, so
-    # CPython 3.9 still resolves to the newest compatible release (0.128.x).
     "flask>=2,<4",
     "fastapi>=0.100,<0.163",
     "httpx>=0.24,<1",
@@ -84,7 +79,7 @@ include = ["shards_kernel*", "implementations*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 extend-exclude = [".github/", "*.md", "*.yaml", "*.yml"]
 
 [tool.ruff.lint]

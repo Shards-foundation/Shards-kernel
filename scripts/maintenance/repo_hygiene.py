@@ -1,6 +1,6 @@
 """Read-only hygiene audit of Git-tracked repository files.
 
-Python 3.9+, standard library and Git; Linux, macOS and Windows.
+Python 3.11+, standard library and Git; Linux, macOS and Windows.
 Does not modify tracked files, stages, worktrees, or Git configuration.
 Advisory findings do not fail by default; --strict treats them as failures.
 

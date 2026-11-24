@@ -34,7 +34,7 @@ workflow files and match the check runs reported on `main` at
 
 | Check name (exact) | Workflow file | Job id | Note |
 |---|---|---|---|
-| `quality (3.9)` … `quality (3.15)` | `.github/workflows/ci.yml` | `quality` (matrix) | One check per Python version; each must be listed separately. |
+| `quality (3.11)` … `quality (3.15)` | `.github/workflows/ci.yml` | `quality` (matrix) | One check per Python version; each must be listed separately. |
 | `Dependency and Python security scans` | `.github/workflows/security.yml` | `vulnerability-scans` | pip-audit and Bandit. |
 | `CodeQL Analyze` | `.github/workflows/security.yml` | `codeql` | Static security analysis. |
 

@@ -11,7 +11,7 @@ These are **operational observations**, not production certification.
 | python scripts/maintenance/workflow_safety.py --repo . | Targeted GitHub Actions unsafe patterns and floating action refs | None |
 | python scripts/maintenance/github_actions_watch.py --repo Shards-foundation/Shards-kernel | Recent main-branch workflow failures, stale runs, API coverage completeness | None |
 
-All run with Python 3.9+, standard-library-only code. The hygiene scanner
+All run with Python 3.11+, standard-library-only code. The hygiene scanner
 requires Git installed and the target to be an existing Git worktree.
 The workflow scanner requires a repository with .github/workflows.
 The Actions monitor uses only the GitHub REST API; public repos need no token.
@@ -72,7 +72,7 @@ for 14 days. The first fully measured regression run after expanding failure
 paths produced 65 passing tests and 92% branch-aware coverage (rounded).
 
 This is an additional gate for maintenance scripts. It does not replace the
-kernel's separate Python 3.9–3.15 matrix, critical security invariant tests
+kernel's separate Python 3.11–3.15 matrix, critical security invariant tests
 or independent review.
 
 ## What could go wrong
@@ -109,6 +109,6 @@ No new maintenance script invokes that legacy utility.
 python -m pytest tests/test_repository_maintenance.py -q
 ~~~
 
-Accept changes only after the existing repository 3.9–3.15 quality matrix,
+Accept changes only after the existing repository 3.11–3.15 quality matrix,
 strict local E2E security gate, PostgreSQL accounting tests and independent
 non-author review pass on the exact PR head.

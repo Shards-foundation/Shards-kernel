@@ -45,14 +45,12 @@ is intentionally smaller and may not replace them.
 ## Negative-path verification (Codacy review of PR #88)
 
 `tests/test_e2e_gate.py` is included in the standard Python-version CI matrix,
-and the release runner is included in branch-aware coverage **only on
-supported Python 3.11+** (`--cov=scripts.ci.run_e2e_gate`). Python 3.9/3.10
-still run the library-quality matrix but cannot exercise the subprocess E2E
-runner. A separate CI step reads the **unrounded**
-`coverage.json:totals.percent_covered` value and exits nonzero for anything
-below 90.0% (or non-finite), even if pytest-cov or a rounded display reports
-success. Targeted doctor tests also cover rejected profiles and backwards
-system clocks on older Python matrix jobs. The tests launch isolated new Python
+and the release runner is included in branch-aware coverage on **every
+supported Python** (`--cov=scripts.ci.run_e2e_gate`). A separate CI step reads
+the **unrounded** `coverage.json:totals.percent_covered` value and exits
+nonzero for anything below 90.0% (or non-finite), even if pytest-cov or a
+rounded display reports success. Targeted doctor tests also cover rejected
+profiles and backwards system clocks on the supported matrix. The tests launch isolated new Python
 interpreters with temporary, **synthetic** pytest scenarios to prove:
 
 - A real scenario passes, while a missing test, skip, expected failure,

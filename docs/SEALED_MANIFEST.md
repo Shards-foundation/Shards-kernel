@@ -195,7 +195,7 @@ Everything not listed above is internal and may change without notice.
 | Version | Status |
 |---------|--------|
 | 3.11+ | ✅ Supported |
-| 3.10 | ⚠️ May work |
+| 3.10 | ❌ Not supported |
 | 3.9 | ❌ Not supported |
 | <3.9 | ❌ Not supported |
 

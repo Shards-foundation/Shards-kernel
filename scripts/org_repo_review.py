@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only GitHub organisation repository inventory and maintenance triage.
 
-Requires Python 3.9+ and only the standard library. This utility never clones,
+Requires Python 3.11+ and only the standard library. This utility never clones,
 executes repository code, resets branches, deletes worktrees or writes reports.
 
 Examples:

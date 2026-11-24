@@ -32,7 +32,7 @@ shards-kernel demo --json
 shards-kernel doctor --profile library --json
 ```
 
-Python 3.9–3.12 are supported for the base library; choose **3.11 or later** for official MCP v2. The offline `demo` is deliberately self-contained and uses synthetic clock/ephemeral test keys. The `doctor` service profile is **not** a production certificate and may correctly report `NOT_READY`.
+Python 3.11–3.15 are supported for the base library; choose **3.11 or later** for official MCP v2. The offline `demo` is deliberately self-contained and uses synthetic clock/ephemeral test keys. The `doctor` service profile is **not** a production certificate and may correctly report `NOT_READY`.
 
 Verify concrete evidence rather than just a zero shell exit: capture the installed version, demo's reported `passed` value, and library doctor's returned status. Do **not** set up wallets, real trading, cloud accounts, cron schedules or public endpoints to complete the first run.
 

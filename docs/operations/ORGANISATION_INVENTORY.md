@@ -6,7 +6,7 @@ and deleted workspaces during normal execution. The replacement performs
 **read-only HTTPS GET requests to GitHub's REST API**. It does not clone, run,
 alter, reset or delete repositories, or create or overwrite report files.
 
-The script requires Python 3.9+ and the standard library only. It is
+The script requires Python 3.11+ and the standard library only. It is
 cross-platform and does not require Git, Docker or a cloud CLI.
 
 ## Usage
@@ -91,6 +91,6 @@ Coverage is a scope-specific quality metric, not evidence of actual
 branch-protection enforcement, availability of private repositories, or
 production readiness of Shards-Kernel itself.
 
-The existing Python 3.9–3.15 quality matrix, strict real-process E2E gate,
+The existing Python 3.11–3.15 quality matrix, strict real-process E2E gate,
 PostgreSQL accounting checks and independent exact-head approval remain
 mandatory before merging.

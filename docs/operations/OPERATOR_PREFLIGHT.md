@@ -26,7 +26,7 @@ A `NOT_VERIFIED` service gate must not be relabelled as a library failure.
 
 | Check | Evidence or limitation |
 |---|---|
-| `python` | Python runtime version >=3.9 |
+| `python` | Python runtime version >=3.11 |
 | `clock_primitive` | Local SystemClock probe, not cross-restart time integrity |
 | `ed25519_library` | Importable cryptography package |
 | `mcp_sdk` | Optional official MCP SDK installed under Python >=3.11 |

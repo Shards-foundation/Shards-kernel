@@ -1,7 +1,8 @@
 """Requirements document structural contract.
 
-Keep this dependency-free so both legacy Python CI and Docs CI can enforce it.
-This test intentionally catches malformed heading replacements and orphan table rows.
+Keep this dependency-free so every supported Python CI job and Docs CI can
+enforce it. This test intentionally catches malformed heading replacements and
+orphan table rows.
 """
 from pathlib import Path
 import re
@@ -45,17 +46,19 @@ class RequirementsDocumentationContract(unittest.TestCase):
         self.assertEqual(labels, [f"3.{minor}" for minor in range(15, 8, -1)] + ["3.16+"])
 
     def test_declared_classifiers_match_version_table(self):
-        self.assertIn('requires-python = ">=3.9"', self.metadata)
-        for minor in range(9, 16):
+        self.assertIn('requires-python = ">=3.11"', self.metadata)
+        for minor in range(11, 16):
             self.assertIn(
                 f'"Programming Language :: Python :: 3.{minor}"',
                 self.metadata,
             )
+        self.assertNotIn('"Programming Language :: Python :: 3.9"', self.metadata)
+        self.assertNotIn('"Programming Language :: Python :: 3.10"', self.metadata)
         self.assertIn(
-            "Python 3.9–3.15",
+            "Python 3.11–3.15",
             self.doc,
         )
-        self.assertIn("Python 3.11+; older interpreters", self.doc)
+        self.assertIn("Python 3.9 and 3.10 were\nretired intentionally", self.doc)
 
 
 if __name__ == "__main__":

@@ -32,8 +32,7 @@ class AsyncKernel:
 
     def __init__(self, kernel: BaseKernel) -> None:
         self.kernel = kernel
-        # Python 3.9 binds locks at construction. Defer construction until
-        # the first running loop, so wrappers can be created synchronously.
+        # Construct the lock lazily so the kernel can be created before an event loop is running.
         self._lock: Optional[asyncio.Lock] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 

@@ -1,4 +1,4 @@
-"""Executable contracts for the public README (stdlib-only on Python 3.9+).
+"""Executable contracts for the public README (stdlib-only on Python 3.11+).
 
 These checks defend documentation accuracy. They do not assert that a
 remote gateway, hosted service or third-party connector exists.

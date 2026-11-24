@@ -6,8 +6,9 @@ import urllib.request
 
 import pytest
 
+from shards_kernel.integrations.auth import AgentIdentity, agent_token_kdf
 from shards_kernel.integrations.wire import boot_strict_kernel
-from shards_kernel.sdk.server import KernelServer
+from shards_kernel.sdk.server import KernelServer, _validate_gateway_identity
 
 TEST_KEY = "shards-test-http-key-32-characters-long-0001"
 
@@ -48,6 +49,22 @@ def test_server_read_routes_and_unknown_route(live_server):
     status, payload = request_json(url + "/unknown")
     assert status == 404
     assert payload["error"] == "Not found"
+
+
+def test_gateway_headers_are_rejected_without_a_gateway_profile(live_server):
+    _server, url = live_server
+    req = urllib.request.Request(
+        url + "/status",
+        headers={
+            "Authorization": f"Bearer {TEST_KEY}",
+            "X-Shards-Gateway-Identity": "forged-gateway",
+        },
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(req, timeout=3)  # nosec B310: fixed loopback test URL
+    assert error.value.code == 403
+    payload = json.loads(error.value.read().decode("utf-8"))
+    assert payload["error"] == "Gateway headers not accepted"
 
 
 def test_server_submit_reports_missing_fields_and_bad_json(live_server):
@@ -200,3 +217,48 @@ def test_signed_operator_http_policy_expiry_denies_submit_and_health():
         assert "expired" in result["error"]
     finally:
         server.stop()
+
+
+def test_gateway_identity_validation_rejects_ambiguous_or_shared_credentials():
+    pepper = b"p" * 32
+    agent_token = "agent." + "a" * 40
+    agent = AgentIdentity("agent", agent_token_kdf(agent_token, pepper), frozenset())
+    with pytest.raises(ValueError, match="configured together"):
+        _validate_gateway_identity(
+            "gateway", None, operator_secret=TEST_KEY,
+            agent_identities=(), agent_auth_pepper=pepper,
+        )
+    with pytest.raises(ValueError, match="configured together"):
+        _validate_gateway_identity(
+            None, "g" * 40, operator_secret=TEST_KEY,
+            agent_identities=(), agent_auth_pepper=pepper,
+        )
+    with pytest.raises(ValueError, match="bounded, concrete ASCII"):
+        _validate_gateway_identity(
+            "gate way", "g" * 40, operator_secret=TEST_KEY,
+            agent_identities=(), agent_auth_pepper=pepper,
+        )
+    with pytest.raises(ValueError, match="at least 32 characters"):
+        _validate_gateway_identity(
+            "gateway", "short", operator_secret=TEST_KEY,
+            agent_identities=(), agent_auth_pepper=pepper,
+        )
+    with pytest.raises(ValueError, match="operator credentials"):
+        _validate_gateway_identity(
+            "gateway", TEST_KEY, operator_secret=TEST_KEY,
+            agent_identities=(), agent_auth_pepper=pepper,
+        )
+    with pytest.raises(ValueError, match="distinct from every agent actor"):
+        _validate_gateway_identity(
+            "agent", "g" * 40, operator_secret=TEST_KEY,
+            agent_identities=(agent,), agent_auth_pepper=pepper,
+        )
+    with pytest.raises(ValueError, match="agent credentials"):
+        _validate_gateway_identity(
+            "gateway", agent_token, operator_secret=TEST_KEY,
+            agent_identities=(agent,), agent_auth_pepper=pepper,
+        )
+    _validate_gateway_identity(
+        "gateway", "g" * 40, operator_secret=TEST_KEY,
+        agent_identities=(agent,), agent_auth_pepper=pepper,
+    )

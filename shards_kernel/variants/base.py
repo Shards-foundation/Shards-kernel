@@ -5,12 +5,19 @@ provides common functionality that variants can extend.
 """
 
 import copy
+import inspect
 from abc import ABC, abstractmethod
 from threading import Lock
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, get_type_hints
 
+from shards_kernel.audit.ledger import AuditLedger
 from shards_kernel.common.codec import equal_json_values
-
+from shards_kernel.common.errors import (
+    AuditError,
+    BootError,
+    StateError,
+)
+from shards_kernel.common.hashing import compute_hash_dict
 from shards_kernel.common.types import (
     Decision,
     DecisionEnvelope,
@@ -22,25 +29,22 @@ from shards_kernel.common.types import (
     ReceiptStatus,
     ToolCall,
 )
-from shards_kernel.common.errors import (
-    AuditError,
-    BootError,
-    StateError,
-)
-from shards_kernel.common.validate import validate_request, check_ambiguity
-from shards_kernel.audit.ledger import AuditLedger
-from shards_kernel.common.hashing import compute_hash_dict
-from shards_kernel.jurisdiction.policy import JurisdictionPolicy
-from shards_kernel.jurisdiction.rules import evaluate_policy
-from shards_kernel.state.machine import StateMachine
-from shards_kernel.execution.tools import create_default_registry
-from shards_kernel.execution.dispatcher import Dispatcher, resolve_bound_params, resolve_effective_params
+from shards_kernel.common.validate import check_ambiguity, validate_request
 from shards_kernel.core.runtime import (
     ExecutionContext,
     KernelRuntime,
     RuntimeEvent,
     RuntimeExecutionResult,
 )
+from shards_kernel.execution.dispatcher import (
+    Dispatcher,
+    resolve_bound_params,
+    resolve_effective_params,
+)
+from shards_kernel.execution.scope import ExecutionScope, execution_scope
+from shards_kernel.execution.tools import create_default_registry
+from shards_kernel.jurisdiction.policy import JurisdictionPolicy
+from shards_kernel.jurisdiction.rules import evaluate_policy
 from shards_kernel.permits import (
     NonceRegistry,
     PermitToken,
@@ -49,6 +53,7 @@ from shards_kernel.permits import (
     _require_hmac_key,
     verify_permit,
 )
+from shards_kernel.state.machine import StateMachine
 
 
 class Kernel(ABC):
@@ -216,6 +221,99 @@ class BaseKernel(Kernel):
         """
         self._policy = policy
 
+    def register_tool(
+        self,
+        name: str,
+        handler: Callable[..., Any],
+        description: str = "",
+        param_schema: Optional[dict[str, type]] = None,
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Register a trusted handler on an explicit, non-wildcard policy.
+
+        This is the supported extension point for released integrations.
+        Registration never grants execution authority: the tool name must
+        already be on the kernel's explicit policy allowlist, and every call
+        still needs a verified permit. Wildcard policies are refused because
+        they would let a registration silently widen the executable surface.
+
+        Args:
+            name: Concrete ASCII tool name, never ``*``.
+            handler: Trusted callable. Its bound signature is the authoritative
+                parameter surface.
+            description: Human-readable description.
+            param_schema: Optional metadata mapping of parameter names to types.
+            replace: Replace an existing registration of the same name.
+
+        Raises:
+            StateError: If the kernel is not booted.
+            ValueError: For an invalid name, handler or non-explicit policy.
+            ToolError: If the name is already registered (or absent on replace).
+        """
+        if self._dispatcher is None:
+            raise StateError("Kernel not booted")
+        if self._policy is None:
+            raise StateError("Kernel policy is not configured")
+        if (
+            not isinstance(name, str)
+            or not name
+            or len(name) > 128
+            or not name.isascii()
+            or "*" in name
+            or any(ch.isspace() for ch in name)
+        ):
+            raise ValueError("Tool name must be a bounded, concrete ASCII identifier")
+        if not callable(handler):
+            raise ValueError("Tool handler must be callable")
+        if param_schema is not None and not isinstance(param_schema, dict):
+            raise ValueError("Tool param_schema must be a dictionary")
+        if param_schema is not None:
+            self._validate_handler_schema(handler, param_schema)
+        if "*" in self._policy.allowed_tools or "*" in self._policy.allowed_actors:
+            raise ValueError("Explicit actor and tool allowlists are required for registration")
+        if name not in self._policy.allowed_tools:
+            raise ValueError("Tool must be on the explicit policy allowlist before registration")
+        self._dispatcher.registry.register(
+            name=name,
+            handler=handler,
+            description=description,
+            param_schema=param_schema,
+            replace=replace,
+        )
+
+    @staticmethod
+    def _validate_handler_schema(
+        handler: Callable[..., Any], param_schema: dict[str, type]
+    ) -> None:
+        """Keep the declared parameter metadata aligned with the bound handler."""
+        if any(not isinstance(value, type) for value in param_schema.values()):
+            raise ValueError("Tool param_schema values must be types")
+        try:
+            signature = inspect.signature(handler)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Tool handler signature is not inspectable") from exc
+        names: set[str] = set()
+        for parameter in signature.parameters.values():
+            if parameter.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ):
+                names.add(parameter.name)
+            else:
+                raise ValueError("Tool handlers must not use variadic parameters")
+        if set(param_schema) != names:
+            raise ValueError("Tool param_schema must match the handler parameters")
+        try:
+            hints = get_type_hints(handler)
+        except Exception:
+            hints = {}
+        for name, declared in param_schema.items():
+            annotated = hints.get(name)
+            if isinstance(annotated, type) and annotated is not declared:
+                raise ValueError("Tool param_schema type does not match handler annotation")
+
     def set_keyring(
         self, keyring: dict[str, bytes], *, strict_key_length: Optional[bool] = None
     ) -> None:
@@ -298,7 +396,10 @@ class BaseKernel(Kernel):
         self._state_machine.assert_not_halted()
 
         try:
-            if evidence.kernel_id != self.config.kernel_id or evidence.variant != self.config.variant:
+            if (
+                evidence.kernel_id != self.config.kernel_id
+                or evidence.variant != self.config.variant
+            ):
                 raise AuditError("Evidence kernel identity does not match this kernel")
             self._ledger.load_verified(evidence.ledger_entries, evidence.root_hash)
         except AuditError:
@@ -580,11 +681,16 @@ class BaseKernel(Kernel):
         if tool_error:
             return self._deny_request(request, state_from, tool_error)
 
-        if self._requires_permit(request) and permit_token is not None and tool_name != permit_token.action:
+        if (
+            self._requires_permit(request)
+            and permit_token is not None
+            and tool_name != permit_token.action
+        ):
             return self._deny_permit(
                 request,
                 state_from,
-                f"ACTION_TOOL_MISMATCH: permit authorises '{permit_token.action}' but the tool is '{tool_name}'",
+                "ACTION_TOOL_MISMATCH: permit authorises "
+                f"'{permit_token.action}' but the tool is '{tool_name}'",
                 ["ACTION_TOOL_MISMATCH"],
                 permit_digest=permit_token.permit_id,
                 proposal_hash=permit_token.proposal_hash,
@@ -893,14 +999,24 @@ class BaseKernel(Kernel):
             max_calls=1,
             call_index=1,
         )
-        runtime_result = self._runtime.execute(
-            ToolCall(name=tool_name or "", params=copy.deepcopy(dispatch_params)),
-            context,
-            authorised_params=copy.deepcopy(dispatch_params),
-            authorised_tool_name=tool_name,
-            authorised_tool=registered_tool,
-            authorisation_deadline_ms=(permit_token.valid_until_ms if permit_token is not None else None),
+        scope = ExecutionScope(
+            request_id=request.request_id,
+            actor=request.actor,
+            tool_name=tool_name or "",
+            permit_id=permit_digest,
+            params_sha256=compute_hash_dict(canonical_params or {}),
         )
+        with execution_scope(scope):
+            runtime_result = self._runtime.execute(
+                ToolCall(name=tool_name or "", params=copy.deepcopy(dispatch_params)),
+                context,
+                authorised_params=copy.deepcopy(dispatch_params),
+                authorised_tool_name=tool_name,
+                authorised_tool=registered_tool,
+                authorisation_deadline_ms=(
+                    permit_token.valid_until_ms if permit_token is not None else None
+                ),
+            )
         if not runtime_result.dispatcher_result.success:
             if shared_operation_id is not None:
                 # A failed invocation might still have applied a side effect.

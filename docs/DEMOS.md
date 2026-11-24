@@ -11,7 +11,7 @@ From a repository checkout, install the package and its development extras:
 python -m pip install -e ".[dev]"
 ```
 
-Python 3.9–3.12 are the supported versions declared by the project.
+Python 3.11–3.15 are the supported versions declared by the project.
 
 ## Run the demos
 

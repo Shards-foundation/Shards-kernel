@@ -59,9 +59,9 @@ Developer
 
 18. build-linux  
 19. build-macos  
-20. build-python-3.9  
-21. build-python-3.10  
-22. build-python-3.11  
+20. build-python-3.11
+21. build-python-3.12
+22. build-python-3.15
 23. build-cuda-11  
 24. build-cuda-12
 

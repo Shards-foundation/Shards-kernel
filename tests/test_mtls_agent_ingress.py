@@ -626,7 +626,7 @@ def test_tls_policy_file_limit_and_crypto_file_symlink_rejected(tmp_path):
 
 
 def test_low_level_ingress_validators_reject_unsafe_transport_and_metadata(tmp_path):
-    """Direct negative paths also run on Python 3.9 without the optional MCP SDK."""
+    """Direct negative paths also run without the optional MCP SDK."""
     import ipaddress
 
     from shards_kernel.integrations.mtls_ingress import (

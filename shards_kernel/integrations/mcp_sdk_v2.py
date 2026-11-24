@@ -20,7 +20,7 @@ try:
     # These must be global: MCP SDK evaluates annotations with inspect.signature.
     from mcp.server import MCPServer
     from mcp.types import CallToolResult, TextContent
-except ImportError:  # Optional extra; the base kernel supports Python 3.9+.
+except ImportError:  # Optional extra; the base kernel supports Python 3.11+.
     MCPServer = None
     CallToolResult = None
     TextContent = None
