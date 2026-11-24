@@ -63,7 +63,7 @@ dev = [
     "defusedxml>=0.7.1,<1",  # Safe JUnit parsing for acceptance report tests.
     "cryptography>=43,<51",  # Optional crypto path is exercised by the full test suite.
     "hypothesis>=6",
-    "ruff==0.17.3",
+    "ruff==0.17.4",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
     "flask>=2,<4",
     "fastapi>=0.100,<0.163",
