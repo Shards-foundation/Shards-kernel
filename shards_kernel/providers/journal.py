@@ -216,7 +216,10 @@ class ProviderEffectJournal:
                 existing = self._select(connection, operation_id)
                 if existing is not None:
                     if (
-                        existing.params_sha256 != params_sha256
+                        existing.provider != provider
+                        or existing.resource != resource
+                        or existing.action != action
+                        or existing.params_sha256 != params_sha256
                         or existing.request_id != request_id
                         or existing.permit_id != permit_id
                     ):
