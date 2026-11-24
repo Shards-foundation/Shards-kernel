@@ -116,7 +116,8 @@ builtin-only and cannot name the provider tool.
 ```
 
 The repository contains a full template at
-`deploy/github-operator.config.example.json`. It contains no secrets.
+`deploy/github-operator.config.example.json`. It contains no secrets. The v3
+profile **requires** `gateway`; a v3 document without it is rejected.
 
 Validation rules include:
 
@@ -347,13 +348,13 @@ here):
 
 ```text
 tests/test_github_issue_label_provider.py       30 passed
-tests/test_operator_github_profile.py           21 passed
+tests/test_operator_github_profile.py           22 passed
 tests/test_public_tool_registration.py           8 passed
 tests/test_github_operator_deploy_contract.py    3 passed
 tests/test_github_issue_label_live.py            1 skipped (gated secrets)
 ```
 
-The broader suite reports 1190 passed and 43 skipped with the offline-approver
+The broader suite reports 1191 passed and 43 skipped with the offline-approver
 module excluded. Ten `test_offline_approver_cli.py` tests fail in this
 container because the filesystem rejects `O_TMPFILE` (`Errno 95`); that is an
 environment limitation unrelated to this profile. An earlier full-suite run

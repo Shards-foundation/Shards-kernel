@@ -261,6 +261,13 @@ def test_v3_config_rejects_unsafe_or_ambiguous_profiles(tmp_path, stack, mutate)
         parse_operator_config(raw)
 
 
+def test_v3_requires_explicit_gateway_identity(tmp_path, stack):
+    raw = json.loads(json.dumps(stack.raw))
+    raw.pop("gateway")
+    with pytest.raises(ValueError, match="Operator v3"):
+        parse_operator_config(raw)
+
+
 def test_v3_signed_policy_envelope_verifies_and_rejects_tampering(tmp_path, stack):
     policy_key = Ed25519PrivateKey.generate()
     now = int(time.time() * 1000)

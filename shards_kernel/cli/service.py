@@ -326,14 +326,13 @@ def parse_operator_config(data: Any) -> OperatorServiceConfig:
         data = _fields(data, common | {"agents"}, "Operator v2")
         allowed_tools = _ALLOWED_TOOLS
     elif version == 3:
-        expected = common | {"agents", "provider"}
-        if "gateway" in data:
-            expected.add("gateway")
-        data = _fields(data, expected, "Operator v3")
+        data = _fields(
+            data, common | {"agents", "provider", "gateway"}, "Operator v3"
+        )
         allowed_tools = _BUILTIN_TOOLS | _PROVIDER_TOOLS
         provider = _parse_github_provider(data["provider"])
-        gateway = _parse_gateway(data["gateway"]) if "gateway" in data else None
-        if gateway is not None and gateway.token_env == provider.token_env:
+        gateway = _parse_gateway(data["gateway"])
+        if gateway.token_env == provider.token_env:
             raise ValueError("Gateway and provider credentials must be separate")
     else:
         raise ValueError("Unsupported operator configuration version")
@@ -432,6 +431,8 @@ def build_operator_server(
     production request path to a real local HTTP test server. It cannot change
     the pinned ``https://api.github.com`` base or the allowlisted scope.
     """
+    if config.provider is not None and config.gateway is None:
+        raise ValueError("Provider profile requires a gateway identity")
     key = resolve_api_key(api_key)
     storage = (
         audit_storage
