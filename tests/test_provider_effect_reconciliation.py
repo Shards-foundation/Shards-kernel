@@ -70,7 +70,16 @@ class _Audit:
             permit_max_executions=1,
         )
 
-    def outcome(self, request_id: str, permit_id: str, params: dict, *, allow: bool) -> None:
+    def outcome(
+        self,
+        request_id: str,
+        permit_id: str,
+        params: dict,
+        *,
+        allow: bool,
+        error: str | None = None,
+        denial_reasons: tuple[str, ...] = (),
+    ) -> None:
         self.ledger.append(
             request_id=request_id,
             actor="agent-alice",
@@ -81,10 +90,13 @@ class _Audit:
             ts_ms=self._tick(),
             tool_name=TOOL_NAME,
             params=params,
-            error=None if allow else "PROVIDER_NOT_APPLIED: rejected",
+            error=(None if allow else "PROVIDER_NOT_APPLIED: rejected")
+            if error is None
+            else error,
             audit_phase="outcome",
             permit_digest=permit_id,
             permit_verification="OUTCOME",
+            permit_denial_reasons=denial_reasons,
             permit_nonce="nonce-" + request_id,
             permit_issuer="operator",
             permit_subject="agent-alice",
@@ -260,6 +272,226 @@ def test_reconcile_reports_audit_intent_without_journal_record(tmp_path):
     incident = report["audit_only_incidents"][0]
     assert incident["classification"] == rec.INCIDENT_JOURNAL_RECORD_MISSING
     assert incident["request_id"] == "req-lost"
+
+
+def test_pre_dispatch_denial_helper_is_strict():
+    assert rec._is_pre_dispatch_denial({"error": None}) is False
+    assert rec._is_pre_dispatch_denial({"error": "REPLAY_DETECTED"}) is False
+    assert (
+        rec._is_pre_dispatch_denial(
+            {"error": "REPLAY_DETECTED", "permit_denial_reasons": ("REPLAY_DETECTED",)}
+        )
+        is True
+    )
+    assert (
+        rec._is_pre_dispatch_denial(
+            {"error": "Tool execution failed: PERMIT_EXPIRED_BEFORE_DISPATCH"}
+        )
+        is True
+    )
+    assert (
+        rec._is_pre_dispatch_denial(
+            {"error": "Tool execution failed: Execution denied by hook: risk policy"}
+        )
+        is True
+    )
+    assert (
+        rec._is_pre_dispatch_denial(
+            {"error": "Tool execution failed: Unexpected error: PROVIDER_JOURNAL_UNAVAILABLE"}
+        )
+        is False
+    )
+
+
+def test_reconcile_classifies_pre_dispatch_denial_as_attention(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(21)
+    audit.intent("req-replay", "r" * 64, params)
+    audit.outcome(
+        "req-replay",
+        "r" * 64,
+        params,
+        allow=False,
+        error="REPLAY_DETECTED",
+        denial_reasons=("REPLAY_DETECTED",),
+    )
+    ProviderEffectJournal(str(journal_path))
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "ATTENTION"
+    assert report["audit_only_incidents"] == []
+    assert report["counts"] == {rec.PREDISPATCH_DENIED: 1}
+    [denied] = report["audit_only_pre_dispatch"]
+    assert denied["classification"] == rec.PREDISPATCH_DENIED
+    assert denied["request_id"] == "req-replay"
+    assert denied["outcome_error"] == "REPLAY_DETECTED"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Tool execution failed: PERMIT_EXPIRED_BEFORE_DISPATCH",
+        "Tool execution failed: TIME_LIMIT_NOT_ENFORCEABLE: "
+        + "synchronous execution cannot enforce max_time_ms",
+        "Tool execution failed: Execution denied by hook: risk policy",
+        "Tool execution failed: Call budget exceeded: call_index=2 > max_calls=1",
+    ],
+)
+def test_reconcile_recognises_kernel_pre_dispatch_errors(tmp_path, error):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(22)
+    audit.intent("req-predispatch", "q" * 64, params)
+    audit.outcome("req-predispatch", "q" * 64, params, allow=False, error=error)
+    ProviderEffectJournal(str(journal_path))
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "ATTENTION"
+    assert report["counts"] == {rec.PREDISPATCH_DENIED: 1}
+    assert report["audit_only_incidents"] == []
+
+
+def test_reconcile_keeps_ambiguous_audit_only_intent_as_incident(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(23)
+    audit.intent("req-tool-error", "t" * 64, params)
+    audit.outcome(
+        "req-tool-error",
+        "t" * 64,
+        params,
+        allow=False,
+        error="Tool execution failed: Unexpected error: PROVIDER_JOURNAL_UNAVAILABLE",
+    )
+    ProviderEffectJournal(str(journal_path))
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "INCIDENT"
+    assert report["counts"] == {rec.INCIDENT_JOURNAL_RECORD_MISSING: 1}
+    assert report["audit_only_pre_dispatch"] == []
+
+
+def test_reconcile_keeps_allow_outcome_without_journal_as_incident(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(24)
+    audit.intent("req-effect-maybe", "u" * 64, params)
+    audit.outcome("req-effect-maybe", "u" * 64, params, allow=True)
+    ProviderEffectJournal(str(journal_path))
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "INCIDENT"
+    assert report["counts"] == {rec.INCIDENT_JOURNAL_RECORD_MISSING: 1}
+
+
+def test_reconcile_requires_every_matching_outcome_to_be_a_pre_dispatch_denial(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(25)
+    audit.intent("req-mixed", "v" * 64, params)
+    audit.outcome(
+        "req-mixed",
+        "v" * 64,
+        params,
+        allow=False,
+        error="REPLAY_DETECTED",
+        denial_reasons=("REPLAY_DETECTED",),
+    )
+    audit.outcome("req-mixed", "v" * 64, params, allow=True)
+    ProviderEffectJournal(str(journal_path))
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "INCIDENT"
+    assert report["counts"] == {rec.INCIDENT_JOURNAL_RECORD_MISSING: 1}
+
+
+def test_reconcile_requires_replay_reason_for_pre_dispatch_proof(tmp_path):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(26)
+    audit.intent("req-no-reason", "w" * 64, params)
+    audit.outcome("req-no-reason", "w" * 64, params, allow=False, error="REPLAY_DETECTED")
+    ProviderEffectJournal(str(journal_path))
+
+    report = rec.reconcile(audit_path, journal_path)
+
+    assert report["status"] == "INCIDENT"
+    assert report["counts"] == {rec.INCIDENT_JOURNAL_RECORD_MISSING: 1}
+
+
+def test_audit_only_intent_without_params_hash_is_ignored():
+    entries = [
+        {
+            "audit_phase": "intent",
+            "tool_name": rec.TOOL_NAME,
+            "request_id": "req-no-params",
+            "permit_digest": "p" * 64,
+            "params_hash": None,
+        }
+    ]
+
+    incidents, pre_dispatch = rec._audit_only_classifications(entries, set())
+
+    assert incidents == []
+    assert pre_dispatch == []
+
+
+def test_reconcile_attention_exit_code_is_snapshot_wide(tmp_path, capsys):
+    audit_path = tmp_path / "audit.sqlite3"
+    journal_path = tmp_path / "journal.sqlite3"
+    audit = _Audit(audit_path)
+    params = _params(27)
+    audit.intent("req-attention", "x" * 64, params)
+    audit.outcome(
+        "req-attention",
+        "x" * 64,
+        params,
+        allow=False,
+        error="REPLAY_DETECTED",
+        denial_reasons=("REPLAY_DETECTED",),
+    )
+    ProviderEffectJournal(str(journal_path))
+
+    assert rec.main(["--audit-db", str(audit_path), "--journal-db", str(journal_path)]) == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "ATTENTION"
+
+
+def test_incident_runbook_uses_a_readable_working_copy_and_honest_exit_code():
+    doc = (
+        Path(__file__).resolve().parents[1]
+        / "docs/operations/GITHUB_ISSUE_LABEL_OPERATOR.md"
+    ).read_text(encoding="utf-8")
+
+    assert "sudo install -d -m 0700 /var/lib/shards-kernel/incident-<id>" not in doc
+    assert (
+        "sudo install -d -o root -g root -m 0700 /var/lib/shards-kernel/incident-<id>"
+        in doc
+    )
+    assert "sudo -u shards-kernel install -d -m 0700" in doc
+    assert "reconcile-<id>" in doc
+
+    reconcile_section = doc.split("### 4. Correlate journal and audit, read-only", 1)[1]
+    reconcile_command = reconcile_section.split("```", 2)[1]
+    assert "sudo -u shards-kernel /opt/shards-kernel/.venv/bin/python" in reconcile_command
+    assert "/var/lib/shards-kernel/incident-<id>/audit.sqlite3" not in reconcile_command
+    assert "reconcile-<id>/audit.sqlite3" in reconcile_command
+
+    assert "still exits `2` for the snapshot" in doc
+    assert "there is no per-record exit code" in doc
+    assert "exits `0` for the new operation" not in doc
+    assert "`PREDISPATCH_DENIED`" in doc
 
 
 def test_reconcile_flags_operation_binding_mismatch(tmp_path):

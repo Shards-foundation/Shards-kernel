@@ -43,6 +43,8 @@ _MAX_BODY_BYTES = 1024 * 1024
 _MAX_PAGES = 5
 _DEFAULT_TIMEOUT_SECONDS = 10.0
 _MAX_LABEL_LENGTH = 100
+_MAX_PROVIDER_REFERENCE = 200
+_REFERENCE_DIGEST_PREFIX = "github:sha256:"
 _MAX_ISSUE_NUMBER = 10_000_000
 _TOKEN_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 _OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
@@ -177,6 +179,36 @@ def _validated_issue_number(value: Any, maximum: int) -> int:
     return value
 
 
+def _provider_reference(owner: str, repo: str, issue: int, label: str) -> str:
+    """Return a bounded, ASCII-safe reference for the durable journal.
+
+    The readable ``github:owner/repo#issue:label`` form is kept when it fits
+    the journal's reference bound. A Unicode or over-long value is replaced by
+    a SHA-256 digest over the exact owner/repo/issue/label tuple. The digest is
+    deterministic and collision-resistant, so it never silently truncates or
+    aliases two different effects. The journal's ``params_sha256`` remains the
+    authoritative parameter binding; this reference is evidence only.
+    """
+    plain = f"github:{owner}/{repo}#{issue}:{label}"
+    if (
+        len(plain) <= _MAX_PROVIDER_REFERENCE
+        and plain.isascii()
+        and not any(ord(ch) < 32 or ord(ch) == 127 for ch in plain)
+    ):
+        return plain
+    digest = compute_hash_dict(
+        {
+            "domain": "SHARDS-PROVIDER-REFERENCE-V1",
+            "provider": _PROVIDER_NAME,
+            "owner": owner,
+            "repo": repo,
+            "issue": issue,
+            "label": label,
+        }
+    )
+    return _REFERENCE_DIGEST_PREFIX + digest
+
+
 def _validated_token(value: Any) -> str:
     if (
         not isinstance(value, str)
@@ -222,6 +254,8 @@ class GitHubIssueLabelConfig:
         for value, label in ((self.owner, "owner"), (self.repo, "repo")):
             if not isinstance(value, str) or not _OWNER_RE.match(value) or value in {".", ".."}:
                 raise ProviderValidationError("INVALID_" + label.upper())
+        if len(f"{self.owner}/{self.repo}") > _MAX_PROVIDER_REFERENCE:
+            raise ProviderValidationError("RESOURCE_TOO_LONG")
         if not isinstance(self.allowed_labels, frozenset) or not self.allowed_labels:
             raise ProviderValidationError("LABEL_ALLOWLIST_REQUIRED")
         if len(self.allowed_labels) > 32:
@@ -631,7 +665,9 @@ class GitHubIssueLabelProvider:
         already_present: bool = False,
         reconciled: bool = False,
     ) -> ProviderEffect:
-        provider_ref = f"github:{self._config.owner}/{self._config.repo}#{issue}:{label}"
+        provider_ref = _provider_reference(
+            self._config.owner, self._config.repo, issue, label
+        )
         try:
             record = self._journal.record_outcome(
                 operation_id,

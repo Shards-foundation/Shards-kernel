@@ -61,6 +61,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Extended smoke script coverage to execute reference implementation runtime checks.
 - Updated release workflow to verify distribution metadata with `twine check` before PyPI publishing.
 
+### Fixed
+
+- GitHub issue-label effects now always reach a terminal journal state. A Unicode or over-long label that passed configuration is journalled with a bounded `github:sha256:<digest>` provider reference instead of raising `ValueError` after the POST. Configuration rejects an owner/repository pair whose resource name exceeds the journal bound. The reconciler classifies an audited intent followed by a kernel-generated pre-dispatch denial (for example a replay race) as `PREDISPATCH_DENIED` attention, not a missing-journal incident. The incident runbook now uses a separate unprivileged working copy and states that exit `2` persists while an older incident remains.
+
 ### Removed
 
 - **BREAKING:** Removed checks not yet rebuilt: sequence numbering (`ledger_seq`), permit enforcement, nonce replay, and state transitions.

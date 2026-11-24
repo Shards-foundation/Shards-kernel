@@ -229,6 +229,15 @@ possibly applied write automatically.
 | Preflight read-back unavailable | `NOT_APPLIED` | No POST; new signed permit required |
 | Restart with `DISPATCHED`/`UNKNOWN` record | read-back only | `SUCCEEDED` only if label visible, otherwise `UNKNOWN` |
 
+The journal `provider_ref` is a bounded, printable-ASCII evidence string. It
+keeps the readable `github:<owner>/<repo>#<issue>:<label>` form when that value
+is at most 200 characters and ASCII. A Unicode or over-long label is stored as
+`github:sha256:<64 hex>`, a SHA-256 digest over the exact
+provider/owner/repo/issue/label tuple. The digest is deterministic and never
+truncates or aliases two different effects. The journal's `params_sha256` is
+still the authoritative parameter binding. GitHub label names are not otherwise
+restricted to ASCII by this adapter.
+
 This is **not** an exactly-once side-effect guarantee. If a request ends
 `UNKNOWN`, a human must inspect the issue. A new action requires a new signed
 permit and a new request id; the same permit is denied as a replay. The
@@ -268,17 +277,49 @@ policy and unit/environment metadata (never the secret values):
 
 ```bash
 sudo systemctl stop shards-kernel-github-operator.service
-sudo install -d -m 0700 /var/lib/shards-kernel/incident-<id>
+sudo install -d -o root -g root -m 0700 /var/lib/shards-kernel/incident-<id>
 sudo sqlite3 /var/lib/shards-kernel/github-operator/audit.sqlite3 \
   ".backup '/var/lib/shards-kernel/incident-<id>/audit.sqlite3'"
 sudo sqlite3 /var/lib/shards-kernel/github-operator/provider-journal.sqlite3 \
   ".backup '/var/lib/shards-kernel/incident-<id>/provider-journal.sqlite3'"
 sudo cp /etc/shards-kernel/github-operator.signed.json \
   /var/lib/shards-kernel/incident-<id>/
+sudo chmod 0400 /var/lib/shards-kernel/incident-<id>/*
 ```
 
-Record `sha256sum`, inode, size and mtime of every preserved file. Make the
-copies read-only. Do not edit, repair or re-sign either database.
+The directory is **root-owned and root-only**. Record `sha256sum`, inode,
+size and mtime of every preserved file. Do not edit, repair or re-sign
+either database.
+
+The reconciler must run as an unprivileged account, so it cannot read that
+root-only snapshot directly. Make a disposable working copy owned by the
+service account and leave the preserved snapshot untouched:
+
+```bash
+sudo -u shards-kernel install -d -m 0700 \
+  /var/lib/shards-kernel/github-operator/reconcile-<id>
+sudo cp \
+  /var/lib/shards-kernel/incident-<id>/audit.sqlite3 \
+  /var/lib/shards-kernel/incident-<id>/provider-journal.sqlite3 \
+  /var/lib/shards-kernel/github-operator/reconcile-<id>/
+sudo chown shards-kernel:shards-kernel \
+  /var/lib/shards-kernel/github-operator/reconcile-<id>/*.sqlite3
+sudo chmod 0600 \
+  /var/lib/shards-kernel/github-operator/reconcile-<id>/*.sqlite3
+```
+
+Confirm the working copy is byte-identical to the preserved snapshot before
+running anything:
+
+```bash
+sudo sha256sum /var/lib/shards-kernel/incident-<id>/*.sqlite3
+sudo -u shards-kernel sha256sum \
+  /var/lib/shards-kernel/github-operator/reconcile-<id>/*.sqlite3
+```
+
+The working directory is writable by the service account so SQLite can create
+its read-only `-shm`/`-wal` side files there. The preserved snapshot stays
+private and immutable.
 
 ### 3. Establish external ground truth, read-only
 
@@ -292,18 +333,24 @@ stop and treat it as a separate scope incident.
 
 ### 4. Correlate journal and audit, read-only
 
-Run the read-only reconciliation tool against the preserved pair:
+Run the read-only reconciliation tool as the unprivileged service account
+against the working copy:
 
 ```bash
-python scripts/ops/reconcile_provider_effects.py \
-  --audit-db /var/lib/shards-kernel/incident-<id>/audit.sqlite3 \
-  --journal-db /var/lib/shards-kernel/incident-<id>/provider-journal.sqlite3
+sudo -u shards-kernel /opt/shards-kernel/.venv/bin/python \
+  /opt/shards-kernel/scripts/ops/reconcile_provider_effects.py \
+  --audit-db /var/lib/shards-kernel/github-operator/reconcile-<id>/audit.sqlite3 \
+  --journal-db /var/lib/shards-kernel/github-operator/reconcile-<id>/provider-journal.sqlite3
 ```
 
 It opens both files with `mode=ro` and `PRAGMA query_only`, verifies the audit
 hash chain, re-derives the operation id from `request_id`, `permit_id` and
-`params_sha256`, and never writes, retries or fabricates a record. Exit codes
-are `0` clean, `2` incident or attention, `1` tool error.
+`params_sha256`, and never writes, retries or fabricates a record.
+
+Exit codes are snapshot-wide: `0` clean, `2` any incident **or** attention,
+`1` tool error. A clean new operation does not turn the process exit code into
+`0` while an older incident is still present. Read the per-record
+classifications, not only the exit status.
 
 | Classification | Meaning |
 | --- | --- |
@@ -313,7 +360,8 @@ are `0` clean, `2` incident or attention, `1` tool error.
 | `INCIDENT_NOT_APPLIED_NO_OUTCOME` | Journal `NOT_APPLIED`, intent present, outcome absent |
 | `INCIDENT_OUTCOME_MISMATCH` | Outcome exists but its decision contradicts the journal |
 | `INCIDENT_INTENT_MISSING` | Journal terminal state with no matching audit intent |
-| `INCIDENT_JOURNAL_RECORD_MISSING` | Audit intent with no journal row (lost or mismatched journal) |
+| `INCIDENT_JOURNAL_RECORD_MISSING` | Audit intent with no journal row and no proof of a pre-dispatch denial (lost or mismatched journal) |
+| `PREDISPATCH_DENIED` | Audit intent followed by a kernel-generated denial before provider dispatch (for example `REPLAY_DETECTED`, an expired authorisation deadline or a denying runtime hook); no provider effect, but still requires attention |
 | `QUARANTINED_UNKNOWN` | Ambiguous provider effect; human read-back required |
 | `OPEN_OPERATION` | `INTENT`/`DISPATCHED`; never retry automatically |
 | `BINDING_MISMATCH` | Re-derived operation id or provider/action binding disagrees |
@@ -384,8 +432,12 @@ After the incident record is accepted:
 Recovery is complete only when all of these are observed and recorded:
 
 1. The preserved audit chain verifies (`replay_and_verify` / restore drill).
-2. Reconciliation exits `0` for the new operation and still reports the old
-   operation as the accepted external exception.
+2. Reconciliation reports `COMPLETE_SUCCEEDED` for the new operation and
+   still reports the old operation as the accepted external exception. The
+   command still exits `2` for the snapshot while that old incident remains;
+   there is no per-record exit code and no whole-snapshot exit `0` claim.
+   Acceptance is the per-record classification plus the recorded external
+   exception, not a zero exit status.
 3. `/health` is healthy and `/status` shows `IDLE` with gateway auth enforced.
 4. Replaying the original permit returns `REPLAY_DETECTED` and the provider
    POST count does not increase.
@@ -400,7 +452,8 @@ Recovery is complete only when all of these are observed and recorded:
 - It cannot distinguish a label added by this operation from a label added by
   another actor at the same time; use external provider audit logs.
 - Read-only WAL access may create `-shm`/`-wal` side files in the directory.
-  Run against a writable evidence directory or a snapshot copy.
+  Run against the writable working copy described in step 2, never against the
+  root-only preserved snapshot.
 - Single-host only. There is no HA, distributed locking or cross-host
   reconciliation.
 - The effect is not exactly-once. Do not claim complete effect evidence in
