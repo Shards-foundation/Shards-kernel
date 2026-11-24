@@ -66,7 +66,8 @@ dev = [
     "ruff==0.17.3",
     # Optional adapter servers exercised by tests. Not runtime dependencies.
     "flask>=2,<4",
-    "fastapi>=0.100,<0.163",
+    "fastapi>=0.100,<0.163; python_version < '3.10'",
+    "fastapi>=0.162.5,<0.163; python_version >= '3.10'",
     "httpx>=0.24,<1",
 ]
 
