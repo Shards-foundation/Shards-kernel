@@ -45,6 +45,8 @@ _RESERVED_SECRET_ENVS = frozenset(
         "SHARDS_KERNEL_POLICY_PUBLIC_KEY_HEX",
     }
 )
+_PROVIDER_SECRET_ENV_PREFIX = "SHARDS_KERNEL_GITHUB_"
+_GATEWAY_SECRET_ENV_PREFIX = "SHARDS_KERNEL_GATEWAY_"
 _MAX_CONFIG_BYTES = 64 * 1024
 
 
@@ -153,7 +155,7 @@ def _label_name(value: Any) -> str:
     return value
 
 
-def _secret_env(value: Any, label: str) -> str:
+def _secret_env(value: Any, label: str, *, role: str) -> str:
     if (
         not isinstance(value, str)
         or not (3 <= len(value) <= 64)
@@ -164,6 +166,12 @@ def _secret_env(value: Any, label: str) -> str:
         raise ValueError(label + " must name an uppercase environment variable")
     if value in _RESERVED_SECRET_ENVS:
         raise ValueError(label + " must not reuse another operator credential")
+    required_prefix = (
+        _PROVIDER_SECRET_ENV_PREFIX if role == "provider"
+        else _GATEWAY_SECRET_ENV_PREFIX
+    )
+    if not value.startswith(required_prefix):
+        raise ValueError(label + " must use its role-specific secret namespace")
     return value
 
 
@@ -197,7 +205,9 @@ def _parse_github_provider(value: Any) -> GitHubProviderConfig:
     if type(maximum) is not int or not 1 <= maximum <= 10_000_000:
         raise ValueError("max_issue_number must be an integer between 1 and 10000000")
     journal_db = _database_path(provider["journal_db"], "provider journal_db")
-    token_env = _secret_env(provider["token_env"], "provider token_env")
+    token_env = _secret_env(
+        provider["token_env"], "provider token_env", role="provider"
+    )
     return GitHubProviderConfig(
         owner=owner,
         repo=repo,
@@ -211,7 +221,9 @@ def _parse_github_provider(value: Any) -> GitHubProviderConfig:
 def _parse_gateway(value: Any) -> GatewayConfig:
     gateway = _fields(value, {"identity", "token_env"}, "Gateway")
     identity = _identifier(gateway["identity"], "gateway identity")
-    token_env = _secret_env(gateway["token_env"], "gateway token_env")
+    token_env = _secret_env(
+        gateway["token_env"], "gateway token_env", role="gateway"
+    )
     return GatewayConfig(identity=identity, token_env=token_env)
 
 

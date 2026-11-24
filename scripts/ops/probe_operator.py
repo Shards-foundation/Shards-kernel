@@ -1,6 +1,6 @@
 """Read-only Shards-Kernel operator health probe for cron and service monitors.
 
-Python 3.9+, standard library only; Linux, macOS and Windows.
+Python 3.11+, standard library only; Linux, macOS and Windows.
 No permits, tool calls, service restarts, external destinations or writes.
 A passing health check is NOT a production-readiness certificate.
 

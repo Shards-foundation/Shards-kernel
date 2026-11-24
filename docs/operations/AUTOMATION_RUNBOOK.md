@@ -5,7 +5,7 @@ SQLite restore drill and independently reviewed production-readiness programme.
 They do not issue permits, invoke governed tools, modify the operator database,
 self-repair, deploy, or declare production readiness.
 
-Python 3.9+ on Linux, macOS and Windows. Structured JSON logging and explicit
+Python 3.11+ on Linux, macOS and Windows. Structured JSON logging and explicit
 nonzero exit codes allow cron, systemd or other supervisors to consume results.
 
 ## Operator health probe

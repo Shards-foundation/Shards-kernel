@@ -28,7 +28,13 @@ UNKNOWN = "UNKNOWN"
 
 TERMINAL_STATES = frozenset({SUCCEEDED, NOT_APPLIED})
 OPEN_STATES = frozenset({INTENT, DISPATCHED, UNKNOWN})
+OUTCOME_STATES = frozenset({SUCCEEDED, NOT_APPLIED, UNKNOWN})
 ALL_STATES = frozenset({INTENT, DISPATCHED, SUCCEEDED, NOT_APPLIED, UNKNOWN})
+_ALLOWED_OUTCOME_TRANSITIONS = {
+    INTENT: OUTCOME_STATES,
+    DISPATCHED: OUTCOME_STATES,
+    UNKNOWN: frozenset({SUCCEEDED, NOT_APPLIED, UNKNOWN}),
+}
 
 _MAX_IDENTIFIER = 200
 _MAX_DETAIL = 500
@@ -57,6 +63,18 @@ def _safe_detail(value: Optional[str]) -> str:
         return ""
     cleaned = "".join(ch for ch in value if 32 <= ord(ch) < 127)
     return cleaned[:_MAX_DETAIL]
+
+
+def _safe_reference(value: str) -> str:
+    """Allow an empty reference, but never persist control or non-ASCII bytes."""
+    if (
+        not isinstance(value, str)
+        or len(value) > _MAX_IDENTIFIER
+        or not value.isascii()
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+    ):
+        raise ValueError("provider_ref must be a bounded printable ASCII string")
+    return value
 
 
 @dataclass(frozen=True)
@@ -91,7 +109,6 @@ class ProviderEffectJournal:
             raise ValueError("Provider journal parent directory must exist")
         self._path = path
         self._clock = clock or SystemClock()
-        self._connection: Optional[sqlite3.Connection] = None
         self._initialize()
 
     def _now_ms(self) -> int:
@@ -139,9 +156,11 @@ class ProviderEffectJournal:
         return self._path
 
     def close(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
+        """Release journal resources.
+
+        Connections are opened per operation and closed in each method, so this
+        is a stable shutdown hook rather than a cached-connection close.
+        """
 
     def _row_to_record(self, row: tuple[Any, ...]) -> ProviderEffectRecord:
         return ProviderEffectRecord(
@@ -206,8 +225,7 @@ class ProviderEffectJournal:
         _bounded(action, "action")
         _bounded(params_sha256, "params_sha256")
         _bounded(request_id, "request_id")
-        if not isinstance(permit_id, str) or len(permit_id) > _MAX_IDENTIFIER:
-            raise ValueError("permit_id must be a bounded string")
+        _bounded(permit_id, "permit_id")
         now = self._now_ms()
         try:
             connection = self._connect()
@@ -298,17 +316,38 @@ class ProviderEffectJournal:
         *,
         provider_ref: str = "",
         detail: str = "",
+        expected_provider: Optional[str] = None,
+        expected_resource: Optional[str] = None,
+        expected_action: Optional[str] = None,
+        expected_params_sha256: Optional[str] = None,
+        expected_request_id: Optional[str] = None,
+        expected_permit_id: Optional[str] = None,
     ) -> ProviderEffectRecord:
         """Commit a terminal outcome (or preserve a quarantine as UNKNOWN).
 
         ``UNKNOWN`` may later be reconciled to ``SUCCEEDED`` or
-        ``NOT_APPLIED`` by authoritative read-back. Terminal states are final.
+        ``NOT_APPLIED`` by authoritative read-back. ``INTENT`` and
+        ``DISPATCHED`` are never valid outcome states, so a quarantine cannot
+        regress to a non-terminal state. Terminal states are final.
+
+        Optional ``expected_*`` values bind the outcome to the existing
+        operation's immutable provider/resource/action/params/request/permit.
+        A mismatch fails closed instead of reporting another operation's effect.
         """
         _bounded(operation_id, "operation_id")
-        if state not in ALL_STATES:
-            raise ValueError("Unsupported provider journal state")
-        if not isinstance(provider_ref, str) or len(provider_ref) > _MAX_IDENTIFIER:
-            raise ValueError("provider_ref must be a bounded string")
+        if state not in OUTCOME_STATES:
+            raise ValueError("Unsupported provider journal outcome state")
+        safe_reference = _safe_reference(provider_ref)
+        for value, label in (
+            (expected_provider, "expected_provider"),
+            (expected_resource, "expected_resource"),
+            (expected_action, "expected_action"),
+            (expected_params_sha256, "expected_params_sha256"),
+            (expected_request_id, "expected_request_id"),
+            (expected_permit_id, "expected_permit_id"),
+        ):
+            if value is not None:
+                _bounded(value, label)
         safe_detail = _safe_detail(detail)
         now = self._now_ms()
         try:
@@ -319,21 +358,36 @@ class ProviderEffectJournal:
                 if existing is None:
                     connection.execute("ROLLBACK")
                     raise ProviderJournalError("JOURNAL_OPERATION_MISSING")
+                if any(
+                    expected is not None and actual != expected
+                    for actual, expected in (
+                        (existing.provider, expected_provider),
+                        (existing.resource, expected_resource),
+                        (existing.action, expected_action),
+                        (existing.params_sha256, expected_params_sha256),
+                        (existing.request_id, expected_request_id),
+                        (existing.permit_id, expected_permit_id),
+                    )
+                ):
+                    connection.execute("ROLLBACK")
+                    raise ProviderJournalError("JOURNAL_OPERATION_CONFLICT")
                 if existing.state == state:
                     connection.execute("COMMIT")
                     return existing
-                if existing.state in TERMINAL_STATES:
+                if state not in _ALLOWED_OUTCOME_TRANSITIONS.get(
+                    existing.state, frozenset()
+                ):
                     connection.execute("ROLLBACK")
                     raise ProviderJournalError("JOURNAL_STATE_CONFLICT")
                 cursor = connection.execute(
                     """
                     UPDATE provider_effect_journal
                     SET state = ?, provider_ref = ?, detail = ?, updated_ms = ?
-                    WHERE operation_id = ? AND state IN (?, ?, ?)
+                    WHERE operation_id = ? AND state = ?
                     """,
                     (
-                        state, provider_ref, safe_detail, now, operation_id,
-                        INTENT, DISPATCHED, UNKNOWN,
+                        state, safe_reference, safe_detail, now, operation_id,
+                        existing.state,
                     ),
                 )
                 if cursor.rowcount != 1:
@@ -345,6 +399,8 @@ class ProviderEffectJournal:
                 try:
                     connection.execute("ROLLBACK")
                 except sqlite3.Error:
+                    # Preserve the original failure; a rollback failure is
+                    # secondary and must not mask it.
                     pass
                 raise
             finally:

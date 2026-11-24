@@ -30,11 +30,11 @@ def diagnose(
     def record(check_id: str, status: str, detail: str) -> None:
         checks.append({"id": check_id, "status": status, "detail": detail})
 
-    supported = sys.version_info >= (3, 9)
+    supported = sys.version_info >= (3, 11)
     record(
         "python",
         "PASS" if supported else "BLOCKED",
-        "Supported Python runtime detected" if supported else "Python 3.9+ required",
+        "Supported Python runtime detected" if supported else "Python 3.11+ required",
     )
     try:
         clock = SystemClock()
@@ -54,7 +54,7 @@ def diagnose(
             "Ed25519 cryptography dependency installed"
             if crypto else "Install shards-kernel[crypto] for public-only permit verification",
         )
-        mcp = sys.version_info >= (3, 11) and importlib.util.find_spec("mcp") is not None
+        mcp = importlib.util.find_spec("mcp") is not None
         record(
             "mcp_sdk",
             "PASS" if mcp else "BLOCKED",

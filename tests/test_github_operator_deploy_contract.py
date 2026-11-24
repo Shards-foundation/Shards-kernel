@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from shards_kernel.cli.service import parse_operator_config
-from shards_kernel.providers.github_issue_label import TOOL_NAME
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "deploy" / "github-operator.config.example.json"
@@ -14,19 +15,19 @@ UNIT = ROOT / "deploy" / "systemd" / "shards-kernel-github-operator.service"
 ENV = ROOT / "deploy" / "systemd" / "github-operator.env.example"
 
 
-def test_config_template_is_valid_v3_without_credentials(tmp_path):
+def test_config_template_is_non_deployable_until_placeholders_are_replaced(tmp_path):
     raw = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     raw["audit_db"] = str(tmp_path / "audit.sqlite3")
     raw["provider"]["journal_db"] = str(tmp_path / "journal.sqlite3")
-    config = parse_operator_config(raw)
-    assert config.version == 3
-    assert config.provider is not None
-    assert config.gateway is not None
-    assert TOOL_NAME in config.tools
-    assert config.provider.allowed_labels == ("shards-agent",)
-    assert config.provider.token_env == "SHARDS_KERNEL_GITHUB_TOKEN"
-    assert config.gateway.token_env == "SHARDS_KERNEL_GATEWAY_TOKEN"
+    with pytest.raises(ValueError, match="public_key_hex"):
+        parse_operator_config(raw)
+
+    raw["issuer_keys"][0]["public_key_hex"] = "0" * 64
+    with pytest.raises(ValueError, match="token_scrypt"):
+        parse_operator_config(raw)
+
     serialized = TEMPLATE.read_text(encoding="utf-8")
+    assert "REPLACE_WITH_" in serialized
     assert "ghp_" not in serialized
     assert "Bearer " not in serialized
     assert "SHARDS_KERNEL_GITHUB_TOKEN=" not in serialized

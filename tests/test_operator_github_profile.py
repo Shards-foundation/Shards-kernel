@@ -32,8 +32,8 @@ from tests.github_issue_label_test_server import GitHubTestProvider, LoopbackTra
 
 KERNEL_ID = "github-operator"
 GATEWAY_ID = "edge-gateway"
-GITHUB_ENV = "SHARDS_KERNEL_TEST_GITHUB_TOKEN"
-GATEWAY_ENV = "SHARDS_KERNEL_TEST_GATEWAY_TOKEN"
+GITHUB_ENV = "SHARDS_KERNEL_GITHUB_TOKEN"
+GATEWAY_ENV = "SHARDS_KERNEL_GATEWAY_TOKEN"
 
 
 def _raw_config(tmp_path, issuer: Ed25519PrivateKey, alice_digest: str, bob_digest: str) -> dict:
@@ -265,6 +265,23 @@ def test_v3_requires_explicit_gateway_identity(tmp_path, stack):
     raw = json.loads(json.dumps(stack.raw))
     raw.pop("gateway")
     with pytest.raises(ValueError, match="Operator v3"):
+        parse_operator_config(raw)
+
+
+@pytest.mark.parametrize(
+    "section, token_env",
+    [
+        ("provider", "SHARDS_KERNEL_GATEWAY_TOKEN"),
+        ("gateway", "SHARDS_KERNEL_GITHUB_TOKEN"),
+        ("provider", "SHARDS_KERNEL_TEST_GITHUB_TOKEN"),
+        ("gateway", "SHARDS_KERNEL_TEST_GATEWAY_TOKEN"),
+        ("provider", "SHARDS_KERNEL_AGENT_AUTH_PEPPER"),
+    ],
+)
+def test_secret_names_are_role_isolated(stack, section, token_env):
+    raw = json.loads(json.dumps(stack.raw))
+    raw[section]["token_env"] = token_env
+    with pytest.raises(ValueError, match="role-specific secret namespace|reuse"):
         parse_operator_config(raw)
 
 

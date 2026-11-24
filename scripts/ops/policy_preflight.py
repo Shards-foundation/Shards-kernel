@@ -1,6 +1,6 @@
 """Read-only expiry and signature preflight for a signed operator policy.
 
-Python 3.9+. Requires Shards-Kernel's existing crypto optional extra.
+Python 3.11+. Requires Shards-Kernel's existing crypto optional extra.
 The validator imports the kernel's authoritative policy verifier and DOES
 NOT create a policy, issue permits, open an audit DB or start the service.
 This cannot prove anti-rollback or distributed production readiness.

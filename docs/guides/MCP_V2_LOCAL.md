@@ -9,7 +9,7 @@ or a remote authentication assessment.
 ## Scope and security posture
 
 - Python **3.11+**; install with `python -m pip install -e ".[mcp]"`.
-- The base `shards-kernel` package remains installable on Python 3.9+.
+- The base `shards-kernel` package remains installable on Python 3.11+.
 - **Local stdio only**. The host starts one subprocess per trusted local
   agent identity. Do not expose this example over HTTP or a shared network.
 - The trusted host provides a **fixed actor identity** to the factory. An

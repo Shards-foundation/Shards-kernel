@@ -5,9 +5,10 @@ provides common functionality that variants can extend.
 """
 
 import copy
+import inspect
 from abc import ABC, abstractmethod
 from threading import Lock
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, get_type_hints
 
 from shards_kernel.audit.ledger import AuditLedger
 from shards_kernel.common.codec import equal_json_values
@@ -267,6 +268,8 @@ class BaseKernel(Kernel):
             raise ValueError("Tool handler must be callable")
         if param_schema is not None and not isinstance(param_schema, dict):
             raise ValueError("Tool param_schema must be a dictionary")
+        if param_schema is not None:
+            self._validate_handler_schema(handler, param_schema)
         if "*" in self._policy.allowed_tools or "*" in self._policy.allowed_actors:
             raise ValueError("Explicit actor and tool allowlists are required for registration")
         if name not in self._policy.allowed_tools:
@@ -278,6 +281,38 @@ class BaseKernel(Kernel):
             param_schema=param_schema,
             replace=replace,
         )
+
+    @staticmethod
+    def _validate_handler_schema(
+        handler: Callable[..., Any], param_schema: dict[str, type]
+    ) -> None:
+        """Keep the declared parameter metadata aligned with the bound handler."""
+        if any(not isinstance(value, type) for value in param_schema.values()):
+            raise ValueError("Tool param_schema values must be types")
+        try:
+            signature = inspect.signature(handler)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Tool handler signature is not inspectable") from exc
+        names: set[str] = set()
+        for parameter in signature.parameters.values():
+            if parameter.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ):
+                names.add(parameter.name)
+            else:
+                raise ValueError("Tool handlers must not use variadic parameters")
+        if set(param_schema) != names:
+            raise ValueError("Tool param_schema must match the handler parameters")
+        try:
+            hints = get_type_hints(handler)
+        except Exception:
+            hints = {}
+        for name, declared in param_schema.items():
+            annotated = hints.get(name)
+            if isinstance(annotated, type) and annotated is not declared:
+                raise ValueError("Tool param_schema type does not match handler annotation")
 
     def set_keyring(
         self, keyring: dict[str, bytes], *, strict_key_length: Optional[bool] = None

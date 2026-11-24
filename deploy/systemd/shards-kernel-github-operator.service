@@ -26,6 +26,8 @@ ReadOnlyPaths=/etc/shards-kernel /opt/shards-kernel
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
+# systemd maps root and this unit's own user/group to themselves, so the
+# StateDirectory owned by shards-kernel remains writable inside the namespace.
 PrivateUsers=yes
 ProtectSystem=strict
 ProtectHome=yes

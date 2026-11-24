@@ -8,14 +8,14 @@
   "agents": [
     {
       "actor": "agent-requester",
-      "token_scrypt": "0000000000000000000000000000000000000000000000000000000000000000",
+      "token_scrypt": "REPLACE_WITH_AGENT_SCRYPT_VERIFIER",
       "allowed_tools": [
         "github.issue.add_label"
       ]
     },
     {
       "actor": "agent-auditor",
-      "token_scrypt": "1111111111111111111111111111111111111111111111111111111111111111",
+      "token_scrypt": "REPLACE_WITH_AGENT_SCRYPT_VERIFIER",
       "allowed_tools": [
         "echo"
       ]
@@ -25,7 +25,7 @@
     {
       "key_id": "operator-policy-key-1",
       "issuer": "offline-operator-issuer",
-      "public_key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "public_key_hex": "REPLACE_WITH_OFFLINE_ISSUER_PUBLIC_KEY",
       "revoked": false
     }
   ],

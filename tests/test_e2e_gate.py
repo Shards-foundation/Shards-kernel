@@ -204,7 +204,9 @@ def test_ci_quality_matrix_is_structurally_blocked_by_e2e_failure():
     assert "math.isfinite(percent)" in quality_job
     assert "sys.exit(1)" in quality_job
     assert "--cov=scripts.ci.run_e2e_gate" in quality_job
-    assert "sys.version_info >= (3, 11)" in quality_job
+    # Every supported interpreter now runs the gate; no version-conditional
+    # coverage may hide the release runner on an older matrix entry.
+    assert "sys.version_info" not in quality_job
 
 
 def test_tag_release_requires_strict_e2e_and_unrounded_coverage():

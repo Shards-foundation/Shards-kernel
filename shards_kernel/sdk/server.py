@@ -69,6 +69,14 @@ class KernelRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "Untrusted identity header"})
                 return False
         if self.gateway_token is None:
+            # Without a configured gateway profile, gateway headers have no
+            # trusted meaning. Refuse them instead of silently ignoring a
+            # caller that believes it is authenticated through a gateway.
+            if self.headers.get("X-Shards-Gateway-Identity") or self.headers.get(
+                "X-Shards-Gateway-Token"
+            ):
+                self._send_json(403, {"error": "Gateway headers not accepted"})
+                return False
             return True
         identity = self.headers.get("X-Shards-Gateway-Identity")
         token = self.headers.get("X-Shards-Gateway-Token")
@@ -476,13 +484,16 @@ class KernelServer:
             print(f"Shards-Kernel server started on http://{self.host}:{self.port}")
 
     def stop(self) -> None:
-        """Stop the server."""
+        """Stop the server and release the optional provider journal."""
         if self._server:
             self._server.shutdown()
             self._server = None
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
+        if self.provider_journal is not None:
+            self.provider_journal.close()
+            self.provider_journal = None
 
     @property
     def url(self) -> str:

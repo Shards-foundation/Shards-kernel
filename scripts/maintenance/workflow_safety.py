@@ -1,6 +1,6 @@
 """Read-only security audit of GitHub Actions workflow source.
 
-Python 3.9+, standard library only. This is a targeted static check, NOT
+Python 3.11+, standard library only. This is a targeted static check, NOT
 a complete YAML or GitHub Actions security parser. Avoids loading untrusted
 workflows, running commands, or changing repository files.
 

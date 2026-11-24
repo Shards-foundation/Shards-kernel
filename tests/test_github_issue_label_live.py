@@ -44,35 +44,54 @@ def test_live_github_readback_and_optional_add(tmp_path):
     owner, separator, name = repo.partition("/")
     assert separator == "/" and owner and name
     issue = int(os.environ["SHARDS_KERNEL_LIVE_GITHUB_ISSUE"])
+    if issue < 1:
+        pytest.fail("SHARDS_KERNEL_LIVE_GITHUB_ISSUE must be a positive issue number")
     label = os.environ["SHARDS_KERNEL_LIVE_GITHUB_LABEL"]
     journal = ProviderEffectJournal(str(tmp_path / "live-journal.sqlite3"))
-    provider = GitHubIssueLabelProvider(
-        config=GitHubIssueLabelConfig(
-            owner=owner,
-            repo=name,
-            allowed_labels=frozenset({label}),
-            max_issue_number=max(issue, 1),
-            token_env="SHARDS_KERNEL_LIVE_GITHUB_TOKEN",
-        ),
-        journal=journal,
-        token_supplier=EnvTokenSupplier("SHARDS_KERNEL_LIVE_GITHUB_TOKEN"),
-    )
-    assert isinstance(provider.check_label_present(issue, label), bool)
+    try:
+        provider = GitHubIssueLabelProvider(
+            config=GitHubIssueLabelConfig(
+                owner=owner,
+                repo=name,
+                allowed_labels=frozenset({label}),
+                max_issue_number=issue,
+                token_env="SHARDS_KERNEL_LIVE_GITHUB_TOKEN",
+            ),
+            journal=journal,
+            token_supplier=EnvTokenSupplier("SHARDS_KERNEL_LIVE_GITHUB_TOKEN"),
+        )
+        assert isinstance(provider.check_label_present(issue, label), bool)
 
-    if os.environ.get("SHARDS_KERNEL_LIVE_GITHUB_WRITE") != "1":
-        return
-    params_sha = compute_hash_dict({"issue_number": issue, "label": label})
-    operation_id = derive_operation_id(
-        request_id="live-readback-" + str(issue),
-        permit_id="live-operator-acceptance",
-        params_sha256=params_sha,
-    )
-    effect = provider.add_label(
-        issue_number=issue,
-        label=label,
-        operation_id=operation_id,
-        request_id="live-readback-" + str(issue),
-        permit_id="live-operator-acceptance",
-    )
-    assert effect.state is ProviderOutcome.SUCCEEDED
-    assert provider.check_label_present(issue, label) is True
+        if os.environ.get("SHARDS_KERNEL_LIVE_GITHUB_WRITE") != "1":
+            return
+        params_sha = compute_hash_dict({"issue_number": issue, "label": label})
+        request_id = "live-readback-" + str(issue)
+        operation_id = derive_operation_id(
+            request_id=request_id,
+            permit_id="live-operator-acceptance",
+            params_sha256=params_sha,
+        )
+        effect = provider.add_label(
+            issue_number=issue,
+            label=label,
+            operation_id=operation_id,
+            request_id=request_id,
+            permit_id="live-operator-acceptance",
+        )
+        assert effect.state is ProviderOutcome.SUCCEEDED
+        assert provider.check_label_present(issue, label) is True
+        record = journal.get(operation_id)
+        assert record is not None
+        assert record.state == "SUCCEEDED"
+        # The same operation returns the journaled effect; it must not resend.
+        replay = provider.add_label(
+            issue_number=issue,
+            label=label,
+            operation_id=operation_id,
+            request_id=request_id,
+            permit_id="live-operator-acceptance",
+        )
+        assert replay.state is ProviderOutcome.SUCCEEDED
+        assert replay.provider_ref == effect.provider_ref
+    finally:
+        journal.close()

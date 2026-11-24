@@ -102,7 +102,7 @@ class HttpTransport(Protocol):
         body: Optional[bytes],
         timeout: float,
     ) -> HttpResponse:
-        ...
+        raise NotImplementedError
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -427,6 +427,7 @@ class GitHubIssueLabelProvider:
             raise ProviderEffectUnknown("PROVIDER_JOURNAL_UNAVAILABLE") from None
 
         if record.state == SUCCEEDED or record.state == NOT_APPLIED:
+            self._assert_record_binding(record, issue, label)
             return self._effect_from_record(record, issue, label, reconciled=False)
         if record.state == DISPATCHED or record.state == UNKNOWN:
             return self._reconcile(record, issue, label)
@@ -471,10 +472,26 @@ class GitHubIssueLabelProvider:
             operation_id, issue, label, token, classification
         )
 
+    def _assert_record_binding(
+        self, record: ProviderEffectRecord, issue: int, label: str
+    ) -> None:
+        """Refuse a terminal record that belongs to different parameters."""
+        expected_params = compute_hash_dict(
+            {"issue_number": issue, "label": label}
+        )
+        if (
+            record.provider != _PROVIDER_NAME
+            or record.resource != self._config.resource
+            or record.action != "add_label"
+            or record.params_sha256 != expected_params
+        ):
+            raise ProviderEffectUnknown("PROVIDER_JOURNAL_BINDING_MISMATCH")
+
     def _reconcile(
         self, record: ProviderEffectRecord, issue: int, label: str
     ) -> ProviderEffect:
         """Read back only; never re-send an operation that may have applied."""
+        self._assert_record_binding(record, issue, label)
         try:
             token = _validated_token(self._token_supplier())
         except Exception:
@@ -617,7 +634,16 @@ class GitHubIssueLabelProvider:
         provider_ref = f"github:{self._config.owner}/{self._config.repo}#{issue}:{label}"
         try:
             record = self._journal.record_outcome(
-                operation_id, state, provider_ref=provider_ref, detail=detail
+                operation_id,
+                state,
+                provider_ref=provider_ref,
+                detail=detail,
+                expected_provider=_PROVIDER_NAME,
+                expected_resource=self._config.resource,
+                expected_action="add_label",
+                expected_params_sha256=compute_hash_dict(
+                    {"issue_number": issue, "label": label}
+                ),
             )
         except ProviderJournalError:
             # The journal is the durable authority. If it cannot record the

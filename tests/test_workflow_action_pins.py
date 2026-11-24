@@ -1,6 +1,6 @@
 """Verify GitHub Actions use reviewed immutable upstream commits.
 
-Python 3.9+, standard library only. No GitHub API traffic, credentials or
+Python 3.11+, standard library only. No GitHub API traffic, credentials or
 workflow executions are involved.
 """
 

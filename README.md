@@ -45,7 +45,10 @@ Shards-Kernel is an open-source **Python AI-agent governance and tool-authorizat
 
 ## Try it in your terminal
 
-Install the published package with the optional cryptographic demo support, verify the Python namespace and CLI, and run a **local, offline** permit-and-audit demonstration:
+Requires **Python 3.11 or newer**; Python 3.9 and 3.10 are no longer supported.
+Install the published package with the optional cryptographic demo support,
+verify the Python namespace and CLI, and run a **local, offline**
+permit-and-audit demonstration:
 
 ```bash
 python -m pip install "shards-kernel[crypto]"
@@ -258,7 +261,9 @@ Variants tune posture while preserving invariants:
 
 ## Install
 
-The PyPI distribution name is `shards-kernel`, the import namespace is `shards_kernel`, and the CLI command is `shards-kernel`:
+Requires **Python 3.11 or newer**. The PyPI distribution name is
+`shards-kernel`, the import namespace is `shards_kernel`, and the CLI command
+is `shards-kernel`:
 
 ```bash
 python -m pip install shards-kernel
@@ -429,6 +434,9 @@ an explicit development-only `--allow-unsigned-local` flag. See the
 for config fields, trust boundaries and unverified production requirements.
 The opt-in v3 profile for one bounded GitHub issue-label action is documented
 in [bounded GitHub issue-label operator](docs/operations/GITHUB_ISSUE_LABEL_OPERATOR.md).
+The operator-side adapter, signed-permit path and tests are implemented; the
+separate Shards-MCP Edge federation and Cloudflare Tunnel ingress remain hard
+deployment blockers, so this is **not** an end-to-end deployable service yet.
 
 ## SDK and optional service diagnostics
 

@@ -38,36 +38,39 @@ class _Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
-    def _record(self) -> None:
+    def _record(self) -> bytes:
         state = self._state()
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b""
-        state.requests.append(
-            {
-                "method": self.command,
-                "path": self.path,
-                "body": body,
-                "authorization": self.headers.get("Authorization"),
-            }
-        )
-        state.token_seen.append(self.headers.get("Authorization"))
+        with state.lock:
+            state.requests.append(
+                {
+                    "method": self.command,
+                    "path": self.path,
+                    "body": body,
+                    "authorization": self.headers.get("Authorization"),
+                }
+            )
+            state.token_seen.append(self.headers.get("Authorization"))
+        return body
 
     def do_GET(self) -> None:  # noqa: N802
         state = self._state()
         self._record()
-        state.get_count += 1
-        parsed = urllib.parse.urlsplit(self.path)
+        with state.lock:
+            state.get_count += 1
+            issue = state.issue_from_path(urllib.parse.urlsplit(self.path).path)
+            present = issue is not None and issue in state.labels
+            names = sorted(state.labels[issue]) if present else []
         if state.get_status is not None:
             self._send(state.get_status, {"message": "injected"})
             return
-        issue = state.issue_from_path(parsed.path)
-        if issue is None or issue not in state.labels:
+        if issue is None or not present:
             self._send(404, {"message": "Not Found"})
             return
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         per_page = min(int(query.get("per_page", ["100"])[0]), 100)
         page = max(int(query.get("page", ["1"])[0]), 1)
-        names = sorted(state.labels[issue])
         start = (page - 1) * per_page
         chunk = names[start : start + per_page]
         if state.malformed_readback:
@@ -77,15 +80,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         state = self._state()
-        self._record()
-        state.post_count += 1
-        parsed = urllib.parse.urlsplit(self.path)
-        issue = state.issue_from_path(parsed.path)
-        if issue is None or issue not in state.labels:
+        body = self._record()
+        with state.lock:
+            state.post_count += 1
+            issue = state.issue_from_path(urllib.parse.urlsplit(self.path).path)
+            present = issue is not None and issue in state.labels
+        if issue is None or not present:
             self._send(404, {"message": "Not Found"})
             return
         try:
-            payload = json.loads(self._recorded_body())
+            payload = json.loads(body)
             labels = payload["labels"]
             assert isinstance(labels, list) and len(labels) == 1
             label = labels[0]
@@ -99,18 +103,18 @@ class _Handler(BaseHTTPRequestHandler):
         if state.delay_seconds_after_post:
             time.sleep(state.delay_seconds_after_post)
         if state.apply_then_status is not None:
-            state.labels[issue].add(label)
+            with state.lock:
+                state.labels[issue].add(label)
+                names = sorted(state.labels[issue])
             self._send(state.apply_then_status, {"message": "applied-then-error"})
             return
         if state.post_status is not None:
             self._send(state.post_status, {"message": "injected"})
             return
-        state.labels[issue].add(label)
-        self._send(200, [{"name": name} for name in sorted(state.labels[issue])])
-
-    def _recorded_body(self) -> bytes:
-        state = self._state()
-        return state.requests[-1]["body"]
+        with state.lock:
+            state.labels[issue].add(label)
+            names = sorted(state.labels[issue])
+        self._send(200, [{"name": name} for name in names])
 
 
 class GitHubTestProvider:
@@ -129,11 +133,13 @@ class GitHubTestProvider:
         self.delay_seconds_after_post: float = 0.0
         self.drop_connection_after_post = False
         self.malformed_readback = False
+        self.lock = threading.Lock()
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
     def add_issue(self, issue: int, labels: Optional[set[str]] = None) -> None:
-        self.labels[issue] = set(labels or ())
+        with self.lock:
+            self.labels[issue] = set(labels or ())
 
     def issue_from_path(self, path: str) -> Optional[int]:
         parts = path.strip("/").split("/")
@@ -176,7 +182,8 @@ class GitHubTestProvider:
         return f"http://{host}:{port}"
 
     def post_bodies(self) -> list[bytes]:
-        return [r["body"] for r in self.requests if r["method"] == "POST"]
+        with self.lock:
+            return [r["body"] for r in self.requests if r["method"] == "POST"]
 
 
 class LoopbackTransport:

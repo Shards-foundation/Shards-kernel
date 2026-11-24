@@ -50,6 +50,22 @@ def test_server_read_routes_and_unknown_route(live_server):
     assert payload["error"] == "Not found"
 
 
+def test_gateway_headers_are_rejected_without_a_gateway_profile(live_server):
+    _server, url = live_server
+    req = urllib.request.Request(
+        url + "/status",
+        headers={
+            "Authorization": f"Bearer {TEST_KEY}",
+            "X-Shards-Gateway-Identity": "forged-gateway",
+        },
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(req, timeout=3)  # nosec B310: fixed loopback test URL
+    assert error.value.code == 403
+    payload = json.loads(error.value.read().decode("utf-8"))
+    assert payload["error"] == "Gateway headers not accepted"
+
+
 def test_server_submit_reports_missing_fields_and_bad_json(live_server):
     _server, url = live_server
     status, payload = request_json(url + "/submit", "POST", {"actor": "operator"})
