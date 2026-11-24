@@ -238,6 +238,176 @@ label that is already present.
 Label addition is reversible only by a separately authorised human in GitHub.
 The provider offers no delete, remove, merge or close operation.
 
+## Incident runbook: journal `SUCCEEDED` with no audit outcome
+
+A provider effect can be applied and durably journalled as `SUCCEEDED`, then
+the kernel's hash-chained **outcome** audit append can fail. The kernel then
+HALTs and returns HTTP 500. The audit chain holds the `intent` and `halt`
+records but **no outcome** for that request. This is fail-closed for new
+admissions, but it is not complete evidence that the effect was authorised and
+completed end-to-end.
+
+**Never treat a journal `SUCCEEDED` row as proof of a complete governed
+action.** A journal row records what the provider adapter did. Only a matching
+hash-chained `outcome` record plus external ground truth proves the governed
+result.
+
+### 1. Freeze and keep HALTED
+
+- Do not restart the service, clear the halt, issue new permits, or retry the
+  provider call.
+- If the process is still running, confirm the kernel state is `HALTED` and
+  leave it there. If the process exited, keep the systemd unit stopped.
+- New admissions must remain denied until this runbook completes and an
+  authorised operator approves recovery.
+
+### 2. Preserve same-snapshot evidence
+
+Capture both SQLite databases from the **same instant**, plus the signed
+policy and unit/environment metadata (never the secret values):
+
+```bash
+sudo systemctl stop shards-kernel-github-operator.service
+sudo install -d -m 0700 /var/lib/shards-kernel/incident-<id>
+sudo sqlite3 /var/lib/shards-kernel/github-operator/audit.sqlite3 \
+  ".backup '/var/lib/shards-kernel/incident-<id>/audit.sqlite3'"
+sudo sqlite3 /var/lib/shards-kernel/github-operator/provider-journal.sqlite3 \
+  ".backup '/var/lib/shards-kernel/incident-<id>/provider-journal.sqlite3'"
+sudo cp /etc/shards-kernel/github-operator.signed.json \
+  /var/lib/shards-kernel/incident-<id>/
+```
+
+Record `sha256sum`, inode, size and mtime of every preserved file. Make the
+copies read-only. Do not edit, repair or re-sign either database.
+
+### 3. Establish external ground truth, read-only
+
+Using a separate human credential (never the agent bearer or the kernel
+journal), read the label state for the exact configured owner/repository and
+issue. Record the observation time, the actor, the API response and whether
+the label is present. Do not add or remove a label during triage.
+
+If the issue, repository or owner does not match the operator configuration,
+stop and treat it as a separate scope incident.
+
+### 4. Correlate journal and audit, read-only
+
+Run the read-only reconciliation tool against the preserved pair:
+
+```bash
+python scripts/ops/reconcile_provider_effects.py \
+  --audit-db /var/lib/shards-kernel/incident-<id>/audit.sqlite3 \
+  --journal-db /var/lib/shards-kernel/incident-<id>/provider-journal.sqlite3
+```
+
+It opens both files with `mode=ro` and `PRAGMA query_only`, verifies the audit
+hash chain, re-derives the operation id from `request_id`, `permit_id` and
+`params_sha256`, and never writes, retries or fabricates a record. Exit codes
+are `0` clean, `2` incident or attention, `1` tool error.
+
+| Classification | Meaning |
+| --- | --- |
+| `COMPLETE_SUCCEEDED` | Journal `SUCCEEDED` and matching `ALLOW` outcome audit |
+| `COMPLETE_NOT_APPLIED` | Journal `NOT_APPLIED` and matching `DENY` outcome audit |
+| `INCIDENT_EFFECT_APPLIED_NO_OUTCOME` | **This runbook.** Journal `SUCCEEDED`, intent present, outcome absent |
+| `INCIDENT_NOT_APPLIED_NO_OUTCOME` | Journal `NOT_APPLIED`, intent present, outcome absent |
+| `INCIDENT_OUTCOME_MISMATCH` | Outcome exists but its decision contradicts the journal |
+| `INCIDENT_INTENT_MISSING` | Journal terminal state with no matching audit intent |
+| `INCIDENT_JOURNAL_RECORD_MISSING` | Audit intent with no journal row (lost or mismatched journal) |
+| `QUARANTINED_UNKNOWN` | Ambiguous provider effect; human read-back required |
+| `OPEN_OPERATION` | `INTENT`/`DISPATCHED`; never retry automatically |
+| `BINDING_MISMATCH` | Re-derived operation id or provider/action binding disagrees |
+
+An illustrative SQL check is shown below. Every join alias is explicit. A
+previous review sample used `e.request_id = request_id`; an unqualified
+right-hand side resolves to the inner table column and becomes the tautology
+`e.request_id = e.request_id`, hiding exactly the missing-outcome row. Never
+use an unqualified column on either side of this join.
+
+```sql
+-- Illustrative only; the Python tool above is the authoritative procedure.
+SELECT j.operation_id, j.request_id, j.permit_id, j.state
+FROM provider_effect_journal AS j
+LEFT JOIN audit_entries AS i
+  ON i.kernel_id = :kernel_id
+ AND i.request_id = j.request_id
+ AND json_extract(i.payload_json, '$.audit_phase') = 'intent'
+ AND json_extract(i.payload_json, '$.permit_digest') = j.permit_id
+ AND json_extract(i.payload_json, '$.params_hash') = j.params_sha256
+LEFT JOIN audit_entries AS o
+  ON o.kernel_id = :kernel_id
+ AND o.request_id = j.request_id
+ AND json_extract(o.payload_json, '$.audit_phase') = 'outcome'
+ AND json_extract(o.payload_json, '$.permit_digest') = j.permit_id
+ AND json_extract(o.payload_json, '$.params_hash') = j.params_sha256
+WHERE j.state = 'SUCCEEDED' AND o.entry_hash IS NULL;
+```
+
+### 5. Record the incident outside the signed chain
+
+Create an incident record in the operator's external system (ticket, change
+log, or signed incident register) containing:
+
+- `request_id`, `operation_id`, `permit_id`, owner/repository/issue and label;
+- journal state, `provider_ref` and sanitized detail;
+- audit `intent` and `halt` `entry_hash` values and `ledger_seq`;
+- the external label observation and its source;
+- the operator decision, approver identity and timestamp.
+
+Do **not** insert a synthetic outcome, edit the journal state, add a hash-chain
+entry, or re-sign the ledger. The discrepancy is the evidence. A restore drill
+(`scripts/ops/verify_sqlite_restore.py`) will report
+`UNRECONCILED_EXECUTION_INTENTS` for this database; that is the expected
+result and must be recorded as an accepted external exception, not "fixed" by
+editing the database.
+
+### 6. Restart and replay protection (only after approval)
+
+The kernel's `HALTED` state is in memory. A process restart boots `IDLE` from
+the restored audit chain and does **not** enforce this reconciliation. Safe
+restart is therefore an operator procedure, not a code guarantee: treat it as
+a **remaining blocker** for automatic recovery.
+
+After the incident record is accepted:
+
+- do not reuse the original permit, nonce or `request_id`; the restored
+  `intent` consumes the nonce and must be denied as `REPLAY_DETECTED`;
+- issue a new signed v2 permit (new `permit_id`/nonce) and a new `request_id`;
+- if the label is already present, the provider preflight must return
+  `SUCCEEDED` with `already_present=true` and **zero** POST requests;
+- if the preflight would POST, stop and re-triage;
+- if a human removed the label and a new action is desired, that is a new
+  authorised action under its own permit, not recovery of the old operation.
+
+### 7. True recovery acceptance
+
+Recovery is complete only when all of these are observed and recorded:
+
+1. The preserved audit chain verifies (`replay_and_verify` / restore drill).
+2. Reconciliation exits `0` for the new operation and still reports the old
+   operation as the accepted external exception.
+3. `/health` is healthy and `/status` shows `IDLE` with gateway auth enforced.
+4. Replaying the original permit returns `REPLAY_DETECTED` and the provider
+   POST count does not increase.
+5. A new signed permit returns `ALLOW` with `already_present=true` and no POST.
+6. External label state matches the incident record.
+7. Evidence hashes, tool output and preserved snapshots are archived.
+
+### 8. Limits of this recovery
+
+- The tool correlates two local SQLite files. It does not call GitHub, prove a
+  remote label state, repair the chain, or restore a missing outcome.
+- It cannot distinguish a label added by this operation from a label added by
+  another actor at the same time; use external provider audit logs.
+- Read-only WAL access may create `-shm`/`-wal` side files in the directory.
+  Run against a writable evidence directory or a snapshot copy.
+- Single-host only. There is no HA, distributed locking or cross-host
+  reconciliation.
+- The effect is not exactly-once. Do not claim complete effect evidence in
+  this failure envelope.
+- This runbook does not authorise a merge, deployment, release, token change
+  or branch-protection change.
+
 ## Install on Ubuntu/Debian ARM64
 
 The unit targets a native ARM64 Python environment. Validate it on the target
@@ -346,29 +516,72 @@ python -m pytest -q tests/test_github_issue_label_live.py
 Without `SHARDS_KERNEL_LIVE_GITHUB_WRITE=1` the test performs a read-only
 authoritative read-back. The token is never printed.
 
+## Static-analysis triage at this revision
+
+Codacy Static Code Analysis (check `138170958420`, `action_required`, 12
+annotations) and CodeFactor (check `138170624543`, `failure`, 1 annotation)
+remain non-required checks. Their detailed rule pages are sign-in gated. The
+list below is taken from the public GitHub check-run annotations and current
+source. It is a source-backed triage, **not** a scanner-verified dismissal and
+not a claim that the checks pass. No scanner rule or configuration was changed
+and no production code was altered to silence a finding.
+
+| # | Path:line | Scanner message | Classification | Source-backed rationale |
+| --- | --- | --- | --- | --- |
+| 1 | `shards_kernel/cli/service.py:48` | Possible hardcoded password: `'SHARDS_KERNEL_GITHUB_'` | False positive | Constant is an environment-variable **name prefix**; no credential value. |
+| 2 | `shards_kernel/cli/service.py:48` | Possible hardcoded secret key | False positive | Same name prefix; values are read from the environment at runtime. |
+| 3 | `shards_kernel/cli/service.py:49` | Possible hardcoded password: `'SHARDS_KERNEL_GATEWAY_'` | False positive | Gateway environment-variable name prefix; not a secret. |
+| 4 | `shards_kernel/cli/service.py:49` | Possible hardcoded secret key | False positive | Same name prefix; no secret material is stored. |
+| 5 | `shards_kernel/sdk/server.py:304` | Hardcoded tokens are a security risk | False positive | Line is the `gateway_token: Optional[str]` function parameter annotation; no literal token. |
+| 6 | `tests/github_issue_label_test_server.py:26` | Redefining built-in `format` | False positive (stdlib signature) | `BaseHTTPRequestHandler.log_message(self, format, *args)` override must keep the stdlib parameter name. |
+| 7 | `tests/test_github_issue_label_live.py:58` | Possible hardcoded password: `'SHARDS_KERNEL_LIVE_GITHUB_TOKEN'` | False positive | Environment-variable name used by the gated live test; the value is supplied externally. |
+| 8 | `tests/test_github_issue_label_provider.py:284` | Possible hardcoded password: `'ghp_UNIQUE_SECRET_TOKEN_0123456789'` | False positive (test sentinel) | Deliberately fake token used to assert it never appears in outcome errors or logs. |
+| 9 | `tests/test_github_issue_label_provider.py:676` | Possible hardcoded password: `'lowercase'` | False positive (negative path) | Input for a test asserting an invalid `token_env` name is rejected. |
+| 10 | `tests/test_github_operator_deploy_contract.py:60` | Possible binding to all interfaces | False positive | String appears only in `assert "0.0.0.0" not in unit`, a negative assertion. |
+| 11 | `tests/test_operator_github_profile.py:254` | Possible hardcoded password: `'SHARDS_KERNEL_API_KEY'` | False positive (negative path) | Input proving a reserved operator secret name is rejected as a provider token env. |
+| 12 | `tests/test_operator_github_profile.py:255` | Possible hardcoded password: `'SHARDS_KERNEL_github_TOKEN'` | False positive (negative path) | Input proving a mixed-case invalid token env name is rejected. |
+| 13 | `tests/test_github_operator_deploy_contract.py:59` | CodeFactor B104: possible binding to all interfaces | False positive | The only `0.0.0.0` literal is the negative assertion at line 60; line 59 is `assert required in unit`. |
+
+Open question for an independent reviewer: confirm whether Codacy's hidden
+rule metadata agrees with this mapping. Until then, these findings are
+triaged as false positives or test-only artifacts, not proven vulnerabilities
+and not "resolved".
+
 ## Validation at this revision
 
 Local evidence (Python 3.13.15, Linux x86_64 container; CI matrix not executed
 here):
 
 ```text
-tests/test_github_issue_label_provider.py       51 passed
-tests/test_operator_github_profile.py           33 passed
-tests/test_public_tool_registration.py          11 passed
-tests/test_github_operator_deploy_contract.py    3 passed
-tests/test_github_issue_label_live.py            1 skipped (gated secrets)
+tests/test_github_issue_label_provider.py        51 passed
+tests/test_operator_github_profile.py            35 passed
+tests/test_provider_effect_reconciliation.py      8 passed
+tests/test_public_tool_registration.py           11 passed
+tests/test_github_operator_deploy_contract.py     3 passed
+tests/test_github_issue_label_live.py             1 skipped (gated secrets)
 ```
 
-The full suite reports 1292 passed and 40 skipped, with ten
-`test_offline_approver_cli.py` tests failing in this container because the
-filesystem rejects `O_TMPFILE` (`Errno 95`); that is an environment limitation
-unrelated to this profile. Branch coverage measured 93.01% with
+The full suite (with the optional MCP SDK installed, as CI does) reports 1302
+passed and 40 skipped, with ten `test_offline_approver_cli.py` tests failing in
+this container because the filesystem rejects `O_TMPFILE` (`Errno 95`); those
+ten pass when `TMPDIR` is tmpfs (`55 passed`), so the failure is
+environment-dependent, not a profile regression. Branch coverage measured
+93.01% with
 `--cov=shards_kernel --cov=implementations --cov=scripts.ci.run_e2e_gate --cov-branch --cov-fail-under=90`
 on that same run. The mandatory four-scenario E2E gate passed (`4 passed`).
 The provider module itself measures 99% and the journal 97% in the focused
-run. An earlier full-suite run saw the mTLS two-process staging test fail once
-under concurrency; it passed when run alone and passed in the final full-suite
-run, so treat it as an environment flake, not acceptance evidence.
+run.
+
+The new incident regression is covered by
+`test_outcome_audit_failure_after_provider_effect_is_incident` (single POST,
+journal `SUCCEEDED`, kernel `HALTED`, no fabricated outcome, same-process
+admission denied, read-only reconciliation flags the mismatch) and
+`test_incident_restart_boots_idle_but_never_repairs_old_outcome` (restart
+boots `IDLE`, original permit replay-denied, new permit `already_present` with
+no second POST, old missing outcome not backfilled). An earlier full-suite run
+saw the mTLS two-process staging test fail once under concurrency; it passed
+when run alone and in the final full-suite run, so treat it as an environment
+flake, not acceptance evidence.
 
 This is local test evidence only. It does not prove a Cloudflare path, an
 ARM64 systemd start, GitHub production permissions or a remote deployment.
@@ -403,3 +616,11 @@ ARM64 systemd start, GitHub production permissions or a remote deployment.
 11. **No independent production acceptance.** CI and local tests do not prove
     a remote deployment, a live Cloudflare path or GitHub production
     permissions.
+12. **REMAINING BLOCKER: restart is not reconciliation-enforced.** A provider
+    effect applied with a journal `SUCCEEDED` but no audit outcome HALTs the
+    kernel in memory. A process restart boots `IDLE` from the restored chain;
+    it does not require the operator incident runbook to have completed. The
+    provider preflight still prevents a duplicate POST and the original permit
+    is replay-denied, but audit completeness is not automatically repaired.
+    Use the read-only reconciliation tool and the external incident record
+    before any approved restart.

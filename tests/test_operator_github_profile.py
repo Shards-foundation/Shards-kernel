@@ -10,23 +10,27 @@ from __future__ import annotations
 
 import json
 import secrets
+import sqlite3
 import time
 import urllib.error
 import urllib.request
 from dataclasses import replace
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from implementations.storage import SQLiteAuditStorage
+from scripts.ops import reconcile_provider_effects as rec
 from shards_kernel.cli.service import build_operator_server, parse_operator_config
 from shards_kernel.cli.signed_policy import verify_signed_policy
+from shards_kernel.common.hashing import compute_hash_dict
 from shards_kernel.integrations.auth import agent_token_kdf
 from shards_kernel.integrations.wire import permit_to_mapping
 from shards_kernel.issuer import sign_operator_policy, sign_v2_permit
 from shards_kernel.permits import PermitBuilder
-from shards_kernel.providers.github_issue_label import TOOL_NAME
+from shards_kernel.providers.github_issue_label import TOOL_NAME, derive_operation_id
 from shards_kernel.providers.journal import SUCCEEDED, UNKNOWN
 from tests.github_issue_label_test_server import GitHubTestProvider, LoopbackTransport
 
@@ -576,6 +580,169 @@ def test_audit_failure_prevents_dispatch(tmp_path, stack):
     assert status == 500
     assert stack.provider.post_count == 0
     assert stack.server.kernel.get_state().value == "HALTED"
+
+
+class _OutcomeFailingAuditStorage(SQLiteAuditStorage):
+    """Persist intent and halt records, then fail the tool outcome append.
+
+    This models a durable audit failure *after* the provider has already
+    applied its external effect and committed its journal outcome.
+    """
+
+    def append(self, kernel_id, entry):
+        if entry.get("audit_phase") == "outcome":
+            raise RuntimeError("simulated outcome audit failure")
+        super().append(kernel_id, entry)
+
+
+def _audit_payloads(path) -> list[dict]:
+    uri = "file:" + quote(str(path), safe="/") + "?mode=ro"
+    connection = sqlite3.connect(uri, uri=True)
+    try:
+        rows = connection.execute(
+            "SELECT payload_json FROM audit_entries ORDER BY ledger_seq"
+        ).fetchall()
+    finally:
+        connection.close()
+    return [json.loads(row[0]) for row in rows]
+
+
+def _induce_outcome_audit_incident(stack, request_id: str):
+    stack.server.stop()
+    stack.server = stack.build(
+        audit_storage=_OutcomeFailingAuditStorage(str(stack.config.audit_db))
+    )
+    stack.server.start(blocking=False)
+    stack.base = "http://127.0.0.1:" + str(stack.server._server.server_address[1])
+    stack.provider.add_issue(7)
+    params = {"issue_number": 7, "label": "triage"}
+    permit = _permit(stack.issuer, "agent-alice", params)
+    status, _ = _submit(
+        stack,
+        _payload("agent-alice", params, request_id, permit),
+        bearer=stack.alice_token,
+    )
+    return status, params, permit
+
+
+def test_outcome_audit_failure_after_provider_effect_is_incident(tmp_path, stack):
+    status, params, permit = _induce_outcome_audit_incident(stack, "incident-1")
+
+    # The provider effect applied exactly once and its journal committed.
+    assert status == 500
+    assert stack.provider.post_count == 1
+    assert stack.provider.labels[7] == {"triage"}
+    assert stack.server.kernel.get_state().value == "HALTED"
+    operation_id = derive_operation_id(
+        request_id="incident-1",
+        permit_id=permit.permit_id,
+        params_sha256=compute_hash_dict(params),
+    )
+    record = stack.server.provider_journal.get(operation_id)
+    assert record is not None
+    assert record.state == SUCCEEDED
+
+    # The hash chain holds the intent and the terminal halt, but no outcome.
+    payloads = _audit_payloads(stack.config.audit_db)
+    request_phases = [
+        entry["audit_phase"]
+        for entry in payloads
+        if entry["request_id"] == "incident-1"
+    ]
+    assert request_phases == ["intent"]
+    assert any(entry["audit_phase"] == "halt" for entry in payloads)
+    assert not any(
+        entry["request_id"] == "incident-1" and entry["audit_phase"] == "outcome"
+        for entry in payloads
+    )
+
+    # Same-process admission stays denied. No second POST and no new audit row.
+    fresh = _permit(stack.issuer, "agent-alice", params)
+    denied_status, _ = _submit(
+        stack,
+        _payload("agent-alice", params, "incident-2", fresh),
+        bearer=stack.alice_token,
+    )
+    assert denied_status == 500
+    assert stack.provider.post_count == 1
+    assert _audit_payloads(stack.config.audit_db) == payloads
+
+    # Read-only reconciliation detects the applied effect without an outcome.
+    report = rec.reconcile(
+        stack.config.audit_db, stack.config.provider.journal_db
+    )
+    assert report["status"] == "INCIDENT"
+    records = [
+        item for item in report["records"] if item["request_id"] == "incident-1"
+    ]
+    assert len(records) == 1
+    assert records[0]["state"] == SUCCEEDED
+    assert records[0]["audit_intent"] is True
+    assert records[0]["audit_outcome"] is False
+    assert records[0]["classification"] == rec.INCIDENT_EFFECT_APPLIED_NO_OUTCOME
+    assert report["audit_halt_entries"] == 1
+
+
+def test_incident_restart_boots_idle_but_never_repairs_old_outcome(tmp_path, stack):
+    status, params, permit = _induce_outcome_audit_incident(stack, "incident-1")
+    assert status == 500
+    assert stack.provider.post_count == 1
+
+    # A process restart does not persist the in-memory HALTED state: the kernel
+    # boots IDLE over a ledger whose last provider operation has no outcome.
+    stack.server.stop()
+    stack.server = stack.build()
+    stack.server.start(blocking=False)
+    stack.base = "http://127.0.0.1:" + str(stack.server._server.server_address[1])
+
+    # The original signed permit remains replay-denied from the restored intent.
+    replay_status, replay = _submit(
+        stack,
+        _payload("agent-alice", params, "incident-replay", permit),
+        bearer=stack.alice_token,
+    )
+    assert replay_status == 200
+    assert replay["decision"] == "DENY"
+    assert "REPLAY_DETECTED" in replay["error"]
+    assert stack.provider.post_count == 1
+
+    # A new signed permit is admitted, but the provider preflight prevents a
+    # second POST because the label is already present.
+    fresh = _permit(stack.issuer, "agent-alice", params)
+    new_status, second = _submit(
+        stack,
+        _payload("agent-alice", params, "incident-restart-new", fresh),
+        bearer=stack.alice_token,
+    )
+    assert new_status == 200
+    assert second["decision"] == "ALLOW"
+    assert second["result"]["already_present"] is True
+    assert stack.provider.post_count == 1
+
+    # The original incident is not repaired or backfilled by the restart.
+    payloads = _audit_payloads(stack.config.audit_db)
+    assert [
+        entry["audit_phase"]
+        for entry in payloads
+        if entry["request_id"] == "incident-1"
+    ] == ["intent"]
+
+    report = rec.reconcile(
+        stack.config.audit_db, stack.config.provider.journal_db
+    )
+    assert report["status"] == "INCIDENT"
+    old = [
+        item for item in report["records"] if item["request_id"] == "incident-1"
+    ]
+    new = [
+        item
+        for item in report["records"]
+        if item["request_id"] == "incident-restart-new"
+    ]
+    assert [item["classification"] for item in old] == [
+        rec.INCIDENT_EFFECT_APPLIED_NO_OUTCOME
+    ]
+    assert [item["classification"] for item in new] == [rec.COMPLETE_SUCCEEDED]
 
 
 def test_missing_provider_or_gateway_credentials_prevent_startup(tmp_path, stack, monkeypatch):
